@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     Bomb Squad — Screen 7: Strike Toast + Lifeline Toast (variants on Bomb View)
+     Same scene as Screen 3 (Bomb View) with two NON-BLOCKING toasts stacked top-right.
+     Spines: EXPERIENCE.md (Component Patterns "Toast": non-blocking, stack vertically
+     top-right, max 3; lifeline persists 8s, standard 5s; "Never animates the bomb
+     scene's layout"; Voice — strike "Strike. Don't do that again.", lifeline
+     "Spectator [name] sent a tip: [tip]") + DESIGN.md (components.toast: graphite bg,
+     cream ink, brass border, durationLifeline 8s; ledRed = strike).
+
+     Coherent strike state (a strike toast implies a strike fired): strike LED #1 lit
+     AMBER (DESIGN colors.hud.ledAmber = "strike 1, caution"), the offending module
+     (The Button) shows its solve LED in the 600ms striking-red state, and the timer
+     glow is intensified (timer.pulseOnStrike). Bomb remains fully interactive behind
+     the toasts — they do not dim or block the scene.
+     Same timer/diegetic-HUD ambiguity as Screen 3 applies (see that file's header).
+     ============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Squad — Strike + Lifeline Toasts</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .stage { cursor: default; }
+
+  /* ---- workbench ---- */
+  .bench {
+    position:absolute; inset:0;
+    background:
+      radial-gradient(120% 80% at 50% 8%, #2A2730 0%, #16151A 45%, #0A090C 100%);
+  }
+  .bench::before { /* brushed-steel streaks + scratches */
+    content:""; position:absolute; inset:0; opacity:.5;
+    background:
+      repeating-linear-gradient(92deg, rgba(255,255,255,.018) 0 2px, transparent 2px 7px),
+      radial-gradient(60% 50% at 50% 100%, rgba(184,146,74,.05), transparent 70%);
+  }
+  .bench::after { /* vignette focusing the bomb */
+    content:""; position:absolute; inset:0;
+    background: radial-gradient(70% 60% at 50% 52%, transparent 40%, rgba(0,0,0,.55) 100%);
+    pointer-events:none;
+  }
+
+  /* ================= BOMB CHASSIS ================= */
+  .bomb {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-48%);
+    width:1180px; height:812px;
+    background:
+      linear-gradient(180deg, #D2551F 0%, #C2491F 30%, #A93E18 72%, #8E3413 100%);
+    border-radius: var(--r-chassis);
+    border: 3px solid #5E2410;
+    box-shadow:
+      inset 0 2px 0 rgba(255,255,255,.18),
+      inset 0 -8px 22px rgba(0,0,0,.4),
+      0 30px 70px rgba(0,0,0,.6);
+    padding: 26px;
+    display:grid;
+    grid-template-rows: 158px 1fr;
+    gap: 22px;
+  }
+  .bomb::before { /* Bakelite mottle */
+    content:""; position:absolute; inset:0; border-radius: var(--r-chassis); pointer-events:none; opacity:.35;
+    background:
+      radial-gradient(50% 40% at 20% 20%, rgba(255,255,255,.12), transparent 60%),
+      radial-gradient(40% 40% at 85% 80%, rgba(0,0,0,.3), transparent 60%);
+    mix-blend-mode: overlay;
+  }
+  /* corner + edge screws */
+  .screw { position:absolute; width:22px; height:22px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #E4D4A8, #B8924A 55%, #6E5526 100%);
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,.25), 0 2px 3px rgba(0,0,0,.4); }
+  .screw::after { content:""; position:absolute; inset:5px; border-radius:50%;
+    background:linear-gradient(45deg, transparent 44%, #4A381A 44% 56%, transparent 56%); }
+  .screw.tl{ top:14px; left:14px;} .screw.tr{ top:14px; right:14px;}
+  .screw.bl{ bottom:14px; left:14px;} .screw.br{ bottom:14px; right:14px;}
+
+  /* ---- top band (diegetic timer/strikes/serial/indicators) ---- */
+  .top-band { position:relative; display:grid; grid-template-columns: 1fr auto 1fr; align-items:center; padding: 0 24px; }
+
+  .serial-wrap { display:flex; align-items:center; gap:22px; }
+  .serial {
+    background: var(--cream); color:#211A12; transform: rotate(-1deg);
+    padding:7px 14px 6px; border-radius:2px; box-shadow:0 3px 8px rgba(0,0,0,.35);
+    border:1px solid #C9BC9D; text-align:center;
+  }
+  .serial .lab { font-family:var(--font-mono); font-size:8px; letter-spacing:.22em; color:#8A7A5E; }
+  .serial .num { font-family:var(--font-mono); font-weight:700; font-size:20px; letter-spacing:.16em; }
+  .serial .bars { height:8px; margin-top:3px; background: repeating-linear-gradient(90deg,#211A12 0 2px, transparent 2px 4px, #211A12 4px 5px, transparent 5px 9px); }
+
+  /* timer */
+  .timer-mount { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .timer {
+    position:relative;
+    background: var(--timer-lcd-bg);
+    border: 3px solid #120606; border-radius:3px;
+    padding: 6px 22px 2px;
+    box-shadow: inset 0 0 18px rgba(0,0,0,.9), 0 0 18px rgba(255,59,48,.45), 0 4px 10px rgba(0,0,0,.5);
+  }
+  .timer.heated { box-shadow: inset 0 0 18px rgba(0,0,0,.9), 0 0 26px rgba(255,59,48,.7), 0 4px 10px rgba(0,0,0,.5); }
+  .timer .ghost, .timer .live { font-family: var(--font-lcd); font-size: 76px; line-height:1; letter-spacing:2px; }
+  .timer .ghost { color: rgba(255,59,48,.10); }
+  .timer .live { position:absolute; left:22px; top:6px; color: var(--timer-lcd); text-shadow: 0 0 12px rgba(255,59,48,.8); }
+  .timer-label { font-family:var(--font-mono); font-size:10px; letter-spacing:.34em; color:#3A1410; font-weight:700; }
+
+  .right-cluster { display:flex; align-items:center; justify-content:flex-end; gap:26px; }
+  /* strikes */
+  .strikes { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .strikes .row { display:flex; gap:9px; }
+  .strike-led { width:18px; height:18px; border-radius:50%;
+    background: var(--led-red-glow); opacity:.3;
+    box-shadow: inset 0 0 4px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.08);
+    border:1px solid rgba(0,0,0,.4);
+    display:grid; place-items:center; }
+  .strike-led::after { content:"✕"; font-size:9px; color:rgba(255,46,46,.35); font-weight:700; }
+  .strike-led.active { background: var(--led-amber); opacity:1; box-shadow: 0 0 12px rgba(255,179,0,.7), inset 0 1px 0 rgba(255,255,255,.3); border-color:#6B4A00; }
+  .strike-led.active::after { color:#3A2A00; }
+  .strikes .cap { font-family:var(--font-mono); font-size:9px; letter-spacing:.22em; color:#3A1410; font-weight:700; }
+
+  /* indicators + battery */
+  .chassis-meta { display:flex; align-items:center; gap:12px; }
+  .indicator { display:flex; align-items:center; gap:6px; background:#1A1A1F; border:1px solid #000; border-radius:2px; padding:6px 9px; box-shadow: inset 0 1px 0 rgba(255,255,255,.05); }
+  .ind-led { width:9px; height:9px; border-radius:50%; }
+  .ind-led.lit { background:#FFF4D6; box-shadow:0 0 7px #FFE9A8; }
+  .ind-led.unlit { background:#3A3A40; }
+  .indicator .ind-lab { font-family:var(--font-mono); font-weight:700; font-size:12px; letter-spacing:.1em; color:var(--cream); }
+  .battery { display:flex; gap:4px; background:#1A1A1F; border:1px solid #000; border-radius:2px; padding:8px; }
+  .cell-bat { width:13px; height:26px; border-radius:1px; background:linear-gradient(180deg,#C9A23A,#7A5E22); position:relative; box-shadow: inset 0 0 0 1px rgba(0,0,0,.3); }
+  .cell-bat::before{ content:""; position:absolute; top:-3px; left:4px; width:5px; height:3px; background:#C9A23A;}
+
+  /* ---- module grid ---- */
+  .grid { display:grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2,1fr); gap:20px; }
+  .bay {
+    position:relative;
+    background: linear-gradient(180deg,#222127 0%, #17161B 100%);
+    border-radius: var(--r-chassis);
+    border:2px solid #0C0B0E;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.03);
+    padding: 16px;
+    display:flex; flex-direction:column;
+  }
+  .bay-screw { position:absolute; width:11px; height:11px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #D9C794, #9A7A38 60%, #5A451F); }
+  .bay-screw.a{top:6px;left:6px;} .bay-screw.b{top:6px;right:6px;}
+  .bay-screw.c{bottom:6px;left:6px;} .bay-screw.d{bottom:6px;right:6px;}
+
+  .bay-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .solve-led { width:13px; height:13px; border-radius:50%; flex:none;
+    background: var(--led-red-glow); opacity:.6;
+    box-shadow: inset 0 0 3px rgba(0,0,0,.8); border:1px solid #000; }
+  .solve-led.solved { background: var(--led-green); opacity:1; box-shadow:0 0 10px var(--led-green-glow), 0 0 3px #fff; border-color:#0A3A18; }
+  .solve-led.striking { background: var(--led-red); opacity:1; box-shadow:0 0 12px var(--led-red), 0 0 3px #fff; border-color:#5A0000; }
+  .bay-tag { font-family:var(--font-mono); font-size:9px; letter-spacing:.18em; color:#5A5560; text-transform:uppercase; }
+  .bay-body { flex:1; display:flex; align-items:center; justify-content:center; }
+
+  /* ---- Module: Wires ---- */
+  .wires { width:100%; display:flex; flex-direction:column; gap:14px; padding:4px 2px; }
+  .wire-row { display:flex; align-items:center; gap:10px; }
+  .grommet { width:14px; height:14px; border-radius:50%; background: radial-gradient(circle at 35% 30%,#C9A23A,#5A451F); flex:none; box-shadow: inset 0 0 0 2px rgba(0,0,0,.4); }
+  .wire { flex:1; height:11px; border-radius:6px; position:relative; box-shadow: inset 0 2px 2px rgba(255,255,255,.25), inset 0 -2px 3px rgba(0,0,0,.35); }
+  .wire.red{background:linear-gradient(180deg,#FF5A4D,#C2261A);}
+  .wire.white{background:linear-gradient(180deg,#FBF6EC,#C8C0AE);}
+  .wire.blue{background:linear-gradient(180deg,#5AA0FF,#1E5FC2);}
+  .wire-lab { font-family:var(--font-mono); font-size:10px; font-weight:700; color:#8A8590; width:12px; text-align:center; flex:none; }
+  .wire.cut { background:none; height:11px; display:flex; align-items:center; justify-content:space-between; box-shadow:none; }
+  .wire.cut span { height:11px; width:42%; border-radius:6px; }
+  .wire.cut .l{ background:linear-gradient(180deg,#FF5A4D,#C2261A); clip-path: polygon(0 0,100% 0,80% 100%,0% 100%);}
+  .wire.cut .r{ background:linear-gradient(180deg,#FF5A4D,#C2261A); clip-path: polygon(20% 0,100% 0,100% 100%,0 100%);}
+
+  /* ---- Module: The Button ---- */
+  .button-mod { display:flex; align-items:center; gap:18px; }
+  .big-btn { width:104px; height:104px; border-radius:50%; flex:none;
+    background: radial-gradient(circle at 38% 32%, #6FB0FF, #2E6FD6 55%, #16448F 100%);
+    box-shadow: inset 0 3px 4px rgba(255,255,255,.5), inset 0 -8px 14px rgba(0,0,0,.45), 0 6px 12px rgba(0,0,0,.5);
+    display:grid; place-items:center;
+    border:3px solid #0E2A55; }
+  .big-btn span { font-family:var(--font-body); font-weight:700; font-size:15px; letter-spacing:.08em; color:#EAF2FF; text-transform:uppercase; text-shadow:0 1px 1px rgba(0,0,0,.4); }
+  .btn-strip { width:18px; height:104px; border-radius:3px; background:linear-gradient(180deg,#5AA0FF,#1E5FC2); box-shadow: inset 0 0 6px rgba(255,255,255,.4), 0 0 10px rgba(46,111,214,.5); position:relative; }
+  .btn-strip::after{ content:"BLUE"; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); font-family:var(--font-mono); font-size:8px; letter-spacing:.15em; color:#001a3a; font-weight:700; white-space:nowrap;}
+
+  /* ---- Module: Keypad ---- */
+  .keypad { display:grid; grid-template-columns: repeat(2, 60px); grid-template-rows: repeat(2,60px); gap:12px; }
+  .key { background: linear-gradient(180deg,#34323A,#1E1C22); border:1px solid #000; border-radius: var(--r-md);
+    display:grid; place-items:center; font-size:30px; color:#D8D2C4; box-shadow: inset 0 2px 2px rgba(255,255,255,.07), 0 2px 4px rgba(0,0,0,.5);
+    font-family: var(--font-display); }
+
+  /* ---- Module: Simon Says ---- */
+  .simon { position:relative; width:150px; height:150px; }
+  .simon .s { position:absolute; width:54px; height:54px; border-radius:12px; box-shadow: inset 0 2px 3px rgba(255,255,255,.25), inset 0 -3px 6px rgba(0,0,0,.4); }
+  .simon .top{ top:0; left:48px; background:#1E4FA0;}
+  .simon .left{ top:48px; left:0; background:#9A1414;}
+  .simon .right{ top:48px; right:0; background:#9A8410;}
+  .simon .bottom{ bottom:0; left:48px; background:#3DFF7A; box-shadow:0 0 18px var(--led-green-glow), inset 0 2px 3px rgba(255,255,255,.5);}
+  .simon .pos { position:absolute; font-family:var(--font-mono); font-size:8px; color:rgba(255,255,255,.5); }
+
+  /* ---- Module: Memory ---- */
+  .memory { display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .mem-display { background: var(--timer-lcd-bg); border:2px solid #000; border-radius:3px; padding:4px 26px;
+    box-shadow: inset 0 0 12px rgba(0,0,0,.8); }
+  .mem-display span { font-family:var(--font-lcd); font-size:40px; color:#3DFF7A; text-shadow:0 0 10px var(--led-green-glow); }
+  .mem-btns { display:flex; gap:10px; }
+  .mem-btn { width:42px; height:38px; border-radius: var(--r-md); background:linear-gradient(180deg,#34323A,#1E1C22);
+    border:1px solid #000; display:grid; place-items:center; font-family:var(--font-mono); font-weight:700; font-size:18px; color:#D8D2C4;
+    box-shadow: inset 0 2px 2px rgba(255,255,255,.07); }
+
+  /* ---- Module: Morse Code ---- */
+  .morse { display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; }
+  .morse-top { display:flex; align-items:center; gap:16px; }
+  .morse-lamp { width:30px; height:30px; border-radius:50%; background: radial-gradient(circle at 40% 35%, #FFE9A0, #FFB300 60%, #6B4A00); box-shadow:0 0 16px rgba(255,179,0,.7); border:2px solid #2A1E00; }
+  .morse-freq { background: var(--timer-lcd-bg); border:2px solid #000; border-radius:3px; padding:3px 14px; box-shadow: inset 0 0 10px rgba(0,0,0,.8); }
+  .morse-freq span { font-family:var(--font-lcd); font-size:26px; color:var(--timer-lcd); text-shadow:0 0 8px rgba(255,59,48,.6); }
+  .morse-bottom { display:flex; align-items:center; gap:12px; }
+  .dial { width:130px; height:14px; border-radius:7px; background:#0E0D10; position:relative; box-shadow: inset 0 1px 3px rgba(0,0,0,.8); }
+  .dial::after { content:""; position:absolute; top:50%; left:34%; transform:translate(-50%,-50%); width:16px; height:24px; border-radius:3px; background:linear-gradient(180deg,#D9C794,#7A5E22); box-shadow:0 2px 4px rgba(0,0,0,.5); }
+  .tx-btn { padding:8px 14px; border-radius:var(--r-md); background:#9A1414; color:#fff; font-family:var(--font-mono); font-weight:700; font-size:12px; letter-spacing:.1em; border:1px solid #4A0808; box-shadow: inset 0 1px 0 rgba(255,255,255,.2);}
+
+  /* ================= HUD OVERLAYS (non-diegetic) ================= */
+  /* active speaker pill — top-left */
+  .speaker-pill {
+    position:absolute; top: var(--safe-area); left: var(--safe-area);
+    display:flex; align-items:center; gap:12px;
+    background: rgba(26,26,31,.82); backdrop-filter: blur(4px);
+    border:1px solid var(--brass); border-radius: var(--r-pill);
+    padding:10px 20px 10px 12px; box-shadow: var(--hud-shadow);
+  }
+  .sp-avatar { position:relative; width:38px; height:38px; border-radius:50%; background:#7A4FB0; display:grid; place-items:center; font-family:var(--font-display); font-weight:700; color:#fff; font-size:16px; flex:none; }
+  .sp-ring { position:absolute; inset:-5px; border-radius:50%; border:2px solid var(--speaker-active); animation: pulse 1.6s ease-out infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(61,255,122,.5); opacity:1;} 70%{box-shadow:0 0 0 10px rgba(61,255,122,0); opacity:.7;} 100%{box-shadow:0 0 0 0 rgba(61,255,122,0); opacity:1;} }
+  .sp-name { font-weight:600; font-size:var(--fs-md); }
+  .sp-sub { font-family:var(--font-mono); font-size:9px; letter-spacing:.18em; color:var(--speaker-active); text-transform:uppercase; }
+
+  /* self mute — bottom-left */
+  .self-mute {
+    position:absolute; bottom: var(--safe-area); left: var(--safe-area);
+    display:flex; align-items:center; gap:12px;
+    background: rgba(26,26,31,.82); backdrop-filter: blur(4px);
+    border:2px solid var(--speaker-self); border-radius: var(--r-pill);
+    padding:10px 22px 10px 12px; box-shadow: var(--hud-shadow); cursor:pointer;
+  }
+  .sm-icon { width:38px; height:38px; border-radius:50%; background:rgba(79,184,255,.14); display:grid; place-items:center; flex:none; }
+  .sm-txt { display:flex; flex-direction:column; }
+  .sm-txt .who { font-weight:600; font-size:var(--fs-base); }
+  .sm-txt .state { font-family:var(--font-mono); font-size:9px; letter-spacing:.16em; color:var(--speaker-self); text-transform:uppercase; }
+
+  /* ================= TOASTS (non-blocking, top-right) ================= */
+  .toast-stack { position:absolute; top: var(--safe-area); right: var(--safe-area); z-index:20; display:flex; flex-direction:column; gap:14px; width:430px; }
+  .toast { position:relative; border-radius: var(--r-md); box-shadow: var(--hud-shadow); overflow:hidden; }
+  .toast-body { display:flex; gap:14px; padding:16px 18px 18px; }
+  .toast-ic { width:36px; height:36px; border-radius:50%; flex:none; display:grid; place-items:center; }
+  .t-title { font-weight:700; font-size: var(--fs-md); line-height:1.15; }
+  .t-msg { font-size: var(--fs-sm); line-height:1.5; margin-top:4px; }
+  .toast .progress { position:absolute; bottom:0; left:0; height:3px; }
+  .t-dur { position:absolute; top:14px; right:16px; font-family: var(--font-mono); font-size:11px; font-weight:700; }
+
+  /* strike toast — danger / red */
+  .toast.strike { background:#241010; border:1px solid var(--led-red); }
+  .toast.strike .toast-ic { background: rgba(255,46,46,.16); }
+  .toast.strike .t-title { color: var(--led-red); }
+  .toast.strike .t-msg { color:#E8C7C2; }
+  .toast.strike .progress { background: var(--led-red); width:64%; }
+
+  /* lifeline toast — bomb-world toast: graphite + cream + brass */
+  .toast.lifeline { background: var(--graphite); border:1px solid var(--brass); }
+  .toast.lifeline .toast-ic { background: rgba(184,146,74,.18); }
+  .toast.lifeline .t-kicker { font-family: var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color: var(--brass); margin-bottom:5px; }
+  .toast.lifeline .t-msg { color: var(--cream); font-size: var(--fs-md); margin-top:0; }
+  .toast.lifeline .t-msg b { color:#FFE9B8; }
+  .toast.lifeline .progress { background: var(--brass); width:58%; }
+  .toast.lifeline .t-dur { color: var(--brass); }
+
+  @media (prefers-reduced-motion: reduce) { .sp-ring { animation: none; } }
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="stage" data-screen-label="Bomb View — Strike + Lifeline Toasts">
+    <div class="bench"></div>
+
+    <!-- BOMB -->
+    <div class="bomb">
+      <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
+
+      <!-- TOP BAND -->
+      <div class="top-band">
+        <div class="serial-wrap">
+          <div class="serial">
+            <div class="lab">SERIAL NO.</div>
+            <div class="num">KTANE5</div>
+            <div class="bars"></div>
+          </div>
+        </div>
+
+        <div class="timer-mount">
+          <div class="timer heated">
+            <div class="ghost">8:88</div>
+            <div class="live">4:32</div>
+          </div>
+          <div class="timer-label">T — MINUS</div>
+        </div>
+
+        <div class="right-cluster">
+          <div class="strikes">
+            <div class="row">
+              <span class="strike-led active"></span>
+              <span class="strike-led"></span>
+            </div>
+            <span class="cap">STRIKES</span>
+          </div>
+          <div class="chassis-meta">
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <div class="indicator"><span class="ind-led lit"></span><span class="ind-lab">FRK</span></div>
+              <div class="indicator"><span class="ind-led unlit"></span><span class="ind-lab">CAR</span></div>
+            </div>
+            <div class="battery"><span class="cell-bat"></span><span class="cell-bat"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODULE GRID -->
+      <div class="grid">
+        <!-- Wires (solved) -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-01</span><span class="solve-led solved"></span></div>
+          <div class="bay-body">
+            <div class="wires">
+              <div class="wire-row"><span class="wire-lab">R</span><span class="grommet"></span><span class="wire red"></span><span class="grommet"></span></div>
+              <div class="wire-row"><span class="wire-lab">W</span><span class="grommet"></span><span class="wire white"></span><span class="grommet"></span></div>
+              <div class="wire-row"><span class="wire-lab">B</span><span class="grommet"></span><span class="wire blue"></span><span class="grommet"></span></div>
+              <div class="wire-row"><span class="wire-lab">R</span><span class="grommet"></span><span class="wire cut"><span class="l"></span><span class="r"></span></span><span class="grommet"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- The Button -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-02</span><span class="solve-led striking"></span></div>
+          <div class="bay-body">
+            <div class="button-mod">
+              <div class="big-btn"><span>Abort</span></div>
+              <div class="btn-strip"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Keypad -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-03</span><span class="solve-led"></span></div>
+          <div class="bay-body">
+            <div class="keypad">
+              <div class="key">Ψ</div><div class="key">¶</div>
+              <div class="key">☆</div><div class="key">ω</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simon Says -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-04</span><span class="solve-led"></span></div>
+          <div class="bay-body">
+            <div class="simon">
+              <div class="s top"></div><div class="s left"></div><div class="s right"></div><div class="s bottom"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Memory -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-05</span><span class="solve-led"></span></div>
+          <div class="bay-body">
+            <div class="memory">
+              <div class="mem-display"><span>3</span></div>
+              <div class="mem-btns"><div class="mem-btn">1</div><div class="mem-btn">2</div><div class="mem-btn">3</div><div class="mem-btn">4</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Morse Code -->
+        <div class="bay">
+          <span class="bay-screw a"></span><span class="bay-screw b"></span><span class="bay-screw c"></span><span class="bay-screw d"></span>
+          <div class="bay-head"><span class="bay-tag">MOD-06</span><span class="solve-led"></span></div>
+          <div class="bay-body">
+            <div class="morse">
+              <div class="morse-top">
+                <div class="morse-lamp"></div>
+                <div class="morse-freq"><span>3.5</span></div>
+              </div>
+              <div class="morse-bottom">
+                <div class="dial"></div>
+                <div class="tx-btn">TX</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOASTS: non-blocking, stacked top-right (bomb interactive behind) -->
+    <div class="toast-stack">
+      <!-- strike toast (red, 5s) -->
+      <div class="toast strike">
+        <div class="toast-body">
+          <div class="toast-ic">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1l7 12H1z" stroke="#FF2E2E" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M8 6v3.4M8 11.2v.1" stroke="#FF2E2E" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </div>
+          <div>
+            <div class="t-title">Strike.</div>
+            <div class="t-msg">Don&rsquo;t do that again. The clock just got faster.</div>
+          </div>
+        </div>
+        <div class="progress"></div>
+      </div>
+
+      <!-- lifeline toast (graphite + cream + brass, 8s) -->
+      <div class="toast lifeline">
+        <div class="t-dur">8s</div>
+        <div class="toast-body">
+          <div class="toast-ic">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 13.8 4.1 15.8l.8-4.3-3.1-3 4.3-.6z" fill="#B8924A"/></svg>
+          </div>
+          <div>
+            <div class="t-kicker">Spectator Sam sent a tip</div>
+            <div class="t-msg">Check the serial number for vowels &mdash; it <b>flips the color table.</b></div>
+          </div>
+        </div>
+        <div class="progress"></div>
+      </div>
+    </div>
+
+    <!-- HUD: active speaker (top-left) -->
+    <div class="speaker-pill">
+      <div class="sp-avatar">D<span class="sp-ring"></span></div>
+      <div><div class="sp-name">Devon</div><div class="sp-sub">Speaking</div></div>
+    </div>
+
+    <!-- HUD: self mute (bottom-left) -->
+    <div class="self-mute">
+      <div class="sm-icon">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" fill="#4FB8FF"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2.2M5.5 14.7h5" stroke="#4FB8FF" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </div>
+      <div class="sm-txt"><span class="who">You</span><span class="state">Mic live</span></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="stage.js"></script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     Bomb Squad — Screen 4: Expert — Manual Viewer
+     Spines: EXPERIENCE.md (IA §4 Expert; Component Patterns "Manual page":
+     keyboard arrows + Page Up/Down; current chapter highlighted; no nested
+     scrolling regions) + DESIGN.md (components.panel.manualPage: cream paper,
+     serif, paper grain, ≤1° rotation, paper shadow; serif = "you're reading
+     rules, not playing"). Wires rule tables verbatim from GDD Module 1.
+     No ambiguities on this screen.
+     ============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Squad — Manual</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .stage {
+    background:
+      radial-gradient(120% 90% at 30% 0%, #211D24 0%, var(--surface) 55%, #0C0B0E 100%);
+    display:grid; grid-template-columns: 300px 1fr; align-items:stretch;
+  }
+  .stage::before { /* desk grain */
+    content:""; position:absolute; inset:0; opacity:.5; pointer-events:none;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 1px, transparent 1px 6px);
+  }
+
+  /* ---- sidebar ---- */
+  .sidebar { position:relative; z-index:1; padding: 44px 28px; display:flex; flex-direction:column; border-right:1px solid #2A242F; }
+  .side-head { margin-bottom: 30px; }
+  .side-kicker { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.26em; text-transform:uppercase; color: var(--ink-muted); margin-bottom:8px; }
+  .side-title { font-family: var(--font-manual); font-weight:700; font-size: 26px; color: var(--ink-primary); }
+
+  .chapters { display:flex; flex-direction:column; gap:2px; flex:1; }
+  .chapter {
+    display:flex; align-items:center; gap:14px;
+    font-family: var(--font-manual); font-size: var(--fs-md); color: var(--ink-muted);
+    padding: 9px 14px; border-radius: var(--r-md); text-decoration:none; cursor:pointer;
+    transition: background .12s, color .12s;
+  }
+  .chapter .ch-num { font-family: var(--font-mono); font-size: var(--fs-sm); width:20px; flex:none; text-align:right; opacity:.7; }
+  .chapter:hover { background: rgba(255,255,255,.04); color: var(--ink-primary); }
+  .chapter.active { background: var(--surface-manual); color: var(--ink-manual); font-weight:600; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+  .chapter.active .ch-num { color: var(--bakelite); opacity:1; }
+
+  .side-foot { margin-top: 22px; padding-top:18px; border-top:1px solid #2A242F; }
+  .search-hint { display:flex; align-items:center; gap:10px; font-size: var(--fs-sm); color: var(--ink-muted); }
+  .kbd { font-family: var(--font-mono); font-size: var(--fs-sm); background: var(--surface-raised); border:1px solid #3A3340; border-bottom-width:2px; border-radius: var(--r-sm); padding:2px 9px; color: var(--ink-primary); }
+
+  /* ---- paper area ---- */
+  .desk { position:relative; z-index:1; display:grid; place-items:center; padding: 40px 60px; }
+  .sheet {
+    position:relative;
+    width: 980px; height: 1000px;
+    background: var(--surface-manual);
+    color: var(--ink-manual);
+    border:1px solid #C9BC9D; border-radius: var(--r-sm);
+    box-shadow: 0 4px 16px rgba(0,0,0,.35), 0 30px 70px rgba(0,0,0,.45);
+    transform: rotate(-0.8deg);
+    padding: 56px 64px 40px;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+  }
+  .sheet.paper-grain { } /* grain via ::before from tokens */
+
+  .sheet-top { display:flex; align-items:baseline; justify-content:space-between; border-bottom:2px solid #211A12; padding-bottom:10px; margin-bottom:6px; }
+  .sheet-top .manual-id { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.18em; text-transform:uppercase; color:#8A7A5E; }
+
+  .ch-heading { display:flex; align-items:baseline; gap:18px; margin: 22px 0 6px; }
+  .ch-heading .big-num { font-family: var(--font-manual); font-weight:700; font-size: 56px; color: var(--bakelite); line-height:1; }
+  .ch-heading h1 { font-family: var(--font-manual); font-weight:700; font-size: 40px; margin:0; letter-spacing:-.01em; }
+  .lede { font-family: var(--font-manual); font-size: 18px; line-height: 1.55; max-width: 60ch; color:#2A2118; margin: 6px 0 4px; }
+  .lede b { font-weight:600; }
+
+  .rule-note { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.06em; color:#8A7A5E; margin: 18px 0 14px; display:flex; align-items:center; gap:10px; }
+  .rule-note::before { content:""; width:30px; height:1px; background:#B7A580; }
+
+  /* 2×2 grid of wire-count rule tables */
+  .rules-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 22px 40px; position:relative; z-index:2; }
+  .rtable .rt-head { display:flex; align-items:center; gap:10px; font-family: var(--font-manual); font-weight:700; font-size: 20px; margin-bottom:8px; }
+  .rt-head .chip { font-family: var(--font-mono); font-size: 11px; font-weight:700; background:#211A12; color: var(--surface-manual); padding:2px 8px; border-radius:2px; letter-spacing:.05em; }
+  table.rt { width:100%; border-collapse: collapse; font-family: var(--font-manual); font-size: 15px; }
+  table.rt td { padding: 6px 4px; border-bottom: 1px solid #D8CBAC; vertical-align: top; line-height:1.4; }
+  table.rt tr:last-child td { border-bottom: none; }
+  table.rt .cond { color:#2A2118; padding-right:14px; }
+  table.rt .act { white-space:nowrap; text-align:right; font-weight:600; }
+  table.rt .act b { color: var(--bakelite); }
+  .ord { font-family: var(--font-mono); font-size:12px; color:#A8946C; padding-right:8px !important; width:14px; }
+
+  /* color word emphasis (paired with the word itself — colorblind floor) */
+  .w { font-weight:600; }
+  .w.red{ color:#B3261A;} .w.blue{ color:#1E5FC2;} .w.white{ color:#7A6F58;} .w.yellow{ color:#9A7A10;} .w.black{ color:#1A1410;}
+
+  /* footer / page nav */
+  .sheet-foot { margin-top:auto; padding-top:18px; border-top:1px solid #C9BC9D; display:flex; align-items:center; justify-content:space-between; }
+  .pageno { font-family: var(--font-mono); font-size: var(--fs-xs); color:#8A7A5E; letter-spacing:.1em; }
+  .pagenav { display:flex; align-items:center; gap:22px; font-family: var(--font-manual); font-size: 16px; color:#5A4F3E; }
+  .pagenav span { display:flex; align-items:center; gap:8px; }
+  .pagenav .dim { color:#A8946C; }
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="stage" data-screen-label="Expert — Manual Viewer">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="side-head">
+        <div class="side-kicker">Defusal Handbook</div>
+        <div class="side-title">Chapters</div>
+      </div>
+      <nav class="chapters">
+        <a class="chapter active"><span class="ch-num">1</span> Wires</a>
+        <a class="chapter"><span class="ch-num">2</span> The Button</a>
+        <a class="chapter"><span class="ch-num">3</span> Keypads</a>
+        <a class="chapter"><span class="ch-num">4</span> Simon Says</a>
+        <a class="chapter"><span class="ch-num">5</span> Memory</a>
+        <a class="chapter"><span class="ch-num">6</span> Morse Code</a>
+        <a class="chapter"><span class="ch-num">7</span> Complicated Wires</a>
+        <a class="chapter"><span class="ch-num">8</span> Wire Sequences</a>
+        <a class="chapter"><span class="ch-num">9</span> Who&rsquo;s on First</a>
+        <a class="chapter"><span class="ch-num">10</span> Passwords</a>
+        <a class="chapter"><span class="ch-num">11</span> Mazes</a>
+      </nav>
+      <div class="side-foot">
+        <div class="search-hint"><span class="kbd">/</span> Search a chapter by name</div>
+      </div>
+    </aside>
+
+    <!-- PAPER -->
+    <main class="desk">
+      <article class="sheet paper-grain">
+        <div class="sheet-top">
+          <span class="manual-id">Bomb Defusal Manual</span>
+          <span class="manual-id">Verification &mdash; 241</span>
+        </div>
+
+        <div class="ch-heading">
+          <span class="big-num">1</span>
+          <h1>Wires</h1>
+        </div>
+        <p class="lede">The module shows three to six coloured wires. <b>Cut exactly one wire</b> to disarm it. Count the wires first, then apply the matching table below &mdash; the rules differ for every wire count.</p>
+
+        <div class="rule-note">Apply the first rule that matches, reading top to bottom.</div>
+
+        <div class="rules-grid">
+          <!-- 3 wires -->
+          <div class="rtable">
+            <div class="rt-head"><span class="chip">3</span> Three wires</div>
+            <table class="rt">
+              <tr><td class="ord">1</td><td class="cond">No <span class="w red">red</span> wires</td><td class="act">cut the <b>2nd</b></td></tr>
+              <tr><td class="ord">2</td><td class="cond">Last wire is <span class="w white">white</span></td><td class="act">cut the <b>last</b></td></tr>
+              <tr><td class="ord">3</td><td class="cond">More than one <span class="w blue">blue</span> wire</td><td class="act">cut <b>last blue</b></td></tr>
+              <tr><td class="ord">4</td><td class="cond">Otherwise</td><td class="act">cut the <b>last</b></td></tr>
+            </table>
+          </div>
+
+          <!-- 4 wires -->
+          <div class="rtable">
+            <div class="rt-head"><span class="chip">4</span> Four wires</div>
+            <table class="rt">
+              <tr><td class="ord">1</td><td class="cond">More than one <span class="w red">red</span> &amp; last serial digit <b>odd</b></td><td class="act">cut <b>last red</b></td></tr>
+              <tr><td class="ord">2</td><td class="cond">Last wire <span class="w yellow">yellow</span> &amp; no <span class="w red">red</span></td><td class="act">cut the <b>1st</b></td></tr>
+              <tr><td class="ord">3</td><td class="cond">Exactly one <span class="w blue">blue</span> wire</td><td class="act">cut the <b>1st</b></td></tr>
+              <tr><td class="ord">4</td><td class="cond">More than one <span class="w yellow">yellow</span> wire</td><td class="act">cut the <b>last</b></td></tr>
+              <tr><td class="ord">5</td><td class="cond">Otherwise</td><td class="act">cut the <b>2nd</b></td></tr>
+            </table>
+          </div>
+
+          <!-- 5 wires -->
+          <div class="rtable">
+            <div class="rt-head"><span class="chip">5</span> Five wires</div>
+            <table class="rt">
+              <tr><td class="ord">1</td><td class="cond">Last wire <span class="w black">black</span> &amp; last serial digit <b>odd</b></td><td class="act">cut the <b>4th</b></td></tr>
+              <tr><td class="ord">2</td><td class="cond">One <span class="w red">red</span> &amp; more than one <span class="w yellow">yellow</span></td><td class="act">cut the <b>1st</b></td></tr>
+              <tr><td class="ord">3</td><td class="cond">No <span class="w black">black</span> wires</td><td class="act">cut the <b>2nd</b></td></tr>
+              <tr><td class="ord">4</td><td class="cond">Otherwise</td><td class="act">cut the <b>1st</b></td></tr>
+            </table>
+          </div>
+
+          <!-- 6 wires -->
+          <div class="rtable">
+            <div class="rt-head"><span class="chip">6</span> Six wires</div>
+            <table class="rt">
+              <tr><td class="ord">1</td><td class="cond">No <span class="w yellow">yellow</span> &amp; last serial digit <b>odd</b></td><td class="act">cut the <b>3rd</b></td></tr>
+              <tr><td class="ord">2</td><td class="cond">One <span class="w yellow">yellow</span> &amp; more than one <span class="w white">white</span></td><td class="act">cut the <b>4th</b></td></tr>
+              <tr><td class="ord">3</td><td class="cond">No <span class="w red">red</span> wires</td><td class="act">cut the <b>last</b></td></tr>
+              <tr><td class="ord">4</td><td class="cond">Otherwise</td><td class="act">cut the <b>4th</b></td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="sheet-foot">
+          <span class="pageno">Wires &middot; p. 01</span>
+          <div class="pagenav">
+            <span class="dim">&larr; prev</span>
+            <span>next &rarr;</span>
+          </div>
+        </div>
+      </article>
+    </main>
+
+  </div>
+</div>
+
+<script src="stage.js"></script>
+</body>
+</html>

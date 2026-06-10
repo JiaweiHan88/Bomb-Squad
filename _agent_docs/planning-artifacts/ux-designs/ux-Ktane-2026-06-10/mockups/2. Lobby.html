@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     Bomb Squad — Screen 2: Lobby
+     Spines: EXPERIENCE.md (IA §2 Lobby; State Patterns "Empty states":
+     lobby with 1 player → "Waiting for your team."). Voice: "Bring them in".
+     Operator-world palette. Up to 16 slots; shown at the 1-player empty state.
+     ============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Squad — Lobby</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .stage {
+    background: radial-gradient(130% 100% at 50% -20%, #221E26 0%, var(--surface) 60%, #0E0C10 100%);
+    color: var(--ink-primary);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    padding: 48px 56px 56px;
+  }
+
+  /* ---- header ---- */
+  .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom: 36px; }
+  .brand { display:flex; align-items:center; gap:14px; }
+  .brand .dot { width:30px; height:30px; }
+  .brand h1 { font-family: var(--font-display); font-weight:700; font-size: var(--fs-xl); margin:0; letter-spacing:-.02em; }
+  .brand h1 span { color: var(--bakelite); }
+  .session-meta { display:flex; align-items:center; gap:28px; }
+  .session-meta .label { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.24em; text-transform:uppercase; color: var(--ink-muted); }
+  .session-meta .val { font-family: var(--font-body); font-weight:600; font-size: var(--fs-md); }
+  .pill-count { display:inline-flex; align-items:center; gap:8px; background: var(--surface-raised); border:1px solid #322C38; border-radius: var(--r-pill); padding:7px 16px; font-size: var(--fs-sm); color: var(--ink-muted); }
+  .pill-count b { color: var(--ink-primary); }
+
+  /* ---- main grid ---- */
+  .layout { display:grid; grid-template-columns: 1fr 460px; gap: 40px; min-height:0; }
+
+  .panel { background: var(--surface-raised); border:1px solid #322C38; border-radius: var(--r-lg); }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; padding: 22px 26px 18px; border-bottom:1px solid #2A242F; }
+  .panel-head h2 { margin:0; font-size: var(--fs-md); font-weight:600; letter-spacing:.01em; }
+  .panel-head .sub { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.18em; text-transform:uppercase; color: var(--ink-muted); }
+
+  /* roster */
+  .roster { padding: 22px 26px; display:flex; flex-direction:column; gap: 14px; height: 100%; }
+  .player {
+    display:flex; align-items:center; gap:16px;
+    background: var(--surface); border:1px solid #322C38; border-radius: var(--r-lg);
+    padding: 16px 18px;
+  }
+  .avatar { width:44px; height:44px; border-radius:50%; flex:none; display:grid; place-items:center; font-family:var(--font-display); font-weight:700; font-size:var(--fs-md); color:#1A1410; }
+  .player .info { flex:1; min-width:0; }
+  .player .name { font-weight:600; font-size: var(--fs-md); display:flex; align-items:center; gap:10px; }
+  .you-tag { font-family:var(--font-mono); font-size:10px; letter-spacing:.12em; color: var(--speaker-self); border:1px solid rgba(79,184,255,.5); border-radius: var(--r-sm); padding:1px 6px; text-transform:uppercase; }
+  .player .role-row { display:flex; align-items:center; gap:10px; margin-top:7px; }
+  .badge { font-family:var(--font-body); font-weight:600; font-size: var(--fs-xs); letter-spacing:.04em; padding:3px 10px; border-radius: var(--r-pill); text-transform:uppercase; }
+  .badge.host { background: rgba(184,146,74,.16); color: var(--brass); border:1px solid rgba(184,146,74,.4); }
+  .badge.unassigned { background: #2A242F; color: var(--ink-muted); border:1px solid #3A3340; }
+  /* mic check */
+  .mic-check { display:flex; align-items:center; gap:8px; font-size: var(--fs-sm); color: var(--ink-muted); }
+  .mic-dot { width:11px; height:11px; border-radius:50%; flex:none; }
+  .mic-dot.on { background: var(--led-green); box-shadow:0 0 8px var(--led-green-glow); }
+  .mic-dot.off { background: var(--voice-muted); }
+
+  /* empty state */
+  .empty {
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; border:2px dashed #322C38; border-radius: var(--r-lg);
+    text-align:center; padding: 30px;
+  }
+  .empty .slots { display:flex; gap:10px; }
+  .empty .slot { width:38px; height:38px; border-radius:50%; border:2px dashed #3A3340; }
+  .empty h3 { margin:0; font-family:var(--font-display); font-weight:600; font-size: var(--fs-lg); color: var(--ink-primary); }
+  .empty p { margin:0; font-size: var(--fs-sm); color: var(--ink-muted); max-width:360px; line-height:1.5; }
+
+  /* ---- right column ---- */
+  .right { display:flex; flex-direction:column; gap: 28px; min-height:0; }
+  .share { padding: 26px; }
+  .share .lead { font-family:var(--font-display); font-weight:600; font-size: var(--fs-lg); margin:0 0 4px; }
+  .share .sub { font-size: var(--fs-sm); color: var(--ink-muted); margin:0 0 24px; }
+
+  .code-row { display:flex; align-items:stretch; gap:12px; margin-bottom: 24px; }
+  .code-box {
+    flex:1; background: var(--surface); border:1px solid #3A3340; border-radius: var(--r-md);
+    display:flex; align-items:center; justify-content:center;
+    font-family: var(--font-mono); font-weight:700; font-size: var(--fs-xl);
+    letter-spacing:.2em; color: var(--cream); padding: 14px 10px 14px 22px;
+  }
+  .copy-btn { display:flex; align-items:center; gap:9px; }
+  .copy-btn svg { flex:none; }
+
+  .qr-block { display:flex; gap:22px; align-items:center; padding-top: 22px; border-top:1px solid #2A242F; }
+  .qr { width:128px; height:128px; flex:none; background:#fff; border-radius: var(--r-md); padding:10px; }
+  .qr-grid { width:100%; height:100%; display:grid; }
+  .qr-grid i { background:#0E0C10; }
+  .qr-copy h4 { margin:0 0 6px; font-size: var(--fs-base); font-weight:600; }
+  .qr-copy p { margin:0; font-size: var(--fs-sm); color: var(--ink-muted); line-height:1.5; }
+  .link-line { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--brass); margin-top:10px; word-break:break-all; }
+
+  .ready-card { padding: 24px 26px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+  .ready-card .txt { font-size: var(--fs-sm); color: var(--ink-muted); line-height:1.5; }
+  .ready-card .txt b { color: var(--ink-primary); display:block; font-size:var(--fs-md); font-weight:600; margin-bottom:3px; }
+  .btn-ready { padding: 15px 34px; font-size: var(--fs-md); }
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="stage" data-screen-label="Lobby">
+
+    <div class="topbar">
+      <div class="brand">
+        <svg class="dot" viewBox="0 0 46 46" fill="none"><circle cx="24" cy="27" r="14" fill="#1A1A1F" stroke="#B8924A" stroke-width="2"/><circle cx="24" cy="27" r="14" fill="url(#g2)"/><path d="M30 16 l4 -5 l3 3 l-5 4" stroke="#B8924A" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="38" cy="11" r="2.4" fill="#FFB300"/><defs><radialGradient id="g2" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#C2491F"/><stop offset="1" stop-color="#7A2A10"/></radialGradient></defs></svg>
+        <h1>Bomb <span>Squad</span></h1>
+      </div>
+      <div class="session-meta">
+        <div><div class="label">Session</div><div class="val">Friday Team Build</div></div>
+        <div class="pill-count"><b>1</b>&nbsp;/ 16 in lobby</div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <!-- ROSTER -->
+      <section class="panel" style="display:flex; flex-direction:column;">
+        <div class="panel-head">
+          <h2>Team roster</h2>
+          <span class="sub">Mic check</span>
+        </div>
+        <div class="roster">
+          <div class="player">
+            <div class="avatar" style="background:#E8DCC2;">M</div>
+            <div class="info">
+              <div class="name">Maya <span class="you-tag">You</span></div>
+              <div class="role-row">
+                <span class="badge host">Host</span>
+                <span class="badge unassigned">Role TBD</span>
+              </div>
+            </div>
+            <div class="mic-check"><span class="mic-dot on"></span> Mic OK</div>
+          </div>
+
+          <div class="empty">
+            <div class="slots">
+              <span class="slot"></span><span class="slot"></span><span class="slot"></span>
+              <span class="slot"></span><span class="slot"></span>
+            </div>
+            <h3>Waiting for your team.</h3>
+            <p>Share the join code or link. Players land here as they enter — assign roles once everyone's in.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT -->
+      <div class="right">
+        <section class="panel share">
+          <p class="lead">Bring them in</p>
+          <p class="sub">Anyone with the code can join this session.</p>
+
+          <div class="code-row">
+            <div class="code-box">KTANE5</div>
+            <button class="btn btn-primary copy-btn" id="copyBtn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 10.5V3.5A1.5 1.5 0 0 1 4.5 2h6" stroke="currentColor" stroke-width="1.5"/></svg>
+              <span id="copyLabel">Copy</span>
+            </button>
+          </div>
+
+          <div class="qr-block">
+            <div class="qr"><div class="qr-grid" id="qr"></div></div>
+            <div class="qr-copy">
+              <h4>Or scan to join</h4>
+              <p>Drops players straight into this lobby.</p>
+              <div class="link-line">bombsquad.local/j/KTANE5</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel ready-card">
+          <div class="txt"><b>Ready when you are</b>Marks you set. The facilitator starts the round once the team's in.</div>
+          <button class="btn btn-primary btn-ready">Ready</button>
+        </section>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="stage.js"></script>
+<script>
+  // Deterministic QR-like placeholder (not a real code) — 21×21 with 3 finder patterns.
+  (function () {
+    var N = 21, qr = document.getElementById('qr');
+    qr.style.gridTemplateColumns = 'repeat(' + N + ', 1fr)';
+    qr.style.gridTemplateRows = 'repeat(' + N + ', 1fr)';
+    function finder(r, c) { // inside 7×7 finder region?
+      return (r < 7 && c < 7) || (r < 7 && c > N-8) || (r > N-8 && c < 7);
+    }
+    function finderOn(r, c, br, bc) {
+      var lr = r - br, lc = c - bc;
+      if (lr === 0 || lr === 6 || lc === 0 || lc === 6) return true;
+      return lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4;
+    }
+    var seed = 1337;
+    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+      var on;
+      if (r < 7 && c < 7) on = finderOn(r, c, 0, 0);
+      else if (r < 7 && c > N-8) on = finderOn(r, c, 0, N-7);
+      else if (r > N-8 && c < 7) on = finderOn(r, c, N-7, 0);
+      else if (finder(r, c)) on = false;
+      else on = rnd() > 0.52;
+      var cell = document.createElement('i');
+      if (on) cell.style.background = '#0E0C10'; else cell.style.background = 'transparent';
+      qr.appendChild(cell);
+    }
+  })();
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var l = document.getElementById('copyLabel');
+    l.textContent = 'Copied';
+    try { navigator.clipboard && navigator.clipboard.writeText('KTANE5'); } catch (e) {}
+    setTimeout(function () { l.textContent = 'Copy'; }, 1600);
+  });
+</script>
+</body>
+</html>

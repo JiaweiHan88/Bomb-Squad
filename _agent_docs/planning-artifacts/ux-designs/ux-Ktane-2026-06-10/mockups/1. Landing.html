@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     Bomb Squad — Screen 1: Landing / Join
+     Spines: DESIGN.md (visual identity) + EXPERIENCE.md (IA §1 Landing/Join,
+     Component Patterns: Join-code input).
+     Operator-world surface (--surface). Display wordmark; mono 6-cell join code.
+     No ambiguities flagged on this screen.
+     ============================================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Squad — Join</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .stage { background:
+      radial-gradient(120% 90% at 50% -10%, #221E26 0%, var(--surface) 55%, #0E0C10 100%);
+      display: grid; place-items: center; }
+
+  /* faint workbench texture so the dark shell isn't dead flat */
+  .stage::before {
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+    background:
+      radial-gradient(1px 1px at 20% 30%, rgba(184,146,74,.18) 50%, transparent 51%),
+      radial-gradient(1px 1px at 70% 65%, rgba(184,146,74,.12) 50%, transparent 51%),
+      radial-gradient(1px 1px at 45% 80%, rgba(184,146,74,.10) 50%, transparent 51%);
+    background-size: 240px 240px, 320px 320px, 200px 200px;
+  }
+
+  .card {
+    position: relative;
+    width: 620px;
+    background: var(--surface-raised);
+    border: 1px solid #322C38;
+    border-radius: var(--r-lg);
+    box-shadow: 0 24px 70px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.04);
+    padding: 56px 60px 48px;
+    text-align: center;
+  }
+
+  /* wordmark */
+  .mark { display:flex; align-items:center; justify-content:center; gap:18px; margin-bottom: 6px; }
+  .mark-icon {
+    width: 46px; height: 46px; position: relative; flex:none;
+  }
+  .wordmark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 56px;
+    letter-spacing: -.02em;
+    line-height: 1;
+    color: var(--ink-primary);
+    margin: 0;
+  }
+  .wordmark .b2 { color: var(--bakelite); }
+  .tagline {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--fs-xs);
+    letter-spacing: .34em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 14px 0 40px;
+  }
+
+  .field-label {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: var(--fs-sm);
+    letter-spacing: .02em;
+    color: var(--ink-primary);
+    display:block;
+    text-align: left;
+    margin-bottom: 12px;
+  }
+
+  /* 6-cell join code */
+  .code {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .cell {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    height: 84px;
+    background: var(--surface);
+    border: 2px solid #3A3340;
+    border-radius: var(--r-md);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: var(--fs-xl);
+    color: var(--cream);
+    text-align: center;
+    caret-color: var(--led-green);
+    transition: border-color .15s, box-shadow .15s;
+    text-transform: uppercase;
+    letter-spacing: 0;
+  }
+  .cell:focus {
+    outline: none;
+    border-color: var(--led-green);
+    box-shadow: 0 0 0 3px rgba(61,255,122,.18);
+  }
+  .cell.filled { border-color: var(--brass); }
+
+  .help {
+    font-size: var(--fs-sm);
+    color: var(--ink-muted);
+    text-align: left;
+    margin: 0 0 30px;
+    line-height: 1.5;
+  }
+  .help b { color: var(--ink-primary); font-weight: 600; }
+
+  .divider {
+    display:flex; align-items:center; gap:16px;
+    color: var(--ink-muted); font-size: var(--fs-xs);
+    letter-spacing:.2em; text-transform:uppercase;
+    margin: 6px 0 26px;
+  }
+  .divider::before, .divider::after {
+    content:""; height:1px; flex:1; background:#322C38;
+  }
+
+  .actions { display:flex; flex-direction:column; gap:14px; }
+  .btn-block { width:100%; padding: 15px; font-size: var(--fs-md); }
+
+  /* mic preflight microcopy */
+  .mic {
+    display:flex; align-items:center; gap:12px;
+    margin-top: 34px; padding-top: 24px;
+    border-top: 1px solid #2A242F;
+    text-align:left;
+  }
+  .mic-glyph {
+    width: 34px; height: 34px; flex:none;
+    border-radius: 50%;
+    display:grid; place-items:center;
+    background: rgba(79,184,255,.10);
+    border: 1px solid rgba(79,184,255,.35);
+  }
+  .mic-copy { font-size: var(--fs-sm); color: var(--ink-muted); line-height: 1.45; }
+  .mic-copy b { color: var(--speaker-self); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="stage" data-screen-label="Landing / Join">
+    <div class="card">
+      <div class="mark">
+        <div class="mark-icon">
+          <svg width="46" height="46" viewBox="0 0 46 46" fill="none" aria-hidden="true">
+            <circle cx="24" cy="27" r="14" fill="#1A1A1F" stroke="#B8924A" stroke-width="2"/>
+            <circle cx="24" cy="27" r="14" fill="url(#g)"/>
+            <path d="M30 16 l4 -5 l3 3 l-5 4" stroke="#B8924A" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+            <circle cx="38" cy="11" r="2.6" fill="#FFB300"/>
+            <circle cx="38" cy="11" r="5" fill="#FFB300" opacity=".25"/>
+            <circle cx="19" cy="23" r="2.6" fill="#3DFF7A"/>
+            <defs><radialGradient id="g" cx="0.35" cy="0.3" r="0.8">
+              <stop offset="0" stop-color="#C2491F"/><stop offset="1" stop-color="#7A2A10"/>
+            </radialGradient></defs>
+          </svg>
+        </div>
+        <h1 class="wordmark">Bomb <span class="b2">Squad</span></h1>
+      </div>
+      <p class="tagline">Don't cut the wrong wire</p>
+
+      <label class="field-label" for="c1">Enter a join code</label>
+      <div class="code" id="code">
+        <input class="cell" id="c1" maxlength="1" inputmode="latin" aria-label="Join code digit 1" value="K">
+        <input class="cell" maxlength="1" aria-label="Join code digit 2" value="T">
+        <input class="cell" maxlength="1" aria-label="Join code digit 3" value="A">
+        <input class="cell" maxlength="1" aria-label="Join code digit 4" value="N">
+        <input class="cell" maxlength="1" aria-label="Join code digit 5" value="">
+        <input class="cell" maxlength="1" aria-label="Join code digit 6" value="">
+      </div>
+      <p class="help">Six characters, from your facilitator. <b>Submits on the sixth.</b></p>
+
+      <div class="divider">or</div>
+
+      <div class="actions">
+        <button class="btn btn-secondary btn-block">Host a session</button>
+      </div>
+
+      <div class="mic">
+        <div class="mic-glyph">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" fill="#4FB8FF"/>
+            <path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2.2M5.5 14.7h5" stroke="#4FB8FF" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="mic-copy"><b>We'll ask for your microphone next.</b> The bomb is quiet — your team won't be. Voice is how you play.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="stage.js"></script>
+<script>
+  // Join-code behaviour per EXPERIENCE.md: auto-uppercase, auto-advance, paste split, fill state.
+  (function () {
+    var cells = Array.prototype.slice.call(document.querySelectorAll('.cell'));
+    function mark(c){ c.classList.toggle('filled', !!c.value); }
+    cells.forEach(mark);
+    cells.forEach(function (cell, i) {
+      cell.addEventListener('input', function () {
+        cell.value = cell.value.toUpperCase().slice(0,1);
+        mark(cell);
+        if (cell.value && i < cells.length - 1) cells[i+1].focus();
+      });
+      cell.addEventListener('keydown', function (e) {
+        if (e.key === 'Backspace' && !cell.value && i > 0) cells[i-1].focus();
+      });
+      cell.addEventListener('paste', function (e) {
+        e.preventDefault();
+        var txt = (e.clipboardData.getData('text') || '').toUpperCase().replace(/[^A-Z0-9]/g,'');
+        for (var j = 0; j < txt.length && i + j < cells.length; j++) {
+          cells[i+j].value = txt[j]; mark(cells[i+j]);
+        }
+        cells[Math.min(i + txt.length, cells.length - 1)].focus();
+      });
+    });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!-- Bomb Squad — contact sheet / navigation index for the 8 key screens. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomb Squad — Mockups</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html,body { background: var(--surface); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 64px 40px 80px; }
+  .head { display:flex; align-items:center; gap:16px; margin-bottom: 8px; }
+  .head svg { width:40px; height:40px; }
+  h1 { font-family: var(--font-display); font-weight:700; font-size: 44px; margin:0; letter-spacing:-.02em; }
+  h1 span { color: var(--bakelite); }
+  .lede { color: var(--ink-muted); font-size: var(--fs-md); margin: 6px 0 40px; max-width: 60ch; line-height:1.55; }
+  .lede code { font-family: var(--font-mono); color: var(--brass); font-size: var(--fs-sm); }
+  .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  a.card { text-decoration:none; color:inherit; background: var(--surface-raised); border:1px solid #322C38; border-radius: var(--r-lg); padding: 22px 24px; display:flex; align-items:center; gap:18px; transition: border-color .14s, transform .08s; }
+  a.card:hover { border-color: var(--brass); transform: translateY(-2px); }
+  .num { font-family: var(--font-mono); font-weight:700; font-size: var(--fs-lg); color: var(--bakelite); width:38px; flex:none; }
+  .ct h2 { margin:0 0 3px; font-size: var(--fs-md); font-weight:600; }
+  .ct p { margin:0; font-size: var(--fs-sm); color: var(--ink-muted); line-height:1.4; }
+  .foot { margin-top: 40px; font-size: var(--fs-sm); color:#5A5560; font-family: var(--font-mono); letter-spacing:.04em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <svg viewBox="0 0 46 46" fill="none"><circle cx="24" cy="27" r="14" fill="#1A1A1F" stroke="#B8924A" stroke-width="2"/><circle cx="24" cy="27" r="14" fill="url(#g)"/><path d="M30 16 l4 -5 l3 3 l-5 4" stroke="#B8924A" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="38" cy="11" r="2.6" fill="#FFB300"/><circle cx="19" cy="23" r="2.6" fill="#3DFF7A"/><defs><radialGradient id="g" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#C2491F"/><stop offset="1" stop-color="#7A2A10"/></radialGradient></defs></svg>
+    <h1>Bomb <span>Squad</span> — Mockups</h1>
+  </div>
+  <p class="lede">Eight key screens, hi-fi at 1920×1080 (scales to 1280×720). All share <code>tokens.css</code>, generated from DESIGN.md. Two worlds: the diegetic bomb (Bakelite + LED) and the operator shell (dark + cream). Files with header comments flag any spine ambiguities.</p>
+  <div class="grid">
+    <a class="card" href="1. Landing.html"><div class="num">01</div><div class="ct"><h2>Landing / Join</h2><p>Join-code entry + host path, mic preflight</p></div></a>
+    <a class="card" href="2. Lobby.html"><div class="num">02</div><div class="ct"><h2>Lobby</h2><p>Roster empty state, join-code share + QR</p></div></a>
+    <a class="card" href="3. Defuser Bomb View.html"><div class="num">03</div><div class="ct"><h2>Defuser — Bomb View</h2><p>The hero: 2D chassis, six modules, HUD</p></div></a>
+    <a class="card" href="4. Expert Manual.html"><div class="num">04</div><div class="ct"><h2>Expert — Manual Viewer</h2><p>Cream-paper Wires page, serif handbook</p></div></a>
+    <a class="card" href="5. Spectator Lounge.html"><div class="num">05</div><div class="ct"><h2>Spectator Lounge</h2><p>Read-only bomb + locked manual, lifeline</p></div></a>
+    <a class="card" href="6. Facilitator Dashboard.html"><div class="num">06</div><div class="ct"><h2>Facilitator Dashboard</h2><p>Config, team assignment, round control</p></div></a>
+    <a class="card" href="7. Toasts on Bomb View.html"><div class="num">07</div><div class="ct"><h2>Strike + Lifeline Toasts</h2><p>Bomb View with two non-blocking toasts</p></div></a>
+    <a class="card" href="8. Scoreboard.html"><div class="num">08</div><div class="ct"><h2>End-of-Session Scoreboard</h2><p>DEFUSED. takeover, per-round times</p></div></a>
+  </div>
+  <div class="foot">mockups/ · tokens.css · stage.js</div>
+</div>
+</body>
+</html>

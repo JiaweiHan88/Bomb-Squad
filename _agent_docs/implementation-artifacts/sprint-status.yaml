@@ -1,0 +1,142 @@
+# generated: 2026-06-10
+# last_updated: 2026-06-10
+# project: Bomb Squad
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _agent_docs/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-06-10
+last_updated: 2026-06-10  # story 1-1 created → ready-for-dev
+project: Bomb Squad
+project_key: NOKEY
+tracking_system: file-system
+story_location: _agent_docs/implementation-artifacts
+
+development_status:
+  # ---- Epic 1: Foundation & Walking Skeleton ----
+  epic-1: in-progress
+  1-1-monorepo-and-build-scaffold: ready-for-dev
+  1-2-shared-contracts-core-types-and-typed-events: backlog
+  1-3-deterministic-seed-chain-utility: backlog
+  1-4-server-bootstrap-fastify-socketio-health: backlog
+  1-5-data-store-adapters-redis-keyspace-and-postgres-pool: backlog
+  1-6-pure-reducer-harness-and-open-closed-bomb-reducer: backlog
+  1-7-client-bootstrap-react-vite-zustand-typed-socket-client: backlog
+  1-8-docker-compose-stack-and-smoke-test: backlog
+  epic-1-retrospective: optional
+
+  # ---- Epic 2: Lobby & Session Setup ----
+  epic-2: backlog
+  2-1-design-tokens-ui-shell-and-state-patterns: backlog
+  2-2-facilitator-hosts-a-session: backlog
+  2-3-player-joins-via-code-and-picks-a-role: backlog
+  2-4-team-and-per-player-role-assignment: backlog
+  2-5-lobby-roster-ready-state-and-mic-check: backlog
+  2-6-capacity-and-join-window-guards: backlog
+  epic-2-retrospective: optional
+
+  # ---- Epic 3: Voice Communication ----
+  epic-3: backlog
+  3-1-role-scoped-livekit-token-minting: backlog
+  3-2-bomb-room-bidirectional-channel: backlog
+  3-3-spectator-lounge-listen-only-channel: backlog
+  3-4-speaker-indicator-and-mute-controls: backlog
+  3-5-token-re-mint-on-role-change: backlog
+  3-6-graceful-voice-degradation: backlog
+  epic-3-retrospective: optional
+
+  # ---- Epic 4: Bomb Renderer & HUD ----
+  epic-4: backlog
+  4-1-3d-bomb-scene-and-camera-rig: backlog
+  4-2-chassis-and-bomb-metadata-rendering: backlog
+  4-3-module-slots-and-solve-leds: backlog
+  4-4-diegetic-timer-lcd-with-client-extrapolation: backlog
+  4-5-strike-indicator-and-strike-roll-up: backlog
+  4-6-preparation-placeholder-bomb-view: backlog
+  4-7-snapshot-sync-and-optimistic-render-at-60fps: backlog
+  epic-4-retrospective: optional
+
+  # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----
+  epic-5: backlog
+  5-1-module-plugin-scaffold-sandbox-and-click-primitive: backlog
+  5-2-expert-manual-viewer: backlog
+  5-3-wires-module-walking-skeleton: backlog
+  5-4-the-button-module: backlog
+  5-5-passwords-module: backlog
+  epic-5-retrospective: optional
+
+  # ---- Epic 6: Core Modules — Medium ----
+  epic-6: backlog
+  6-1-keypads-module: backlog
+  6-2-whos-on-first-module: backlog
+  6-3-wire-sequences-module: backlog
+  6-4-mazes-module: backlog
+  epic-6-retrospective: optional
+
+  # ---- Epic 7: Core Modules — Hard ----
+  epic-7: backlog
+  7-1-complicated-wires-module: backlog
+  7-2-simon-says-module: backlog
+  7-3-memory-module: backlog
+  7-4-morse-code-module: backlog
+  epic-7-retrospective: optional
+
+  # ---- Epic 8: Game Loop & Scoring ----
+  epic-8: backlog
+  8-1-round-configuration-and-difficulty-gating: backlog
+  8-2-per-team-bomb-generation: backlog
+  8-3-round-start-defuser-assignment-and-preparation-control: backlog
+  8-4-server-authoritative-timer-and-strike-escalation: backlog
+  8-5-round-resolution: backlog
+  8-6-between-round-flow-and-scoreboard-preview: backlog
+  8-7-pause-facilitator-and-disconnect: backlog
+  8-8-retry-a-failed-round: backlog
+  8-9-relay-orchestration-and-odd-team-equalisation: backlog
+  8-10-scoring-final-scoreboard-and-session-end-persistence: backlog
+  epic-8-retrospective: optional
+
+  # ---- Epic 9: Advanced Features ----
+  epic-9: backlog
+  9-1-asymmetric-expert-roles: backlog
+  9-2-spectator-lifeline-token-economy: backlog
+  9-3-send-a-lifeline-hint: backlog
+  9-4-spectator-lounge-view: backlog
+  epic-9-retrospective: optional
+
+  # ---- Epic 10: Polish & Hardening ----
+  epic-10: backlog
+  10-1-game-state-sfx: backlog
+  10-2-60fps-profiling-and-frame-budget-hardening: backlog
+  10-3-webrtc-reliability-behind-symmetric-nat: backlog
+  10-4-accessibility-gate-sign-off: backlog
+  10-5-playtest-instrumentation-and-desync-hardening: backlog
+  epic-10-retrospective: optional
