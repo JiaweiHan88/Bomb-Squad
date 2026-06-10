@@ -1,0 +1,82 @@
+# Claude / BMAD tooling
+.claude/
+_bmad/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime / build artifacts
+node_modules/
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.cache/
+.parcel-cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.env
+.venv/
+venv/
+env/
+
+# Compiled / binary
+*.class
+*.dll
+*.exe
+*.o
+*.so
+*.a
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Secrets / env
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Temp
+tmp/
+temp/
