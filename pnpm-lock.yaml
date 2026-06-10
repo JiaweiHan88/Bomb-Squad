@@ -14,6 +14,9 @@ importers:
 
   apps/client:
     dependencies:
+      '@bomb-squad/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -38,6 +41,10 @@ importers:
         version: 6.4.3(tsx@4.22.4)
 
   apps/server:
+    dependencies:
+      '@bomb-squad/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
     devDependencies:
       tsx:
         specifier: ^4.19.0

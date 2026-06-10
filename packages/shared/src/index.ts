@@ -1,1 +1,2 @@
-export const SHARED_PACKAGE = '@bomb-squad/shared';
+export * from './types/index.js';
+export * from './events/index.js';

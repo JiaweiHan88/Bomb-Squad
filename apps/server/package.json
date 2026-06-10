@@ -8,6 +8,9 @@
     "typecheck": "tsc --noEmit",
     "test": "echo \"No tests yet — server tests land with Story 1.6 (reducer harness)\""
   },
+  "dependencies": {
+    "@bomb-squad/shared": "workspace:*"
+  },
   "devDependencies": {
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
