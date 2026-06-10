@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests yet — server tests land with Story 1.6 (reducer harness)\""
   },
   "devDependencies": {
     "tsx": "^4.19.0",

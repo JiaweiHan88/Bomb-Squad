@@ -4,7 +4,7 @@ baseline_commit: 8359ac5dd4a73338883cce994ae5d903575d2253
 
 # Story 1.1: Monorepo & Build Scaffold
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -174,3 +174,13 @@ claude-sonnet-4-6
 
 ## Change Log
 - 2026-06-10: Story 1.1 implemented — pnpm monorepo scaffold with packages/shared, apps/client (Vite+React), apps/server (placeholder); per-workspace strict tsconfigs; Husky pre-commit typecheck gate; all ACs verified.
+
+## Review Findings
+
+_Code review 2026-06-10 (commit 87c6e78). 3 adversarial layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor). All 3 ACs PASS with runtime evidence: clean `pnpm install`, `tsc --noEmit` exit 0, live Vite dev server with HMR + native ESM, husky pre-commit gate fires and passes. No scope creep into 1.2–1.8._
+
+- [x] [Review][Patch] `pnpm -r test` is a false-green gate — client & server have no `test` script [apps/client/package.json, apps/server/package.json] — FIXED: added explicit placeholder `test` scripts to client and server; `pnpm -r test` now runs all 3 of 3 workspaces (was 1 of 3).
+- [x] [Review][Defer] `@bomb-squad/shared` exposes raw `./src/index.ts` as `main`/`exports` rather than built `dist` [packages/shared/package.json] — deferred. No consumers yet (verified unexercised); works for tsx/Vite/Bundler but the server's `tsc`+NodeNext build will need a real entrypoint strategy. Decide raw-TS-source vs built-`dist`+conditional-`exports` when Story 1.2 wires the first consumer.
+- [x] [Review][Defer] `vite.config.ts` is in the client typecheck graph without `@types/node` [apps/client/tsconfig.json, apps/client/package.json] — deferred. Passes today (config uses no Node globals); fragile the moment it references `path`/`process`. Add `@types/node` + a `tsconfig.node.json` split when the Vite config grows.
+
+_Dismissed as noise (7), all empirically refuted by running the toolchain: husky shebang (hook verified wired + passing via `.husky/_` wrapper), tsc-per-workspace resolution (exit 0), client `build` `tsc` against `noEmit:true` (intended typecheck gate; `vite build` emits correctly), `.env.example` formatting (review-prompt compression artifact — real file is newline-separated), `main.tsx` `import './App.js'` (verified works + idiomatic under Bundler resolution), `engines.node ">=20 <21"` (intentional Node 20 LTS pin per spec), `onlyBuiltDependencies:["esbuild"]` (verified complete for current dep set)._
