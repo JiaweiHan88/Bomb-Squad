@@ -1,6 +1,10 @@
+---
+baseline_commit: 8359ac5dd4a73338883cce994ae5d903575d2253
+---
+
 # Story 1.1: Monorepo & Build Scaffold
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -18,28 +22,28 @@ so that all later work has a consistent, type-safe foundation with clean depende
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Workspace root & topology (AC: 1)**
-  - [ ] Create root `package.json` with `"private": true`, `"packageManager": "pnpm@10.30.1"`, an `"engines": { "node": ">=20 <21" }` field (Architecture pins **Node 20 LTS** — see guardrail), and root scripts (`typecheck`, `build`, `dev`, `test`).
-  - [ ] Create `pnpm-workspace.yaml` listing `packages/*` and `apps/*`.
-  - [ ] Create the directory skeleton exactly per the Architecture project structure: `packages/shared/src/{types,events,modules,seeding,__tests__}`, `apps/client/src/`, `apps/server/src/`. Use `.gitkeep` for otherwise-empty dirs that later stories fill — **do not** pre-implement their contents (those belong to Stories 1.2–1.8).
-  - [ ] Add `.env.example` at root (placeholder keys only — never real secrets; `.env` must stay git-ignored).
-- [ ] **Task 2 — `packages/shared` as pure TypeScript (AC: 1)**
-  - [ ] Create `packages/shared/package.json` named `@bomb-squad/shared`, `"type": "module"`, with a `build` (`tsc`) and `test` script. **Dependencies must be empty** of react/socket.io/fastify/ioredis/pg/any framework — pure TS only (dev-only `typescript` is fine).
-  - [ ] Add a minimal `packages/shared/src/index.ts` (e.g. `export const SHARED_PACKAGE = '@bomb-squad/shared';`) so the package builds; real types/events/seeding land in Stories 1.2/1.3.
-- [ ] **Task 3 — Per-workspace strict tsconfig + typecheck gate (AC: 2)**
-  - [ ] Give **each** workspace its own complete `tsconfig.json` with `strict: true` — **do NOT create a single shared root tsconfig that packages extend** (project-context rule). Client config targets DOM + React JSX; server + shared target Node ESM.
-  - [ ] Ensure `pnpm -r exec tsc --noEmit` passes with zero errors.
-  - [ ] Install and configure **Husky** (`pnpm dlx husky init`) with a `.husky/pre-commit` hook that runs `pnpm -r exec tsc --noEmit`. Add `husky` as a root dev dependency and a `"prepare": "husky"` script.
-- [ ] **Task 4 — `apps/client` Vite + placeholder shell (AC: 3)**
-  - [ ] Create `apps/client/package.json` named `@bomb-squad/client`, `"type": "module"`, with `dev` (`vite`), `build` (`tsc && vite build`), scripts; deps: `react@^18.3`, `react-dom@^18.3`; devDeps: `vite@^6`, `@vitejs/plugin-react`, `typescript`, `@types/react`, `@types/react-dom`.
-  - [ ] Create `apps/client/vite.config.ts` (TypeScript, React plugin) and `apps/client/index.html` (ESM entry to `/src/main.tsx`).
-  - [ ] Create `apps/client/src/main.tsx` + `App.tsx` rendering a minimal placeholder shell (e.g. "Bomb Squad — booting…"). No game logic, no Three.js, no socket — those are later stories.
-- [ ] **Task 5 — `apps/server` build target placeholder (AC: 1, 2)**
-  - [ ] Create `apps/server/package.json` named `@bomb-squad/server`, `"type": "module"`, with a `dev` script (e.g. `tsx watch src/index.ts` or `node --watch`) and `build` (`tsc`). **No Fastify/Socket.IO bootstrap yet** — that is Story 1.4. Provide a placeholder `src/index.ts` (e.g. a `console.log('server placeholder')`) that type-checks.
-- [ ] **Task 6 — Verify end-to-end (AC: 1, 2, 3)**
-  - [ ] `pnpm install` from a clean clone resolves all three workspaces.
-  - [ ] `pnpm -r exec tsc --noEmit` → zero errors; staged commit triggers the hook.
-  - [ ] Client `dev` script serves the placeholder shell with HMR; editing `App.tsx` hot-reloads.
+- [x] **Task 1 — Workspace root & topology (AC: 1)**
+  - [x] Create root `package.json` with `"private": true`, `"packageManager": "pnpm@10.30.1"`, an `"engines": { "node": ">=20 <21" }` field (Architecture pins **Node 20 LTS** — see guardrail), and root scripts (`typecheck`, `build`, `dev`, `test`).
+  - [x] Create `pnpm-workspace.yaml` listing `packages/*` and `apps/*`.
+  - [x] Create the directory skeleton exactly per the Architecture project structure: `packages/shared/src/{types,events,modules,seeding,__tests__}`, `apps/client/src/`, `apps/server/src/`. Use `.gitkeep` for otherwise-empty dirs that later stories fill — **do not** pre-implement their contents (those belong to Stories 1.2–1.8).
+  - [x] Add `.env.example` at root (placeholder keys only — never real secrets; `.env` must stay git-ignored).
+- [x] **Task 2 — `packages/shared` as pure TypeScript (AC: 1)**
+  - [x] Create `packages/shared/package.json` named `@bomb-squad/shared`, `"type": "module"`, with a `build` (`tsc`) and `test` script. **Dependencies must be empty** of react/socket.io/fastify/ioredis/pg/any framework — pure TS only (dev-only `typescript` is fine).
+  - [x] Add a minimal `packages/shared/src/index.ts` (e.g. `export const SHARED_PACKAGE = '@bomb-squad/shared';`) so the package builds; real types/events/seeding land in Stories 1.2/1.3.
+- [x] **Task 3 — Per-workspace strict tsconfig + typecheck gate (AC: 2)**
+  - [x] Give **each** workspace its own complete `tsconfig.json` with `strict: true` — **do NOT create a single shared root tsconfig that packages extend** (project-context rule). Client config targets DOM + React JSX; server + shared target Node ESM.
+  - [x] Ensure `pnpm -r exec tsc --noEmit` passes with zero errors.
+  - [x] Install and configure **Husky** (`pnpm dlx husky init`) with a `.husky/pre-commit` hook that runs `pnpm -r exec tsc --noEmit`. Add `husky` as a root dev dependency and a `"prepare": "husky"` script.
+- [x] **Task 4 — `apps/client` Vite + placeholder shell (AC: 3)**
+  - [x] Create `apps/client/package.json` named `@bomb-squad/client`, `"type": "module"`, with `dev` (`vite`), `build` (`tsc && vite build`), scripts; deps: `react@^18.3`, `react-dom@^18.3`; devDeps: `vite@^6`, `@vitejs/plugin-react`, `typescript`, `@types/react`, `@types/react-dom`.
+  - [x] Create `apps/client/vite.config.ts` (TypeScript, React plugin) and `apps/client/index.html` (ESM entry to `/src/main.tsx`).
+  - [x] Create `apps/client/src/main.tsx` + `App.tsx` rendering a minimal placeholder shell (e.g. "Bomb Squad — booting…"). No game logic, no Three.js, no socket — those are later stories.
+- [x] **Task 5 — `apps/server` build target placeholder (AC: 1, 2)**
+  - [x] Create `apps/server/package.json` named `@bomb-squad/server`, `"type": "module"`, with a `dev` script (e.g. `tsx watch src/index.ts` or `node --watch`) and `build` (`tsc`). **No Fastify/Socket.IO bootstrap yet** — that is Story 1.4. Provide a placeholder `src/index.ts` (e.g. a `console.log('server placeholder')`) that type-checks.
+- [x] **Task 6 — Verify end-to-end (AC: 1, 2, 3)**
+  - [x] `pnpm install` from a clean clone resolves all three workspaces.
+  - [x] `pnpm -r exec tsc --noEmit` → zero errors; staged commit triggers the hook.
+  - [x] Client `dev` script serves the placeholder shell with HMR; editing `App.tsx` hot-reloads.
 
 ## Dev Notes
 
@@ -128,9 +132,45 @@ Extracted from `project-context.md` as binding constraints for this story:
 ## Dev Agent Record
 
 ### Agent Model Used
+claude-sonnet-4-6
 
 ### Debug Log References
+- esbuild build scripts blocked by pnpm security by default → resolved by adding `pnpm.onlyBuiltDependencies: ["esbuild"]` to root package.json; required for Vite to function.
+- `pnpm -r exec tsc --noEmit` triggers Node engine warning (v25.6.1 vs required >=20 <21) but exits 0 — expected per story guardrail note; no fix needed here.
 
 ### Completion Notes List
+- Scaffolded full pnpm workspace monorepo: root + `packages/shared` + `apps/client` + `apps/server`.
+- `packages/shared/package.json` has zero runtime framework dependencies (verified: only `typescript` devDep).
+- All three workspaces have independent `tsconfig.json` with `strict: true`; no shared root tsconfig.
+- Husky 9.1.7 installed; `.husky/pre-commit` runs `pnpm -r exec tsc --noEmit` — verified exit 0.
+- Vite v6.4.3 dev server starts in ~140ms, serves placeholder shell with HMR and native ESM.
+- `apps/server/src/index.ts` is a console.log placeholder; Fastify/Socket.IO is Story 1.4.
+- Directory skeleton (`.gitkeep` placeholders) created for: `packages/shared/src/{types,events,modules,seeding,__tests__}`.
+- Node 20 LTS is the pinned `engines.node` target; local machine runs v25.6.1 — use `nvm use 20` for CI parity.
 
 ### File List
+- package.json
+- pnpm-workspace.yaml
+- pnpm-lock.yaml
+- .env.example
+- .husky/pre-commit
+- packages/shared/package.json
+- packages/shared/tsconfig.json
+- packages/shared/src/index.ts
+- packages/shared/src/types/.gitkeep
+- packages/shared/src/events/.gitkeep
+- packages/shared/src/modules/.gitkeep
+- packages/shared/src/seeding/.gitkeep
+- packages/shared/src/__tests__/.gitkeep
+- apps/client/package.json
+- apps/client/tsconfig.json
+- apps/client/vite.config.ts
+- apps/client/index.html
+- apps/client/src/main.tsx
+- apps/client/src/App.tsx
+- apps/server/package.json
+- apps/server/tsconfig.json
+- apps/server/src/index.ts
+
+## Change Log
+- 2026-06-10: Story 1.1 implemented — pnpm monorepo scaffold with packages/shared, apps/client (Vite+React), apps/server (placeholder); per-workspace strict tsconfigs; Husky pre-commit typecheck gate; all ACs verified.

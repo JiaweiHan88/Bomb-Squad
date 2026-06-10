@@ -39,6 +39,8 @@ out/
 .output/
 .cache/
 .parcel-cache/
+.turbo/
+*.tsbuildinfo
 
 # Python
 __pycache__/
