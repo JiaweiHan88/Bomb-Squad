@@ -30,6 +30,11 @@ export class HealthRegistry {
     this.checks.set(name, check);
   }
 
+  /** Remove a named readiness probe. No-op if it was never registered. */
+  unregister(name: string): void {
+    this.checks.delete(name);
+  }
+
   /**
    * Run every registered probe concurrently and aggregate. A probe that throws
    * counts as `{ ok: false, detail: <error message> }` — a crashing probe must

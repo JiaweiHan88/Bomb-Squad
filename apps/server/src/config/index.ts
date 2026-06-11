@@ -3,16 +3,24 @@ import { dirname, resolve } from 'node:path';
 import { parseEnv, EnvValidationError, type Config } from './env.js';
 
 /**
- * Find the nearest `.env` by walking up from `start` to the filesystem root.
+ * Find the nearest `.env` by walking up from `start` toward the repo root.
  * The monorepo keeps a single root `.env` (gitignored; `.env.example` documents
  * it), but pnpm runs scripts with cwd set to the package dir — so a plain
- * cwd-relative lookup would miss it. Returns undefined if none is found.
+ * cwd-relative lookup would miss it. The search stops at the repo root (the dir
+ * holding `pnpm-workspace.yaml` or `.git`) so a stray ancestor `.env`
+ * (`$HOME/.env`, `/.env`) can never be silently hydrated. Returns undefined if
+ * none is found.
  */
 function findEnvFile(start: string): string | undefined {
   let dir = start;
   for (;;) {
     const candidate = resolve(dir, '.env');
     if (existsSync(candidate)) return candidate;
+    // Reached the repo root without finding a `.env` — stop rather than escaping
+    // the project tree.
+    if (existsSync(resolve(dir, 'pnpm-workspace.yaml')) || existsSync(resolve(dir, '.git'))) {
+      return undefined;
+    }
     const parent = dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -30,11 +38,16 @@ function findEnvFile(start: string): string | undefined {
  * `.env` exists), then reading `process.env` and exiting on invalid config.
  */
 function loadConfig(): Config {
-  const envFile = findEnvFile(process.cwd());
-  if (envFile) {
-    process.loadEnvFile(envFile);
-  }
   try {
+    // Hydrate `process.env` from the nearest project `.env` (best-effort; in
+    // containers env comes from the environment and no `.env` exists). Inside the
+    // try so a malformed/unreadable `.env` surfaces the clean config-error path
+    // instead of a raw stack trace.
+    const envFile = findEnvFile(process.cwd());
+    if (envFile) {
+      process.loadEnvFile(envFile);
+      console.info(`Loaded environment from ${envFile}`);
+    }
     return Object.freeze(parseEnv(process.env));
   } catch (err) {
     if (err instanceof EnvValidationError) {

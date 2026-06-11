@@ -49,22 +49,34 @@ async function start(): Promise<void> {
   const { fastify, io } = await buildServer();
 
   let shuttingDown = false;
-  const shutdown = (signal: NodeJS.Signals): void => {
+  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     fastify.log.info({ signal }, 'shutting down');
-    io.close(() => {
-      fastify.close().then(
-        () => process.exit(0),
-        (err: unknown) => {
-          fastify.log.error(err, 'error during shutdown');
-          process.exit(1);
-        },
-      );
-    });
+    try {
+      // `io.close()` disconnects clients AND closes the underlying HTTP server
+      // (Socket.IO was attached to `fastify.server`). Await it and surface any
+      // error it reports rather than discarding the callback argument.
+      await new Promise<void>((resolveClose) => {
+        io.close((err?: Error) => {
+          if (err) fastify.log.error(err, 'error closing Socket.IO');
+          resolveClose();
+        });
+      });
+      // The HTTP server is already closed by `io.close()`; `fastify.close()` runs
+      // the onClose hooks. Tolerate the expected "already not running" error so a
+      // clean shutdown still exits 0.
+      await fastify.close().catch((err: NodeJS.ErrnoException) => {
+        if (err?.code !== 'ERR_SERVER_NOT_RUNNING') throw err;
+      });
+      process.exit(0);
+    } catch (err) {
+      fastify.log.error(err, 'error during shutdown');
+      process.exit(1);
+    }
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   await fastify.ready();
   await fastify.listen({ port: config.PORT, host: '0.0.0.0' });

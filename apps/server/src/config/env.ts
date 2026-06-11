@@ -59,12 +59,21 @@ export class EnvValidationError extends Error {
 export function parseEnv(source: Record<string, unknown>): Config {
   // Enumerate the full error set before Parse so the caller sees every problem at once.
   // typebox@1 emits ajv-style errors: the offending var is in `instancePath`
-  // (e.g. "/REDIS_URL") for value violations; for a missing key `instancePath` is
-  // empty but the message itself lists the absent var names.
+  // (e.g. "/REDIS_URL") for value violations; a missing key has an empty
+  // `instancePath` but carries the absent name(s) in `params.requiredProperties`
+  // (keyword "required") — extract that so every error names its variable.
   const issues = [...Errors(EnvSchema, source)].map((e) => {
-    const { instancePath, message } = e as { instancePath?: string; message: string };
-    const field = instancePath ? instancePath.replace(/^\//, '') : '(root)';
-    return `${field}: ${message}`;
+    const err = e as {
+      instancePath?: string;
+      message: string;
+      keyword?: string;
+      params?: { requiredProperties?: string[] };
+    };
+    if (err.keyword === 'required' && err.params?.requiredProperties?.length) {
+      return `${err.params.requiredProperties.join(', ')}: ${err.message}`;
+    }
+    const field = err.instancePath ? err.instancePath.replace(/^\//, '') : '(root)';
+    return `${field}: ${err.message}`;
   });
   if (issues.length > 0) {
     throw new EnvValidationError(issues);
@@ -72,13 +81,17 @@ export function parseEnv(source: Record<string, unknown>): Config {
 
   const raw = Parse(EnvSchema, source) as RawEnv;
 
+  // Strict decimal-integer parsing. `Number()` would accept hex ("0x10"),
+  // exponent ("1e3"), and whitespace-padded (" 3001 ") forms, silently booting
+  // on an unintended value — so require plain digits via `^\d+$` first.
+  const DECIMAL_INT = /^\d+$/;
   const numericIssues: string[] = [];
   const PORT = Number(raw.PORT);
-  if (!Number.isInteger(PORT) || PORT <= 0) {
-    numericIssues.push(`PORT: must be a positive integer (got "${raw.PORT}")`);
+  if (!DECIMAL_INT.test(raw.PORT) || PORT < 1 || PORT > 65535) {
+    numericIssues.push(`PORT: must be an integer in 1–65535 (got "${raw.PORT}")`);
   }
   const TURN_TTL = Number(raw.TURN_TTL);
-  if (!Number.isInteger(TURN_TTL) || TURN_TTL <= 0) {
+  if (!DECIMAL_INT.test(raw.TURN_TTL) || TURN_TTL <= 0) {
     numericIssues.push(`TURN_TTL: must be a positive integer (got "${raw.TURN_TTL}")`);
   }
   if (numericIssues.length > 0) {

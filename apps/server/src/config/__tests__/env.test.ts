@@ -70,4 +70,20 @@ describe('parseEnv', () => {
   it('rejects a non-numeric TURN_TTL', () => {
     expect(() => parseEnv({ ...validEnv, TURN_TTL: 'soon' })).toThrow(/TURN_TTL/);
   });
+
+  it('rejects non-decimal PORT forms that Number() would silently accept', () => {
+    for (const PORT of ['0x10', '1e3', ' 3001 ', '+3001', '3001.0']) {
+      expect(() => parseEnv({ ...validEnv, PORT })).toThrow(/PORT/);
+    }
+  });
+
+  it('rejects a PORT above the TCP range (65535)', () => {
+    expect(() => parseEnv({ ...validEnv, PORT: '70000' })).toThrow(/PORT/);
+    expect(() => parseEnv({ ...validEnv, PORT: '99999999999999999999' })).toThrow(/PORT/);
+  });
+
+  it('accepts the TCP boundary ports', () => {
+    expect(parseEnv({ ...validEnv, PORT: '1' }).PORT).toBe(1);
+    expect(parseEnv({ ...validEnv, PORT: '65535' }).PORT).toBe(65535);
+  });
 });

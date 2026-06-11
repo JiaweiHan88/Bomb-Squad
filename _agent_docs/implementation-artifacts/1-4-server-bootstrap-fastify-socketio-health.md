@@ -4,7 +4,7 @@ baseline_commit: 0fece04
 
 # Story 1.4: Server Bootstrap — Fastify + Socket.IO + Health
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -273,3 +273,19 @@ Issues found and resolved during implementation:
 
 - 2026-06-11: Story 1.4 drafted — Fastify + typed Socket.IO + config validation + health/readiness registry. Status: ready-for-dev.
 - 2026-06-11: Story 1.4 implemented on worktree branch `story/1-4-server-bootstrap`. Fastify host + typed Socket.IO + fail-fast config + `/health` readiness registry; 9 server tests; monorepo typecheck + tests green. Status: review.
+
+## Review Findings
+
+Adversarial code review (2026-06-11) — Blind Hunter + Edge Case Hunter + Acceptance Auditor. All 3 ACs and all 6 tasks confirmed implemented; no Critical/High defects. 6 patches, 4 deferred, 5 dismissed as noise.
+
+- [x] [Review][Patch] Graceful shutdown double-closes the shared HTTP server → spurious exit(1) [apps/server/src/index.ts:56-64] — `io.close()` closes `fastify.server` (Socket.IO was attached to it), then `fastify.close()` closes the same already-closed server → `ERR_SERVER_NOT_RUNNING` rejection routed into the `exit(1)` branch, so every clean shutdown can exit non-zero. Also, `io.close(cb)` discards the `err` argument it is called with — a failed socket/transport close is swallowed unlogged. Fix: have only one owner close the HTTP server (e.g. `await fastify.close()` and close Socket.IO resources without re-closing the server, or guard the second close), and log the `io.close` error. (blind+edge)
+- [x] [Review][Patch] PORT/TURN_TTL numeric validation is too loose [apps/server/src/config/env.ts:76-83] — `Number()` accepts hex (`PORT=0x10`→16), exponent (`1e3`→1000), and whitespace-padded (`" 3001 "`) forms, all passing `Number.isInteger && >0`. PORT also has no upper bound: `99999999999999999999`→`1e20` passes validation, then fails opaquely at `fastify.listen()` bind time instead of the clean config-error path. Fix: strict decimal-integer check (regex `^\d+$`) and a `1–65535` range guard for PORT. (blind+edge)
+- [x] [Review][Patch] Missing-key error reports `(root):` instead of the variable name [apps/server/src/config/env.ts:64-68] — for a missing required key `instancePath` is empty, so the field label falls back to `(root)`; the var name only survives because TypeBox happens to embed it in the message text. Tests assert on the joined message, so the naming is version-fragile and AC2 ("name every offending variable") relies on TypeBox wording. Fix: when `instancePath` is empty, diff the schema's required keys against `source` to name the absent var explicitly. (blind)
+- [x] [Review][Patch] `process.loadEnvFile` runs outside the friendly error path [apps/server/src/config/index.ts:33-35] — only `parseEnv` is inside the try/catch; a malformed/unreadable `.env` (or a TOCTOU delete between `existsSync` and load) throws a raw stack instead of the clean "configuration is invalid" message + `exit(1)`. Fix: wrap `loadEnvFile` in the same try/catch. (blind+edge)
+- [x] [Review][Patch] `findEnvFile` walks to filesystem root with no boundary and logs nothing [apps/server/src/config/index.ts:11-20] — the upward search returns the first `.env` from cwd to `/`, so a stray ancestor `.env` (`$HOME/.env`, `/.env`) is silently hydrated when none exists at the repo root, with no log of which file was chosen. Fix: stop at a repo-root marker (`pnpm-workspace.yaml`/`.git`) and log the resolved path. (edge)
+- [x] [Review][Patch] Test pollutes the shared `healthRegistry` singleton [apps/server/src/__tests__/health.test.ts] — registers an `always-fails` check on the process-wide singleton with no teardown; any later test file importing the same singleton inherits the failing probe. Fix: add an `afterEach` unregister, or build the test against a fresh `HealthRegistry` instance. (blind)
+
+- [x] [Review][Defer] CORS `origin: true` reflects any origin [apps/server/src/index.ts:37] — open cross-origin posture, but exactly what Task 4 / the Socket.IO gotcha specify for the bootstrap. Tighten in a later auth/deployment story. Deferred — spec-sanctioned for this story.
+- [x] [Review][Defer] No shutdown hang-timeout; signal during in-flight `listen()` can exit non-zero [apps/server/src/index.ts:51-70] — if `io.close`'s callback never fires (lingering connection) the process wedges until SIGKILL; a signal arriving before `ready()`/`listen()` completes closes a not-yet-listening server and may reject into `exit(1)`. Deferred — robustness hardening, low-likelihood in current scope.
+- [x] [Review][Defer] Shape and numeric config errors are not aggregated into one boot failure [apps/server/src/config/env.ts:64-86] — `parseEnv` throws on shape issues before reaching numeric validation, so a run with both a missing key and a bad PORT surfaces only the shape error first (two-round fixing), contradicting the function's own "see every problem at once" comment. Deferred — minor operator UX.
+- [x] [Review][Defer] `runAll()` doesn't normalize a malformed resolved value; `register()` silently replaces a duplicate name [apps/server/src/health/registry.ts] — a probe that resolves `undefined`/`{}` yields a malformed `/health` entry (only throws/rejections are normalized to `{ok:false}`), and a duplicate `register(name,…)` silently drops the earlier probe. Both bite once Story 1.5 registers real Redis/Postgres probes. Deferred — defensive hardening for the empty-registry phase; revisit in Story 1.5.

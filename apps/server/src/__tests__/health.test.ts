@@ -42,11 +42,16 @@ describe('GET /health', () => {
 
   it('returns 503 {status:"unhealthy"} once a registered check fails', async () => {
     healthRegistry.register('always-fails', async () => ({ ok: false, detail: 'down' }));
+    // `healthRegistry` is a process-wide singleton — remove the probe afterwards
+    // so it cannot leak into other test files that import the same instance.
+    try {
+      const res = await built.fastify.inject({ method: 'GET', url: '/health' });
 
-    const res = await built.fastify.inject({ method: 'GET', url: '/health' });
-
-    expect(res.statusCode).toBe(503);
-    expect(res.json()).toMatchObject({ status: 'unhealthy' });
-    expect(res.json().checks['always-fails']).toMatchObject({ ok: false, detail: 'down' });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ status: 'unhealthy' });
+      expect(res.json().checks['always-fails']).toMatchObject({ ok: false, detail: 'down' });
+    } finally {
+      healthRegistry.unregister('always-fails');
+    }
   });
 });
