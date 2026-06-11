@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-10  # story 1-2 review
+last_updated: 2026-06-11  # story 1-2 review complete → done
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -45,8 +45,8 @@ development_status:
   # ---- Epic 1: Foundation & Walking Skeleton ----
   epic-1: in-progress
   1-1-monorepo-and-build-scaffold: done
-  1-2-shared-contracts-core-types-and-typed-events: review
-  1-3-deterministic-seed-chain-utility: backlog
+  1-2-shared-contracts-core-types-and-typed-events: done
+  1-3-deterministic-seed-chain-utility: in-progress
   1-4-server-bootstrap-fastify-socketio-health: backlog
   1-5-data-store-adapters-redis-keyspace-and-postgres-pool: backlog
   1-6-pure-reducer-harness-and-open-closed-bomb-reducer: backlog

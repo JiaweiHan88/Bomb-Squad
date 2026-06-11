@@ -4,7 +4,7 @@ baseline_commit: fff5fc6
 
 # Story 1.2: Shared Contracts — Core Types & Typed Events
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -250,7 +250,34 @@ claude-sonnet-4-6
 - apps/server/src/index.ts (updated — import type smoke-test)
 - pnpm-lock.yaml (updated — new workspace links)
 - _agent_docs/implementation-artifacts/deferred-work.md (updated — closed entrypoint deferred item)
+- _agent_docs/implementation-artifacts/sprint-status.yaml (updated — story moved to review)
+
+## Review Findings
+
+_Code review 2026-06-11 — 3 adversarial layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor). All 5 ACs confirmed substantively satisfied. Findings below are contract-shape concerns surfaced for a foundational types story (cheap to fix now, costly to churn across 8 epics later)._
+
+### Decisions Needed (resolved 2026-06-11 — all to recommended fix; applied)
+
+- [x] [Review][Decision→Patch] Strike count two sources of truth → **Dropped `bombDelta` from `ModuleUpdate`; `STRIKE` / `TIMER_UPDATE` are the sole channels.** [payloads.ts]
+- [x] [Review][Decision→Patch] Module addressing mismatch → **Kept `moduleIndex` addressing; documented invariant `modules[moduleIndex].moduleId === state.moduleId` + server-side bounds-check obligation on both `ModuleInteractPayload` and `ModuleUpdate`.** [payloads.ts]
+- [x] [Review][Decision→Patch] No ack channel on client→server events → **Added `SessionCreatedPayload` and an ack callback to `SESSION_CREATE`.** [client-to-server.ts, payloads.ts]
+- [x] [Review][Decision→Patch] `TimerState` pause/speed model → **Documented the segment-reset convention in `TimerState` JSDoc (fresh segment on pause-resume and on every `speedMultiplier` change; formula valid only within a segment; substitute `pausedAt` for `now` when frozen).** [timer.ts]
+- [x] [Review][Decision→Patch] Scoreboard vs Session team-map contradiction → **`ScoreboardPayload.teams` now `Partial<Record<TeamId,…>>`.** [payloads.ts]
+- [x] [Review][Decision→Patch] `SessionState.modifiers` duplication → **Dropped the top-level `modifiers`; `config.modifiers` is canonical.** [session.ts]
+- [x] [Review][Decision→Patch] Ranges/invariants comment-only → **Added `StrikeCount = 0 | 1 | 2 | 3` (used by `BombState.strikes` + `StrikePayload.strikes`); config bounds left to runtime validation.** [bomb.ts, payloads.ts]
+
+### Patches (applied 2026-06-11)
+
+- [x] [Review][Patch] `BombState.context` simplified from `Readonly<BombContext>` (no-op wrapper) to `BombContext`. [bomb.ts]
+- [x] [Review][Patch] Documented `ScoreboardPayload.teams.rounds` semantics (per-round elapsed ms; success/failure via BOMB_DEFUSED/BOMB_EXPLODED). [payloads.ts]
+- [x] [Review][Patch] Added `sprint-status.yaml` to the File List. [this file]
+
+### Deferred
+
+- [x] [Review][Defer] `PAUSED`/`RESUMED` carry only `reason: string` (no `TimerState`); partly redundant with `TIMER_UPDATE` — refine when the timer/pause story (1.4+) lands. [server-to-client.ts, payloads.ts] — deferred, depends on consuming story
+- [x] [Review][Defer] Referential integrity unmodeled — `PlayerInfo.teamId` can disagree with `TeamState.relayOrder` membership — runtime concern for the session-state story. [session.ts] — deferred, runtime validation concern
 
 ## Change Log
 
 - 2026-06-10: Story 1.2 implemented — full shared type surface (core types + typed Socket.IO events) in packages/shared; cross-workspace deps declared and typechecking verified zero errors; NodeNext entrypoint strategy resolved.
+- 2026-06-11: Code review — 5 ACs satisfied; 7 decision_needed, 3 patch, 2 deferred, 7 dismissed. See Review Findings.

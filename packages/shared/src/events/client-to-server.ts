@@ -1,5 +1,6 @@
 import type {
   SessionCreatePayload,
+  SessionCreatedPayload,
   SessionJoinPayload,
   TeamAssignPayload,
   RoundConfigurePayload,
@@ -19,9 +20,12 @@ import type {
  *
  * Once typed, socket.emit('unknown_string', data) is a compile-time error.
  * Event names follow SCREAMING_SNAKE_CASE per project convention.
+ *
+ * Events that the client needs a direct response to use a Socket.IO ack
+ * callback (last parameter) rather than relying on a follow-up broadcast.
  */
 export interface ClientToServerEvents {
-  SESSION_CREATE: (payload: SessionCreatePayload) => void;
+  SESSION_CREATE: (payload: SessionCreatePayload, ack: (result: SessionCreatedPayload) => void) => void;
   SESSION_JOIN: (payload: SessionJoinPayload) => void;
   TEAM_ASSIGN: (payload: TeamAssignPayload) => void;
   ROUND_CONFIGURE: (payload: RoundConfigurePayload) => void;

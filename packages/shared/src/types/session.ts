@@ -50,5 +50,4 @@ export interface SessionState {
   players: Record<string, PlayerInfo>;
   teams: Partial<Record<TeamId, TeamState>>;
   roundNumber: number;
-  modifiers: ModifierConfig;
 }

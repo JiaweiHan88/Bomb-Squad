@@ -2,6 +2,7 @@ export type { ClientToServerEvents } from './client-to-server.js';
 export type { ServerToClientEvents } from './server-to-client.js';
 export type {
   SessionCreatePayload,
+  SessionCreatedPayload,
   SessionJoinPayload,
   TeamAssignPayload,
   RoundConfigurePayload,

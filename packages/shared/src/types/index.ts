@@ -22,4 +22,5 @@ export type {
   PortType,
   BombContext,
   BombState,
+  StrikeCount,
 } from './bomb.js';

@@ -1,15 +1,25 @@
 import type { SessionState, TeamId, PlayerRole, RoundConfig } from '../types/session.js';
-import type { BombState } from '../types/bomb.js';
+import type { BombState, StrikeCount } from '../types/bomb.js';
 import type { ModuleState } from '../types/module.js';
 import type { TimerState } from '../types/timer.js';
 
 // Re-export core types used in payloads so consumers can import from events alone
-export type { SessionState, TeamId, PlayerRole, RoundConfig, BombState, TimerState };
+export type { SessionState, TeamId, PlayerRole, RoundConfig, BombState, TimerState, StrikeCount };
 
 // ─── Client → Server payloads ────────────────────────────────────────────────
 
 export interface SessionCreatePayload {
   config?: Partial<RoundConfig>;
+}
+
+/**
+ * Server acknowledgement for SESSION_CREATE. Delivered via the event's ack
+ * callback so the creating client learns the new identifiers without racing a
+ * subsequent broadcast.
+ */
+export interface SessionCreatedPayload {
+  sessionId: string;
+  joinCode: string;
 }
 
 export interface SessionJoinPayload {
@@ -30,6 +40,11 @@ export interface RoundConfigurePayload {
 
 export interface ModuleInteractPayload {
   teamId: TeamId;
+  /**
+   * Index into `BombState.modules`. Untrusted client input — the server MUST
+   * bounds-check (`0 <= moduleIndex < modules.length`) before dereferencing.
+   * Invariant: identifies the same module as `modules[moduleIndex].moduleId`.
+   */
   moduleIndex: number;
   /** Module-specific action data. Validated and bounds-checked server-side before reaching a reducer. */
   action: unknown;
@@ -47,19 +62,20 @@ export interface LifelineSendPayload {
 // ─── Server → Client payloads ────────────────────────────────────────────────
 
 export interface ModuleUpdate {
+  /**
+   * Index into `BombState.modules`. Invariant: `modules[moduleIndex].moduleId`
+   * equals `state.moduleId`. Bomb-level changes (strikes, timer) are NOT bundled
+   * here — they arrive via the dedicated STRIKE / TIMER_UPDATE events, which are
+   * the single source of truth for those values.
+   */
   moduleIndex: number;
   state: ModuleState<unknown>;
-  /** Optional bomb-level changes bundled with the module update. */
-  bombDelta?: {
-    strikes?: number;
-    timer?: TimerState;
-    solved?: boolean;
-  };
 }
 
 export interface StrikePayload {
   teamId: TeamId;
-  strikes: number;
+  /** New authoritative strike total (absolute, not a delta). */
+  strikes: StrikeCount;
   timer: TimerState;
 }
 
@@ -70,7 +86,13 @@ export interface RoundEndPayload {
 }
 
 export interface ScoreboardPayload {
-  teams: Record<TeamId, { cumulativeTimeMs: number; rounds: number[] }>;
+  /**
+   * Per-team standings. `Partial` because a team may be absent (e.g. a session
+   * scored before team B ever formed) — mirrors `SessionState.teams`.
+   * `rounds[i]` is the elapsed defuse time in ms for round i; success vs failure
+   * is conveyed by the BOMB_DEFUSED / BOMB_EXPLODED events, not encoded here.
+   */
+  teams: Partial<Record<TeamId, { cumulativeTimeMs: number; rounds: number[] }>>;
   winnerTeamId?: TeamId;
 }
 

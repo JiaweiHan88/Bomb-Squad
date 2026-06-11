@@ -19,11 +19,14 @@ export interface BombContext {
   readonly ports: ReadonlyArray<PortType>;
 }
 
+/** Team-wide strike count. Third strike (3) triggers explosion. */
+export type StrikeCount = 0 | 1 | 2 | 3;
+
 export interface BombState {
-  /** Read-only per-team-round metadata. Never mutated after generation. */
-  context: Readonly<BombContext>;
+  /** Read-only per-team-round metadata. Never mutated after generation (every field is `readonly`). */
+  context: BombContext;
   modules: ModuleState<unknown>[];
-  /** Team-wide strike count. Range: 0–3; third strike triggers explosion. */
-  strikes: number;
+  /** Team-wide strike count; third strike triggers explosion. */
+  strikes: StrikeCount;
   solved: boolean;
 }
