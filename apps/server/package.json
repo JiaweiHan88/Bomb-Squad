@@ -6,12 +6,20 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests yet — server tests land with Story 1.6 (reducer harness)\""
+    "test": "NODE_OPTIONS='--experimental-vm-modules' node_modules/.bin/jest"
   },
   "dependencies": {
-    "@bomb-squad/shared": "workspace:*"
+    "@bomb-squad/shared": "workspace:*",
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "fastify": "^5.8.5",
+    "socket.io": "^4.8.3",
+    "typebox": "^1.2.8"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "pino-pretty": "^13.1.3",
+    "ts-jest": "^29.2.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
