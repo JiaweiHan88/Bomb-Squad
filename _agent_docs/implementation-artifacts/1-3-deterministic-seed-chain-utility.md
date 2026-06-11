@@ -4,7 +4,7 @@ baseline_commit: d1d8abe
 
 # Story 1.3: Deterministic Seed-Chain Utility
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -16,7 +16,7 @@ so that bomb generation is reproducible and fair across teams without `Math.rand
 
 ## Acceptance Criteria
 
-1. **Seed chain derives deterministically.** `templateSeed = hash(sessionId + roundNumber)`, `teamSeed = hash(templateSeed + teamId)`, `moduleSeed = hash(teamSeed + moduleIndex)` — identical inputs always produce identical outputs on both Node (server) and browser (client). The function must not rely on any environment-specific API.
+1. **Seed chain derives deterministically.** `templateSeed = hash(sessionId + ":" + roundNumber)`, `teamSeed = hash(templateSeed + ":" + teamId)`, `moduleSeed = hash(teamSeed + ":" + moduleIndex)` — fields are joined with a `:` delimiter so adjacent operands cannot collide (without it, `(12, 34)` and `(1, 234)` both hash `"1234"`). Identical inputs always produce identical outputs on both Node (server) and browser (client). The function must not rely on any environment-specific API. _(Delimiter added 2026-06-11 code review.)_
 
 2. **Cross-team independence.** Given the same `(sessionId, roundNumber)`, two different `teamId`s produce an identical `templateSeed` but distinct `teamSeed`s.
 
@@ -40,9 +40,9 @@ so that bomb generation is reproducible and fair across teams without `Math.rand
 
 - [x] **Task 3 — Implement the seed-chain derivation functions (AC: 1, 2)**
   - [x] Create `packages/shared/src/seeding/seedChain.ts`. Export:
-    - `deriveTemplateSeed(sessionId: string, roundNumber: number): number` — `hash(sessionId + String(roundNumber))`
-    - `deriveTeamSeed(templateSeed: number, teamId: string): number` — `hash(String(templateSeed) + teamId)`
-    - `deriveModuleSeed(teamSeed: number, moduleIndex: number): number` — `hash(String(teamSeed) + String(moduleIndex))`
+    - `deriveTemplateSeed(sessionId: string, roundNumber: number): number` — `hash(\`${sessionId}:${roundNumber}\`)`
+    - `deriveTeamSeed(templateSeed: number, teamId: string): number` — `hash(\`${templateSeed}:${teamId}\`)`
+    - `deriveModuleSeed(teamSeed: number, moduleIndex: number): number` — `hash(\`${teamSeed}:${moduleIndex}\`)`
   - [x] Uses `import { hash } from './hash.js'` (`.js` extension required for NodeNext/ESM resolution).
 
 - [x] **Task 4 — Implement `makeSeededRng` (AC: 1, 5)**
@@ -104,15 +104,15 @@ export function hash(input: string): number {
 export function makeSeededRng(seed: number): () => number {
   let s = seed >>> 0;
   return function (): number {
-    s += 0x6d2b79f5;
+    s = (s + 0x6d2b79f5) | 0;                          // mask state to int32 each step
     let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) >>> 0;
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;    // canonical ^ t fold
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 ```
 
-This returns floats in `[0, 1)`. It is the only approved way to introduce randomness in module `generate(seed, ctx)` functions — modules call `const rng = makeSeededRng(seed)` at the start of generation, then `rng()` for each random value.
+This returns floats in `[0, 1)`. _(Corrected 2026-06-11 code review to match canonical mulberry32 — the earlier snippet dropped the `^ t` fold and left state unmasked, drifting after ~5M calls.)_ It is the only approved way to introduce randomness in module `generate(seed, ctx)` functions — modules call `const rng = makeSeededRng(seed)` at the start of generation, then `rng()` for each random value.
 
 ### ESM + Jest setup (critical — do not deviate)
 
@@ -220,11 +220,11 @@ From `project-context.md` — binding for this story:
 - **`generate(seed, ctx)` is the ONLY place randomness is allowed in a module** — the `makeSeededRng` function exported by this story is what module authors call from inside `generate`.
 - **Bomb generation rule (from project-context.md):**
   ```
-  templateSeed = hash(sessionId + roundNumber)
-  teamSeed     = hash(templateSeed + teamId)
-  moduleSeed   = hash(teamSeed + moduleIndex)
+  templateSeed = hash(sessionId + ":" + roundNumber)
+  teamSeed     = hash(templateSeed + ":" + teamId)
+  moduleSeed   = hash(teamSeed + ":" + moduleIndex)
   ```
-  This story implements exactly this contract.
+  Fields are joined with a `:` delimiter so adjacent operands cannot collide. This story implements exactly this contract.
 
 ### References
 
@@ -275,3 +275,19 @@ claude-sonnet-4-6
 ## Change Log
 
 - 2026-06-11: Story 1.3 implemented — deterministic seed-chain utility (xmur3 hash + mulberry32 RNG) in packages/shared/src/seeding; Jest set up with ESM + ts-jest; 17 tests all pass; zero tsc errors.
+
+### Review Findings
+
+_Code review 2026-06-11 (review of stories 1.1–1.3; Blind Hunter + Edge Case Hunter + Acceptance Auditor). All 5 ACs verified SATISFIED with runtime evidence (17 tests pass, `tsc --noEmit` clean, zero runtime deps). 9 findings dismissed as noise/false-positive. Findings below._
+
+- [x] [Review][Patch] Seed-chain derivation has no field delimiter — concatenation collisions (DECISION 2026-06-11: patch now — add delimiter + amend documented contract — APPLIED: `:` delimiter in all three derive functions; project-context.md + AC1 + Project Context Rules updated; collision-boundary tests added) [packages/shared/src/seeding/seedChain.ts:4,8,12] — All three derive functions concatenate operands with no separator, so the field boundary is ambiguous. Confirmed colliding inputs: `deriveTemplateSeed('sid1', 2)` === `deriveTemplateSeed('sid', 12)` (both `2953336349`); `deriveModuleSeed(12, 34)` === `deriveModuleSeed(1, 234)` (both `1867513652`). `deriveModuleSeed` (numeric‖numeric) is the genuinely live risk → two distinct (teamSeed, moduleIndex) pairs yield the same module seed → duplicate puzzles where independence is intended. `deriveTemplateSeed`/`deriveTeamSeed` are mitigated today (fixed-length sessionId boundary, non-digit teamId 'A'/'B') but fragile if those assumptions change. **This faithfully implements the documented contract** (project-context.md:221-227, story AC1, ADR-004 / Pattern 4), so fixing it (add a delimiter that cannot appear in any field, e.g. `:`) requires amending that documented seed contract — hence a decision, not a silent patch. No test currently probes adjacent-boundary collisions, so all three pass green.
+
+- [x] [Review][Patch] makeSeededRng is a non-canonical mulberry32 variant (APPLIED: state masked with `| 0` each step, restored canonical `^ t` fold; spec snippet updated) [packages/shared/src/seeding/seedChain.ts:21-27] — Two deviations from canonical mulberry32: (a) state `s` is never masked to int32 each step (`s += C` with no `| 0`), so after ~5M `rng()` calls `s` exceeds 2^53 and loses integer precision; (b) the middle mixing step drops the canonical trailing `^ t` fold (`(t + imul(...)) >>> 0` instead of `t + imul(...) ^ t`), changing the output distribution vs textbook mulberry32. Deterministic and in-range today (tests pass), hence Low — but the JSDoc/spec claim "mulberry32" while the output is a variant of unvetted distribution quality. The implementation matches the spec snippet (story lines 104-112), so the fix must update that snippet in lockstep. Restore canonical mulberry32.
+
+- [x] [Review][Patch] Seed/RNG functions accept invalid numeric inputs without guards + missing boundary tests (APPLIED: `assertNonNegativeInteger` guards on roundNumber/moduleIndex/templateSeed/teamSeed/seed; boundary tests added for empty/long/unicode/NaN/float/negative inputs) [packages/shared/src/seeding/seedChain.ts:3,11,20] — `roundNumber`/`moduleIndex` are stringified blindly: `NaN` → `"...NaN"`, `1.5` → `"...1.5"`, `-1` → `"...-1"`, all silently producing valid-looking seeds; `makeSeededRng` truncates via `>>> 0` so `1.9`≡`1` and `-1`≡`2^32-1` alias silently. `payloads.ts:35` already mandates the server bounds-check `0 <= moduleIndex < modules.length`, so this is defense-in-depth at the seeding boundary (assert non-negative integers; document/guard the RNG truncation). Also add the absent boundary tests: empty-string correctness (not just stability), negative/float/NaN inputs, long/unicode inputs, and the collision-boundary cases tied to the Decision item above.
+
+- [x] [Review][Patch] jest test gate breaks after a build (no dist/ exclusion) (APPLIED during review verification: scoped jest discovery to `roots: ['<rootDir>/src']` so compiled `dist/__tests__/*.d.ts` is never picked up — `pnpm build && pnpm test` previously failed with a no-test suite) [packages/shared/jest.config.cjs] — surfaced while running the test gate to verify the other patches; clean checkout hid it because dist/ is gitignored.
+
+- [x] [Review][Defer] @bomb-squad/shared package exports point at .ts source, not built dist [packages/shared/package.json:5-11] — deferred. `main`/`exports` resolve to `./src/index.ts`. Works today (client bundles via Vite; server uses only `import type`, erased at compile). Will break the moment the tsc-compiled server imports a *runtime value* (e.g. `hash`, `makeSeededRng`) — Node cannot execute the `.ts`. This was a deliberate, documented decision in Story 1.2 (deferred-work.md story-1.1 entry), validated only for `import type`. Settle the runtime-value consumption strategy (built dist + conditional exports, TS project references, or bundler) in Story 1.4 (server bootstrap), which is when the server first imports shared runtime values.
+
+- [x] [Review][Defer] StrikeCount type admits 3 as a steady-state value [packages/shared/src/types/bomb.ts] — deferred. `StrikeCount = 0 | 1 | 2 | 3` and `BombState.strikes` can hold `3`, but the third strike triggers explosion / round-end. Whether a persisted BombState should ever rest at `3`, or the explosion transition forbids it, is a reducer-modeling question. Resolve when the strike/timer reducer lands (Story 8.4 — server-authoritative timer and strike escalation).

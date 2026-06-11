@@ -31,6 +31,21 @@ describe('hash', () => {
       expect(h).toBeLessThanOrEqual(4294967295); // 2^32 - 1
     }
   });
+
+  it('returns a non-negative 32-bit integer for empty, long, and unicode inputs', () => {
+    const inputs = ['', 'a'.repeat(10000), 'café', 'é', '🔥💣', '日本語'];
+    for (const s of inputs) {
+      const h = hash(s);
+      expect(Number.isInteger(h)).toBe(true);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThanOrEqual(4294967295);
+    }
+  });
+
+  it('empty string and single-char inputs do not collide', () => {
+    expect(hash('')).not.toBe(hash('a'));
+    expect(hash('')).not.toBe(hash('0'));
+  });
 });
 
 describe('deriveTemplateSeed', () => {
@@ -49,6 +64,18 @@ describe('deriveTemplateSeed', () => {
     const t1 = deriveTemplateSeed('sid-aaa', 1);
     const t2 = deriveTemplateSeed('sid-bbb', 1);
     expect(t1).not.toBe(t2);
+  });
+
+  it('does not collide across the sessionId/roundNumber boundary (delimiter)', () => {
+    // Without a delimiter, ('sid1', 2) and ('sid', 12) both hash "sid12".
+    expect(deriveTemplateSeed('sid1', 2)).not.toBe(deriveTemplateSeed('sid', 12));
+    expect(deriveTemplateSeed('a', 11)).not.toBe(deriveTemplateSeed('a1', 1));
+  });
+
+  it('rejects non-negative-integer roundNumbers', () => {
+    expect(() => deriveTemplateSeed('sid', -1)).toThrow(RangeError);
+    expect(() => deriveTemplateSeed('sid', 1.5)).toThrow(RangeError);
+    expect(() => deriveTemplateSeed('sid', NaN)).toThrow(RangeError);
   });
 });
 
@@ -80,6 +107,19 @@ describe('deriveModuleSeed', () => {
     const team = deriveTeamSeed(template, 'A');
     const seeds = Array.from({ length: 10 }, (_, i) => deriveModuleSeed(team, i));
     expect(new Set(seeds).size).toBe(10);
+  });
+
+  it('does not collide across the teamSeed/moduleIndex boundary (delimiter)', () => {
+    // Without a delimiter, (12, 34) and (1, 234) both hash "1234".
+    expect(deriveModuleSeed(12, 34)).not.toBe(deriveModuleSeed(1, 234));
+    expect(deriveModuleSeed(1, 23)).not.toBe(deriveModuleSeed(12, 3));
+  });
+
+  it('rejects invalid teamSeed / moduleIndex', () => {
+    expect(() => deriveModuleSeed(10, -1)).toThrow(RangeError);
+    expect(() => deriveModuleSeed(10, 1.5)).toThrow(RangeError);
+    expect(() => deriveModuleSeed(10, NaN)).toThrow(RangeError);
+    expect(() => deriveModuleSeed(-1, 0)).toThrow(RangeError);
   });
 });
 
@@ -138,5 +178,11 @@ describe('makeSeededRng', () => {
     // rng2 should still produce the first value of the sequence
     const rng3 = makeSeededRng(42);
     expect(rng2()).toBe(rng3());
+  });
+
+  it('rejects non-negative-integer seeds rather than silently truncating', () => {
+    expect(() => makeSeededRng(1.9)).toThrow(RangeError);
+    expect(() => makeSeededRng(-1)).toThrow(RangeError);
+    expect(() => makeSeededRng(NaN)).toThrow(RangeError);
   });
 });

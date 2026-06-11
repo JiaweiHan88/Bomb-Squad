@@ -90,10 +90,11 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Redis reads/writes per game action must be O(1) — no full-session scans on hot path
 
 **Bomb Generation:**
-- Seed derivation is deterministic:
-  `templateSeed = hash(sessionId + roundNumber)`
-  `teamSeed     = hash(templateSeed + teamId)`
-  `moduleSeed   = hash(teamSeed + moduleIndex)`
+- Seed derivation is deterministic. Fields are joined with a `:` delimiter so adjacent
+  operands cannot collide (without it `(12, 34)` and `(1, 234)` both hash `"1234"`):
+  `templateSeed = hash(sessionId + ":" + roundNumber)`
+  `teamSeed     = hash(templateSeed + ":" + teamId)`
+  `moduleSeed   = hash(teamSeed + ":" + moduleIndex)`
 - `generate(seed, bombCtx)` must be synchronous and CPU-cheap — called at round start for all modules simultaneously
 - Never call `Math.random()` in generation — use the seeded value exclusively
 
