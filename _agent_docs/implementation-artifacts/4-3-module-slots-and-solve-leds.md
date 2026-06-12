@@ -4,7 +4,7 @@ baseline_commit: 6ca28c9
 
 # Story 4.3: Module Slots & Solve LEDs
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -65,6 +65,13 @@ So that I can learn the bomb's progress by scanning for greens.
   - [x] Unit tests (Vitest, Node env, pure logic only — R3F components are visual-regression-only per project testing rules): `moduleLed.test.ts` (state table + flash window + reduced-motion, per Task 3), `registry.test.ts` (per Task 1), bay-tag/format tests. Existing `layout.test`/`chassis.test` suites stay green.
   - [x] Gates: `pnpm -r exec tsc --noEmit` → 0 errors, no `// @ts-ignore`; `pnpm --filter @bomb-squad/client build` → green; `pnpm -r test` → no regressions (baseline: shared 24 ✓, client 51 ✓, server 64 ✓).
   - [x] **Manual smoke (record results honestly, check by check, in Completion Notes — 4.1/4.2 house standard):** `pnpm --filter @bomb-squad/client dev`, open `http://localhost:5173/dev/bomb`. Verify: (a) 6 bays render with graphite plates, dark rims, 4 brass screws each, `MOD-01`…`MOD-06` mono tags; (b) module 0's LED is green with visible glow, modules 1–5 dim red — the green is findable by scanning at overview distance (the AC's reason for existing); (c) digit key toggles a module's LED green↔dim-red; (d) Shift+digit produces a single ~600ms red flash that settles back to dim red — including on a module that is already showing armed again (transient struck proof); (e) a solved module does not flash when Shift+digit is fired on a different module (scoped re-render + scoped flash); (f) 4.1/4.2 regression: click a bay → focus dolly, ESC → overview, right/middle dead, cursor hides after 2s, serial sticker/indicators/batteries/ports all still present and correct; (g) emulate `prefers-reduced-motion: reduce` (DevTools rendering tab) → strike shows instant red state, no animated ramp; camera transitions already instant per 4.1; (h) several minutes idle + repeated flashes — no console errors, no frame collapse, no memory creep from repeated flash triggers.
+
+## Review Findings
+
+_Code review 2026-06-12 (gds-code-review, 3 adversarial layers). 1 patch, 1 deferred, 8 dismissed as noise._
+
+- [x] [Review][Patch] Per-frame object allocation during the active strike flash [apps/client/src/scenes/moduleLed.ts:73] — FIXED 2026-06-12: dynamic-flash branch now mutates-and-returns a reused module-level `FLASH_DYNAMIC_VISUAL` scratch; tsc 0 errors, client 76 ✓. — the normal-motion flash branch returns a fresh object literal, and `ModuleBay.useFrame` calls `solveLedVisual(...)` every frame while a flash is active (~600ms/~36 frames). Violates the project "no per-frame allocations in `useFrame`" rule and contradicts the Completion Note's "allocates nothing per frame" claim. Fix: reuse a module-level scratch `SolveLedVisual` for the dynamic-flash branch (constants/static/armed/solved branches already allocation-free; no test retains two flash-branch references, so mutate-and-return is safe).
+- [x] [Review][Defer] A module resting permanently at `'struck'` renders as dim-red (armed) after 600ms [apps/client/src/scenes/moduleLed.ts:81] — deferred, owned by Epic 8. If a snapshot leaves a module at `'struck'` with no following `'armed'` update (server-contract violation), the LED flashes once then reverts to armed-dim, visually indistinguishable from armed. Per the transient-`struck` contract this is correct for 4.3; the story's own Dev Notes already flag it for Story 8.4's explicit server contract.
 
 ## Dev Notes
 

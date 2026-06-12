@@ -60,3 +60,7 @@
 
 - **Battery cells/tray spill off the top face at batteryCount ≥17** (`apps/client/src/scenes/chassis.ts`) — beyond the documented ~12 max, so unreachable in the dev harness; `batteryCount` is an unbounded `number` with no clamp, so a generator emitting a high count would silently place geometry off-chassis. Add a clamp/guard when server-side `BombContext` generation lands (Story 8.2). Deferred — beyond current realistic domain.
 - **Manual-smoke results (a)–(g), incl. AC2 <10 s timing, are headless-only and unverifiable from code** — recommend a human interactive browser pass to confirm sticker size at preferred zoom and indicator glow intensity (the implementer's own recommendation). Deferred — human verification, not a code defect.
+
+## Deferred from: code review of 4-3-module-slots-and-solve-leds (2026-06-12)
+
+- **A module resting permanently at `'struck'` renders as dim-red (armed) after the 600ms flash** (`apps/client/src/scenes/moduleLed.ts`) — the LED is edge-triggered off the armed→struck transition and reverts to the armed visual once the 600ms window expires; a `'struck'` status with no active flash maps to armed. If Epic 8 / a 4.7 snapshot ever delivers a module stuck at `'struck'` (no following `'armed'` roll-up), that module is visually indistinguishable from an armed one. Correct per the transient-`'struck'` contract for 4.3; Story 8.4 should make the transient-struck broadcast an explicit server contract (already flagged in this story's Dev Notes / Completion Notes).

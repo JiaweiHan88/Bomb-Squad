@@ -47,6 +47,15 @@ const FLASH_STATIC_VISUAL: SolveLedVisual = {
 /** Normal motion: the flash decays from this peak down to the floor over 600ms. */
 const FLASH_PEAK_INTENSITY = 2.2;
 const FLASH_FLOOR_INTENSITY = 0.6;
+// Reused scratch for the animated-flash branch: this is the only path called
+// every frame (from ModuleBay's useFrame), so it must not allocate per call.
+// All other branches return shared constants. Safe to mutate-and-return —
+// callers read the fields immediately and never retain the reference.
+const FLASH_DYNAMIC_VISUAL: SolveLedVisual = {
+  color: '#FF2E2E', // --led-red
+  emissive: '#FF2E2E', // --led-red
+  emissiveIntensity: FLASH_PEAK_INTENSITY,
+};
 
 /**
  * @param flashElapsedMs ms since the armed→struck edge was observed, or null
@@ -70,12 +79,9 @@ export function solveLedVisual(
   if (flashActive) {
     if (reducedMotion) return FLASH_STATIC_VISUAL;
     const remaining = 1 - flashElapsedMs / SOLVE_LED_FLASH_MS;
-    return {
-      color: '#FF2E2E', // --led-red
-      emissive: '#FF2E2E', // --led-red
-      emissiveIntensity:
-        FLASH_FLOOR_INTENSITY + (FLASH_PEAK_INTENSITY - FLASH_FLOOR_INTENSITY) * remaining,
-    };
+    FLASH_DYNAMIC_VISUAL.emissiveIntensity =
+      FLASH_FLOOR_INTENSITY + (FLASH_PEAK_INTENSITY - FLASH_FLOOR_INTENSITY) * remaining;
+    return FLASH_DYNAMIC_VISUAL;
   }
 
   // 'armed', or a transient/stale 'struck' with no active flash.
