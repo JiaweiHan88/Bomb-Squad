@@ -6,6 +6,7 @@ import type {
   LifelineToastPayload,
   PauseResumePayload,
   ErrorPayload,
+  ExpertManualPositionPayload,
 } from './payloads.js';
 import type { SessionState } from '../types/session.js';
 import type { BombState } from '../types/bomb.js';
@@ -33,6 +34,7 @@ export interface ServerToClientEvents {
   BOMB_EXPLODED: (payload: RoundEndPayload) => void;
   SCOREBOARD: (payload: ScoreboardPayload) => void;
   LIFELINE_TOAST: (payload: LifelineToastPayload) => void;
+  EXPERT_MANUAL_POSITION: (payload: ExpertManualPositionPayload) => void;
   PAUSED: (payload: PauseResumePayload) => void;
   RESUMED: (payload: PauseResumePayload) => void;
   ERROR: (payload: ErrorPayload) => void;

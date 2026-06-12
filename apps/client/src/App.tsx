@@ -6,6 +6,7 @@ import { AppShell, Landing, Lobby, LoadingScreen, PlatformGate } from './ui/inde
 import { CONNECTING } from './ui/copy.js';
 import DevBombHarness from './scenes/DevBombHarness.js';
 import SandboxHarness from './sandbox/SandboxHarness.js';
+import DevManualHarness from './manual/DevManualHarness.js';
 
 // Production builds are served through Caddy, which proxies /socket.io/* to
 // the game server — same-origin works on any domain without baking a URL into
@@ -51,6 +52,12 @@ export default function App() {
     window.location.pathname === '/dev/sandbox' &&
     (import.meta.env.DEV || connection === 'connected');
 
+  // Dev harness for the manual viewer (Story 5.2) — same pattern, same known
+  // vite-preview SPA-fallback gap as /dev/bomb.
+  const isManualDevRoute =
+    window.location.pathname === '/dev/manual' &&
+    (import.meta.env.DEV || connection === 'connected');
+
   // Precedence: platform gate → loading screen → app shell.
   return (
     <PlatformGate>
@@ -58,6 +65,8 @@ export default function App() {
         <SandboxHarness />
       ) : isBombDevRoute ? (
         <DevBombHarness />
+      ) : isManualDevRoute ? (
+        <DevManualHarness />
       ) : connection !== 'connected' ? (
         <LoadingScreen status={CONNECTING} />
       ) : (
