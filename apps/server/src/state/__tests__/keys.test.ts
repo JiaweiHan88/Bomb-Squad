@@ -5,6 +5,7 @@ import {
   timerKey,
   rolesKey,
   lifelinesKey,
+  joinCodeKey,
 } from '../keys.js';
 
 describe('Redis key-builders — exact string assertions', () => {
@@ -30,6 +31,10 @@ describe('Redis key-builders — exact string assertions', () => {
 
   it('lifelinesKey', () => {
     expect(lifelinesKey('S1')).toBe('session:S1:lifelines');
+  });
+
+  it('joinCodeKey', () => {
+    expect(joinCodeKey('ABC123')).toBe('joincode:ABC123');
   });
 
   it('all keys are colon-delimited and contain no wildcard/glob chars', () => {

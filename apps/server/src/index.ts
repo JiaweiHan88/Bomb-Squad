@@ -7,6 +7,7 @@ import { config } from './config/index.js';
 import { healthRegistry } from './health/index.js';
 import { connectRedis } from './state/index.js';
 import { connectPostgres } from './persistence/index.js';
+import { registerSessionHandlers } from './handlers/sessionHandlers.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
 export type AppIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
@@ -72,6 +73,10 @@ async function start(): Promise<void> {
     const ok = await archive.ping();
     return { ok, ...(ok ? {} : { detail: 'postgres SELECT 1 failed' }) };
   });
+
+  // Game socket handlers. Registered here (not in buildServer) so buildServer
+  // stays pure construction — handlers need the connected Redis store.
+  registerSessionHandlers(io, { redis: redisStore, log: fastify.log });
 
   // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
   // Per-connection runAll() is acceptable in V1 (infrequent handshakes).

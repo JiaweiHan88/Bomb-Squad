@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
 import { useGameStore } from './store/gameStore.js';
-import { AppShell, LoadingScreen, PlatformGate } from './ui/index.js';
+import { AppShell, Landing, Lobby, LoadingScreen, PlatformGate } from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
 
 // Production builds are served through Caddy, which proxies /socket.io/* to
@@ -15,6 +15,7 @@ const SERVER_URL =
 
 export default function App() {
   const connection = useGameStore((s) => s.connection);
+  const session = useGameStore((s) => s.session);
 
   useEffect(() => {
     // StrictMode double-invokes this effect in dev — autoConnect:false + explicit
@@ -37,9 +38,8 @@ export default function App() {
         <LoadingScreen status={CONNECTING} />
       ) : (
         <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>
-          <div className="flex flex-1 items-center justify-center text-ink-muted">
-            <p>Connected. Lobby lands in Story 2.2.</p>
-          </div>
+          {/* Surface derives from the server snapshot — no router, no URL state. */}
+          {session === null ? <Landing /> : <Lobby />}
         </AppShell>
       )}
     </PlatformGate>

@@ -2,6 +2,9 @@
 module.exports = {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
+  // Only *.test.ts files are suites — __tests__/ also hosts shared harnesses
+  // (e.g. handlers/__tests__/testSocketServer.ts) that must not be collected.
+  testMatch: ['**/__tests__/**/*.test.ts'],
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     // Strip the NodeNext `.js` extension so tests resolve the `.ts` sources.
