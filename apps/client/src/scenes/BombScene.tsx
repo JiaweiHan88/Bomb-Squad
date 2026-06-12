@@ -8,6 +8,7 @@ import { CHASSIS_SIZE, computeModuleLayout, type ModuleSlot } from './layout.js'
 import { ChassisFeatures } from './ChassisFeatures.js';
 import { ModuleBay } from './ModuleBay.js';
 import { TimerLcd } from './TimerLcd.js';
+import { StrikeIndicator } from './StrikeIndicator.js';
 import { DEV_BOMB_CONTEXT } from './devBombContext.js';
 import { DEV_PLACEHOLDER_MODULES } from './devBombState.js';
 import { isTextEntryTarget, prefersReducedMotion } from './dom.js';
@@ -16,9 +17,10 @@ import { isTextEntryTarget, prefersReducedMotion } from './dom.js';
  * Bomb scene: bakelite chassis with diegetic BombContext metadata (Story 4.2)
  * + registry-driven module bays with solve LEDs (Story 4.3)
  * + the diegetic 7-segment timer LCD with client extrapolation (Story 4.4)
+ * + the strike indicator LEDs beside the timer (Story 4.5)
  * + the orbit/zoom/focus camera rig (Story 4.1).
  * Rendering only — zero game logic (R3F components are dumb renderers).
- * Strike HUD + team strike roll-up land in 4.5.
+ * Preparation placeholder view lands in 4.6; snapshot sync/60fps pass in 4.7.
  */
 
 /** Brass corner screws on the front/back faces (mockup .screw, Flow 1 "brass
@@ -155,6 +157,9 @@ export default function BombScene() {
 
       {/* Diegetic timer LCD on the chassis top band (Story 4.4) */}
       <TimerLcd />
+
+      {/* Strike LED dots beside the timer (Story 4.5) */}
+      <StrikeIndicator />
 
       {slots.map((slot) => (
         <ModuleBay
