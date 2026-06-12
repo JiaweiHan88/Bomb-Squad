@@ -4,7 +4,7 @@ baseline_commit: 1591434 (+ uncommitted Story 2.3 working-tree changes in this w
 
 # Story 2.4: Team & Per-Player Role Assignment
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -219,6 +219,15 @@ claude-fable-5
 - apps/server/src/index.ts (modified — `AppIOServer` + instantiation 4-generic retype only)
 - apps/client/src/ui/Lobby.tsx (modified — team badges, facilitator A/B chips + role select, ERROR listener + inline alert)
 - apps/client/src/ui/copy.ts (modified — TEAM_A/TEAM_B/UNASSIGNED)
+
+## Review Findings
+
+_Code review 2026-06-12 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). Acceptance Auditor found zero AC violations — AC1/AC2, authority-gate ordering, AR15, frozen contract, and scope fences all verified._
+
+- [x] [Review][Patch] **APPLIED 2026-06-12** — Lobby error surface is unreliable — `assignError` is cleared on *any* room `SESSION_STATE` (another player joining wipes a legitimate, unread TEAM_ASSIGN rejection); the `ERROR` listener is an indiscriminate sink (no `code` filter); an idempotent re-click yields no broadcast so a stale banner persists with zero feedback [apps/client/src/ui/Lobby.tsx:72-88]. Fix: clear `assignError` on the facilitator's own next emit (top of `assign()`), drop the `[session]`-keyed clear, and optionally gate the listener to TEAM_ASSIGN-class codes. Note: the `[session]` clear was spec-prescribed (Task 6) — this is a refinement of that instruction.
+- [x] [Review][Defer] Redis load-modify-store lost-update race on concurrent assignments [apps/server/src/handlers/sessionHandlers.ts] — accepted V1 (single-process, human-speed lobby), commented in code; same posture as SESSION_JOIN. Deferred, pre-existing.
+- [x] [Review][Defer] `currentDefuserIndex` not adjusted when a player leaves a team's `relayOrder` [apps/server/src/session/assignTeam.ts] — index always 0 in lobby phase (no round has run); Epic 8 owns rotation/index mechanics. Deferred, latent.
+- [x] [Review][Defer] `relayOrder` ↔ `PlayerInfo.teamId` divergence is not self-healed if state is seeded inconsistently [apps/server/src/session/assignTeam.ts] — not reachable via 2.4's own writes (the two stay consistent); recurrence of the 1.2-deferred referential-integrity item, now runtime-owned by this story. Deferred, defensive.
 
 ## Change Log
 

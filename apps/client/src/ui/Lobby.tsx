@@ -34,6 +34,21 @@ const TEAM_IDS: readonly TeamId[] = ['A', 'B'];
 /** Roles a facilitator may assign — the facilitator seat itself is mint-only. */
 const ASSIGNABLE_ROLES: readonly PlayerRole[] = ['defuser', 'expert', 'spectator'];
 
+/**
+ * Error codes the assignment surface owns. The lobby socket can in principle
+ * receive an ERROR from any future flow; the inline banner must only reflect
+ * TEAM_ASSIGN rejections, never an unrelated code.
+ */
+const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
+  'INVALID_PAYLOAD',
+  'NOT_IN_SESSION',
+  'NOT_FACILITATOR',
+  'PLAYER_NOT_FOUND',
+  'INVALID_ASSIGNMENT',
+  'NOT_IN_LOBBY',
+  'TEAM_ASSIGN_FAILED',
+]);
+
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
 function sortRoster(players: Record<string, PlayerInfo>): PlayerInfo[] {
   return Object.values(players).sort((a, b) => {
@@ -72,20 +87,18 @@ export default function Lobby() {
 
   // Server rejections (TEAM_ASSIGN has no ack): surface the typed ERROR's
   // human-readable message inline. Landing's listener is unmounted by now —
-  // this is the lobby's own error surface.
+  // this is the lobby's own error surface. Only assignment-class codes paint
+  // the banner; an unrelated ERROR to this socket must not show up here.
   useEffect(() => {
     const socket = getSocket();
-    const onError = (payload: ErrorPayload) => setAssignError(payload.message);
+    const onError = (payload: ErrorPayload) => {
+      if (ASSIGN_ERROR_CODES.has(payload.code)) setAssignError(payload.message);
+    };
     socket.on('ERROR', onError);
     return () => {
       socket.off('ERROR', onError);
     };
   }, []);
-
-  // A new snapshot landing means the last action succeeded — clear the error.
-  useEffect(() => {
-    setAssignError(null);
-  }, [session]);
 
   if (session === null) return null;
 
@@ -94,7 +107,12 @@ export default function Lobby() {
   const isFacilitator = selfId !== undefined && session.players[selfId]?.role === 'facilitator';
   const roster = sortRoster(session.players);
 
+  // Clear any stale rejection on the facilitator's own next action — not on
+  // room broadcasts, which fire for any participant's activity (a join would
+  // otherwise wipe an unread rejection). A failed assign re-sets it; a silent
+  // idempotent no-op leaves a clean slate either way.
   const assign = (playerId: string, teamId: TeamId, role: PlayerRole) => {
+    setAssignError(null);
     getSocket().emit('TEAM_ASSIGN', { playerId, teamId, role });
   };
 
