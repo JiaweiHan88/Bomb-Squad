@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # story 1-6 code review → done
+last_updated: 2026-06-12  # story 1-7 created → ready-for-dev
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -50,7 +50,7 @@ development_status:
   1-4-server-bootstrap-fastify-socketio-health: done
   1-5-data-store-adapters-redis-keyspace-and-postgres-pool: done
   1-6-pure-reducer-harness-and-open-closed-bomb-reducer: done
-  1-7-client-bootstrap-react-vite-zustand-typed-socket-client: backlog
+  1-7-client-bootstrap-react-vite-zustand-typed-socket-client: ready-for-dev
   1-8-docker-compose-stack-and-smoke-test: backlog
   epic-1-retrospective: optional
 
