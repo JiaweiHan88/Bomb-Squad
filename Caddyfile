@@ -1,0 +1,33 @@
+# Bomb Squad reverse proxy.
+# Local dev uses "tls internal" (Caddy generates a local CA cert).
+# Production: replace ":443" block header with your domain (e.g. "bombsquad.example.com")
+# and remove "tls internal" — Caddy will obtain a Let's Encrypt cert automatically.
+
+{
+  # Caddy admin API on 2019 (HTTP only) — used for health check probing.
+  admin :2019
+}
+
+# Redirect HTTP → HTTPS
+:80 {
+  redir https://{host}{uri} permanent
+}
+
+:443 {
+  tls internal
+
+  # ── Socket.IO — pass WebSocket upgrade headers through ──────────────────────
+  @socketio {
+    path /socket.io/*
+  }
+  reverse_proxy @socketio server:{$PORT:3001} {
+    header_up Connection {http.request.header.Connection}
+    header_up Upgrade   {http.request.header.Upgrade}
+  }
+
+  # ── Health endpoint (for external probes through TLS) ───────────────────────
+  reverse_proxy /health server:{$PORT:3001}
+
+  # ── Client SPA (everything else) ────────────────────────────────────────────
+  reverse_proxy /* client:5173
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.git
+_agent_docs
+_bmad
+*.log
+coverage

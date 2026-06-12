@@ -20,7 +20,9 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
 
 2. **Smoke test validates reachability and fails loudly.** Given the running stack, when I run `scripts/smoke-test.sh`, then it validates every service is reachable and exits non-zero if any is not.
 
-3. **Deployment docs state ports + minimum host spec.** Given the deployment docs, when I read them, then the required ports (443, 7880, 7881, 3478, 50000–60000/udp) and minimum host spec (2 vCPU / 4 GB / 100 Mbps / 10 GB) are documented.
+3. **Deployment docs state ports + minimum host spec.** Given the deployment docs, when I read them, then the required ports (443, 7880, 7881, 3478, `50000–50199/udp` for LiveKit RTP/ICE, `40000–40199/udp` for coturn TURN relay) and minimum host spec (2 vCPU / 4 GB / 100 Mbps / 10 GB) are documented.
+
+4. **LiveKit and coturn use disjoint, published UDP relay ranges.** LiveKit's RTP/ICE range (`50000–50199`) and coturn's TURN relay range (`40000–40199`) MUST NOT overlap, and coturn's relay range MUST be published to the host (without it, relay ports are unreachable behind NAT and the TURN fallback silently fails). The smoke test asserts both (relay range published + ranges disjoint).
 
 ## Tasks / Subtasks
 
@@ -43,8 +45,8 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
   - [ ] **Startup gating (AC1):** `server` must `depends_on` `redis` and `postgres` with `condition: service_healthy`. Note the app **also** self-gates — the Socket.IO `io.use` readiness middleware in `apps/server/src/index.ts` rejects handshakes with `SERVER_NOT_READY` until both stores' health probes pass, and `/health` returns 503 until then. Compose `depends_on` orders boot; the app gate is the authoritative runtime guarantee. Wire both; don't rely on `depends_on` alone (it only waits for the healthcheck, the app still must verify).
   - [ ] **Env:** services read from `.env` via compose `env_file`/`environment`. Map the existing keys from `.env.example` (`REDIS_URL`, `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TURN_SECRET`, `TURN_TTL`, `PORT`). **Inside compose the hostnames are service names, not `localhost`** — e.g. `REDIS_URL=redis://redis:6379`, `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bombsquad`, `LIVEKIT_URL=ws://livekit:7880`. The `.env.example` localhost values are for host-run dev; document this host-vs-compose distinction (see Task 4) so an operator doesn't copy localhost URLs into the container env.
   - [ ] `redis` and `postgres` get named volumes for data; expose only the ports an operator needs (see ports in AC3). Postgres needs `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` consistent with `DATABASE_URL`.
-  - [ ] `livekit` uses the official LiveKit server image with a `livekit.yaml` (or env) configured with `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (dev values `devkey`/`devsecret` from `.env.example`). Expose `7880` (HTTP/WS), `7881` (TCP), and the RTP UDP range `50000-60000`.
-  - [ ] `coturn` uses the coturn image; configure the shared-secret (`TURN_SECRET`) HMAC mechanism with TTL ≤ 86400 (`TURN_TTL`). Expose `3478`.
+  - [ ] `livekit` uses the official LiveKit server image with a `livekit.yaml` (or env) configured with `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (dev values `devkey`/`devsecret` from `.env.example`). Expose `7880` (HTTP/WS), `7881` (TCP), and the RTP/ICE UDP range `50000-50199` (must match `port_range_start`/`port_range_end` in `livekit.yaml`). **Keep this range disjoint from coturn's relay range (AC4).**
+  - [ ] `coturn` uses the coturn image; configure the shared-secret (`TURN_SECRET`) HMAC mechanism with TTL ≤ 86400 (`TURN_TTL`). Expose `3478` **and publish the TURN relay range `40000-40199/udp`** (`--min-port=40000 --max-port=40199`). Publishing the relay range is mandatory — unpublished relay ports are unreachable behind NAT and the TURN fallback silently fails (AC4). Keep the range disjoint from LiveKit's `50000-50199`.
   - [ ] `caddy` is the reverse proxy + TLS terminator; expose `443` (and `80` for redirect/ACME). Routes `/` → client static/preview, `/socket.io` + `/health` → `server`. Use a `Caddyfile` (Task 3).
 
 - [ ] **Task 3 — `Caddyfile` reverse proxy + TLS (AC: 1, 3)**
@@ -53,16 +55,17 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
 
 - [ ] **Task 4 — Deployment docs: ports + host spec (AC: 3)**
   - [ ] Create `docs/deployment.md` (the repo already has a `docs/` dir). Document, exactly:
-    - **Ports:** `443` (HTTPS), `7880` (LiveKit HTTP/WS), `7881` (LiveKit TCP), `3478` (TURN), `50000–60000/udp` (RTP).
+    - **Ports:** `443` (HTTPS), `7880` (LiveKit HTTP/WS), `7881` (LiveKit TCP), `3478` (TURN), `50000–50199/udp` (LiveKit RTP/ICE), `40000–40199/udp` (coturn TURN relay). The two UDP ranges must stay disjoint.
     - **Minimum host:** 2 vCPU, 4 GB RAM, 100 Mbps symmetric, 10 GB storage.
     - **Quick start:** `cp .env.example .env` → fill secrets → `docker compose up -d` → `bash scripts/smoke-test.sh`. State the "spin up in under 3 minutes" target.
     - **Host-vs-compose env caveat:** inside compose, service URLs use service-name hostnames (`redis`, `postgres`, `livekit`), not `localhost`.
-    - **WebRTC/NAT note:** symmetric-NAT corporate firewalls are the highest technical risk; TURN (coturn) is the relay fallback — verify the `50000–60000/udp` range and `3478` are open (architecture Deployment / GDD A4).
+    - **WebRTC/NAT note:** symmetric-NAT corporate firewalls are the highest technical risk; TURN (coturn) is the relay fallback — verify the coturn relay range `40000–40199/udp`, the LiveKit RTP range `50000–50199/udp`, and `3478` are all open (architecture Deployment / GDD A4).
   - [ ] Update root `README.md` with a short "Run the stack" pointer to `docs/deployment.md` (don't duplicate the full content).
 
 - [ ] **Task 5 — `scripts/smoke-test.sh` (AC: 2)**
   - [ ] Create `scripts/smoke-test.sh`, executable (`chmod +x`), `#!/usr/bin/env bash` + `set -euo pipefail`.
   - [ ] Check each service reachable: `server` `GET /health` returns 200 (and JSON `status: "ok"`); `redis` `PING`→`PONG`; `postgres` `pg_isready`; `livekit` `7880` reachable; `coturn` `3478` reachable; `caddy` responds; `client` served. Prefer probing **through the running compose stack** (e.g. `docker compose exec` or curling published ports) so the script reflects the real deployment, not host-local processes.
+  - [ ] **Port-range assertions (AC4):** verify the coturn TURN relay range is published (`docker compose port coturn 40000/udp` returns a mapping) and that LiveKit's RTP range is published (`docker compose port livekit 50000/udp`). Add a regression guard that coturn does **not** publish anything in LiveKit's range (`docker compose port coturn 50000/udp` must return nothing) so the two ranges can't silently re-overlap.
   - [ ] Print a per-service PASS/FAIL line; **exit non-zero if ANY check fails** (AC2). Aggregate failures (don't bail on the first) so the operator sees the full picture, then exit 1 if any failed.
   - [ ] No secrets echoed. Keep it POSIX-bash portable (it runs on an operator's host).
 
@@ -114,7 +117,7 @@ A `docker-compose.prod.yml` is mentioned in the architecture `Project Structure`
 
 ### Ports (AC3 — document EXACTLY)
 
-`443` HTTPS · `7880` LiveKit HTTP/WS · `7881` LiveKit TCP · `3478` TURN · `50000–60000/udp` RTP. Minimum host: **2 vCPU / 4 GB RAM / 100 Mbps symmetric / 10 GB storage**. (Internal `redis:6379`, `postgres:5432`, `server:${PORT}` need not be publicly exposed — only mapped as the operator needs for debugging.)
+`443` HTTPS · `7880` LiveKit HTTP/WS · `7881` LiveKit TCP · `3478` TURN · `50000–50199/udp` LiveKit RTP/ICE · `40000–40199/udp` coturn TURN relay (disjoint ranges; relay range must be published). Minimum host: **2 vCPU / 4 GB RAM / 100 Mbps symmetric / 10 GB storage**. (Internal `redis:6379`, `postgres:5432`, `server:${PORT}` need not be publicly exposed — only mapped as the operator needs for debugging.)
 
 ### Project Structure Notes
 
@@ -124,8 +127,8 @@ A `docker-compose.prod.yml` is mentioned in the architecture `Project Structure`
 ### Project Context Rules (from `_agent_docs/project-context.md`)
 
 - **Docker Compose:** services `client`, `server`, `redis`, `postgres`, `livekit`, `coturn` (+ `caddy` per architecture); **all must have health checks**; the game server waits on Redis + Postgres health before accepting connections; ship a `scripts/smoke-test.sh` that validates all services reachable before the app runs.
-- **WebRTC/Voice:** HTTPS required off-localhost (enforce via Caddy/Nginx TLS); coturn TURN creds time-limited HMAC-SHA1 TTL ≤ 86400s; LiveKit needs `7880`/`7881`/`50000–60000 udp` — document in compose + deployment README; test voice behind a simulated symmetric-NAT firewall before any team demo.
-- **Deployment:** min host 2 vCPU / 4 GB / 100 Mbps / 10 GB; ports 443, 7880, 3478, 50000–60000 udp (architecture adds 7881).
+- **WebRTC/Voice:** HTTPS required off-localhost (enforce via Caddy/Nginx TLS); coturn TURN creds time-limited HMAC-SHA1 TTL ≤ 86400s; LiveKit needs `7880`/`7881`/`50000–50199 udp` (RTP/ICE), coturn needs `3478` + `40000–40199 udp` (relay, must be published & disjoint from LiveKit) — document in compose + deployment README; test voice behind a simulated symmetric-NAT firewall before any team demo.
+- **Deployment:** min host 2 vCPU / 4 GB / 100 Mbps / 10 GB; ports 443, 7880, 3478, `50000–50199 udp` (LiveKit) + `40000–40199 udp` (coturn relay) (architecture adds 7881). NOTE: upstream `project-context.md` still lists the pre-fix shared `50000–60000` range — sync it when convenient.
 - **Build/Secrets:** never hardcode LiveKit keys / Redis URL / DB creds — always via `.env`, never committed. `tsc --noEmit` zero errors before commit.
 - **State boundaries:** Redis = in-flight state; LiveKit's own Redis usage is isolated — keep concerns separate (don't point the app's Redis logic at LiveKit's).
 

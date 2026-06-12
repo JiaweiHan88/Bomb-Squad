@@ -73,13 +73,16 @@ pnpm -r test                      # all unit + integration tests
 pnpm -r exec tsc --noEmit         # TypeScript must pass with zero errors
 ```
 
-## Deployment
+## Run the Full Stack
 
-Self-hosted via Docker Compose. Minimum server: 2 vCPU, 4 GB RAM, 100 Mbps symmetric.
+```bash
+cp .env.example .env   # fill in secrets
+docker compose up -d
+bash scripts/smoke-test.sh
+```
 
-Required ports: `443` (HTTPS), `7880–7881` (LiveKit), `3478` (TURN), `50000–60000/udp` (RTP).
-
-See `docker-compose.prod.yml` and `Caddyfile` for production configuration.
+See **[docs/deployment.md](docs/deployment.md)** for required ports, minimum host spec,
+host-vs-compose environment variable caveat, and production TLS configuration.
 
 ## Purpose
 

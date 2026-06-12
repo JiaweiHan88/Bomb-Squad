@@ -1,0 +1,167 @@
+services:
+  # ── Data stores ─────────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bombsquad
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── Voice infrastructure ─────────────────────────────────────────────────────
+
+  livekit:
+    image: livekit/livekit-server:v1.8
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # Keys are set here rather than in livekit.yaml so secrets stay in .env
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-devsecret}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      # LiveKit RTP/ICE media. Distinct from coturn's relay range (40000-40199)
+      # so the two services never collide on a host UDP port. Narrowed from the
+      # old 10k block to avoid Docker spawning a userland-proxy per port; 200
+      # ports comfortably cover a 16-player, 2-room SFU (LiveKit muxes media).
+      # Must match port_range_start/end in livekit.yaml.
+      - "50000-50199:50000-50199/udp"
+    healthcheck:
+      # LiveKit HTTP server on 7880 responds to GET / with a version/status page.
+      # Use wget from BusyBox (Alpine-based image); exit codes: 0=ok, 4=conn fail.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7880/ 2>/dev/null && exit 0 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    # Pass TURN_SECRET from .env as a CLI arg so it's never baked into an image.
+    # Compose substitutes ${VAR} from .env before sending to the container.
+    command: >
+      -n
+      --log-file stdout
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:-changeme}
+      --realm=bombsquad.local
+      --total-quota=100
+      --min-port=40000
+      --max-port=40199
+      --fingerprint
+      --no-tlsv1
+      --no-tlsv1_1
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      # Publish the TURN relay range — without this, allocated relay ports are
+      # unreachable from external clients and the TURN fallback path is dead.
+      # Disjoint from LiveKit's RTP range (50000-50199) to avoid a host collision.
+      - "40000-40199:40000-40199/udp"
+    healthcheck:
+      # Debian-based coturn image has bash; /dev/tcp probe opens a TCP socket.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/3478' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Application ──────────────────────────────────────────────────────────────
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override .env localhost URLs with compose service-name hostnames.
+      # The .env localhost values are for host-run dev only; inside the compose
+      # network each service is reachable by its service name.
+      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/bombsquad"
+      LIVEKIT_URL: "ws://livekit:7880"
+    ports:
+      # Publish server port to host for smoke-test health probing and debugging.
+      # Production may remove this and route everything through Caddy (port 443).
+      - "${PORT:-3001}:${PORT:-3001}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # /health returns 200 {"status":"ok"} when both Redis and Postgres probes pass.
+      # The app's io.use readiness gate also blocks Socket.IO until stores are healthy.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-3001}/health 2>/dev/null | grep -q '\"ok\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  client:
+    build:
+      context: .
+      dockerfile: apps/client/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173/ 2>/dev/null | head -1 | grep -qiE 'html|<!DOCTYPE' || wget -q --spider http://localhost:5173/ 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Reverse proxy + TLS ───────────────────────────────────────────────────────
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - server
+      - client
+    healthcheck:
+      # Caddy admin API at :2019 (HTTP, no TLS) confirms the server is running.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/ 2>/dev/null | grep -qi caddy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  redis-data:
+  postgres-data:
+  caddy-data:
+  caddy-config:
