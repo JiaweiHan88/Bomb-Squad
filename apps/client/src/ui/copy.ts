@@ -6,3 +6,5 @@
 export const CONNECTING = 'Connecting…';
 export const GATE_RESIZE = 'Resize your window — Bomb Squad needs more room';
 export const GATE_MOBILE = 'Bomb Squad is a desktop experience';
+export const CONFIRM = 'Confirm';
+export const CANCEL = 'Cancel';

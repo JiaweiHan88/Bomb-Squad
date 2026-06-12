@@ -4,7 +4,7 @@ baseline_commit: cf924f6
 
 # Story 2.1: Design Tokens, UI Shell & State Patterns
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -73,6 +73,25 @@ so that I always know the system's state, the UI is visually coherent, and I onl
   - [x] Add `apps/client/src/ui/__tests__/platform.test.ts` covering `evaluateGate`: `'ok'` at exactly 1280×720 and above; `'too-small'` at 1279×720 and 1280×719; `'mobile'` for a sample iPhone/Android UA **even at a large viewport** (mobile priority); desktop UA at small viewport → `'too-small'`. Test `isViewportTooSmall` boundary (1280/720 inclusive ⇒ not too small).
   - [x] **Gate (the contract this story is judged on):** `pnpm -r exec tsc --noEmit` from repo root → 0 errors across all workspaces (no `// @ts-ignore`). `pnpm --filter @bomb-squad/client build` (`tsc && vite build`) → succeeds, Tailwind CSS emitted. `pnpm --filter @bomb-squad/client test` → green.
   - [x] **Manual smoke (document in Completion Notes):** run `pnpm --filter @bomb-squad/client dev`. Confirm: (a) at a normal desktop window the operator shell renders with the design fonts/colors; (b) shrinking the window below 1280×720 shows the resize gate; (c) emulating a mobile UA (devtools device toolbar) shows the bounce screen; (d) with the server **not** running, the loading screen sits on "Connecting…" rather than a blank/silent screen; with the server running it advances to the shell. If the server can't run in this environment, verify (a)–(d) except the connected state.
+
+### Review Findings
+
+<!-- Code review 2026-06-12 (commit 8355fda) — layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor -->
+
+- [x] [Review][Defer] iPad desktop-UA bypasses the mobile bounce — iPadOS 13+ Safari reports a `Macintosh` UA with no `Mobi` token, so `isMobileUA` in `apps/client/src/ui/platform.ts` never matches — deferred (decision 2026-06-12): accepted gap; an iPad Pro at 1366×1024 passes the viewport gate anyway and may be usable; revisit if iPad reports surface (blind+edge+auditor)
+- [x] [Review][Patch] PlatformGate unmounts the entire app subtree on a transient resize — keep children mounted and render the gate as a covering overlay instead, so dipping below 1280×720 (window snap, dock/undock) preserves mounted UI state for Stories 2.2–2.6 [apps/client/src/ui/PlatformGate.tsx] (edge; decision 2026-06-12: overlay)
+- [x] [Review][Decision→Resolved] Task 7 "Manual smoke" subtask was checked `[x]` but not executed at dev time — resolved 2026-06-12: Jay ran the documented (a)–(d) visual pass on the post-review-patch build and confirmed it; Completion Notes updated. (auditor)
+- [x] [Review][Patch] ConfirmButton destructive-fire hazards: the armed Confirm button renders in the exact position of the resting button, so a double-click fires the irreversible action; rapid clicks on Confirm can also invoke `onConfirm` twice — guard with a fired-once check and offset/restructure the armed layout [apps/client/src/ui/ConfirmButton.tsx] (blind+edge)
+- [x] [Review][Patch] ConfirmButton armed state never disarms — no blur, Escape, or timeout handling, so a stray later click triggers the destructive action [apps/client/src/ui/ConfirmButton.tsx] (edge)
+- [x] [Review][Patch] ConfirmButton keyboard focus drops to `<body>` when the resting button unmounts on arm — move focus to Confirm on arm and restore on cancel [apps/client/src/ui/ConfirmButton.tsx] (edge)
+- [x] [Review][Patch] `--radius-none: 0` omitted from the `@theme` block — tokens.css/DESIGN.md define it as part of the radius scale; AC1 requires a complete 1:1 mapping [apps/client/src/index.css] (auditor)
+- [x] [Review][Patch] Button transition timing deviates from the `.btn` reference it claims to match 1:1 — tokens.css specifies `transform .04s / background .15s / box-shadow .12s`; implementation uses a uniform `duration-100`, weakening the documented reduced-motion rationale (~40ms snap) [apps/client/src/ui/Button.tsx:11-12] (auditor)
+- [x] [Review][Patch] Press distance and paddings are rem-derived, not the literal px values Task 3 specifies — `active:translate-y-0.5`, `px-5 py-3`, `py-2.5` equal 2px/20px/12px/10px only at a 16px root font size; tokens.css specifies fixed `translateY(2px)` and `12px 20px` / `10px 18px` [apps/client/src/ui/Button.tsx:23-28] (auditor)
+- [x] [Review][Patch] Confirm-step microcopy (`'Confirm'`, `'Cancel'` defaults) hardcoded in the component instead of centralized in `copy.ts`, against Task 6 and the ui/README's own rule [apps/client/src/ui/ConfirmButton.tsx] (auditor)
+- [x] [Review][Defer] Disconnected/failed connection shows "Connecting…" indefinitely with no failure or retry affordance [apps/client/src/App.tsx] — deferred: matches this story's spec (loading screen covers both `disconnected` and `connecting`; socket.io auto-reconnects); dedicated error-state UX belongs to a later story (blind+edge)
+- [x] [Review][Defer] Fonts load via render-blocking third-party CDN `@import`s (Google Fonts + jsDelivr) — offline/firewalled users get fallbacks; GDPR exposure — deferred: spec-mandated mirror of tokens.css for now; self-host before production [apps/client/src/index.css:1-2] (blind+edge)
+- [x] [Review][Defer] `aria-live="polite"` on a freshly mounted LoadingScreen may never announce — live regions announce changes, not initial content [apps/client/src/ui/LoadingScreen.tsx] — deferred: minor a11y polish, no unambiguous fix at this layer (blind)
+- [x] [Review][Defer] No component tests for ConfirmButton's state machine or PlatformGate precedence — deferred: test scope matches Task 7 (pure logic only; components are visual-regression-only per project testing rules); revisit when component-test infra lands (blind)
 
 ## Dev Notes
 
@@ -222,7 +241,8 @@ claude-opus-4-8
 - **Task 6 — Microcopy & guardrails:** `copy.ts` centralizes the deadpan strings (`CONNECTING`, `GATE_RESIZE`, `GATE_MOBILE`). `ui/README.md` restates the semantic color reservations, the no-fourth-surface rule, and the presentation-state-stays-out-of-Zustand rule.
 - **Task 7 — Tests + gates:** Introduced Vitest (`test` → `vitest run`, added `test:watch`). `__tests__/platform.test.ts` covers the gate decision matrix (boundary inclusivity, mobile priority at large viewport, too-small desktop). Typecheck + build + full regression all green.
 - **Scope held:** No bomb-world/diegetic components built (timer/LED/panel/toast deferred to their consuming epics); their tokens are defined but unconsumed, as specified.
-- **Manual smoke:** Not executed in this environment (no browser/live server here). Build produces a working bundle with the design fonts/colors compiled in; gate logic is unit-verified. App branches to "Connecting…" while `connection !== 'connected'`, so with no server it sits on the loading screen rather than a blank/silent page. Recommend a quick visual pass via `pnpm --filter @bomb-squad/client dev` (resize < 1280×720 → resize gate; mobile UA emulation → bounce screen) before merge.
+- **Manual smoke:** Not executed at dev time (no browser/live server in that environment). Executed by Jay on 2026-06-12 against the post-code-review build: (a) operator shell renders with design fonts/colors, (b) resize below 1280×720 shows the resize gate, (c) mobile UA emulation shows the bounce screen, (d) with the server down the loading screen sits on "Connecting…". All four confirmed.
+- **Code review (2026-06-12, commit 8355fda):** 3-layer adversarial review; 8 patches applied (see Review Findings) — ConfirmButton hardening (single-fire, Escape/blur disarm, focus management, Cancel in the resting position), PlatformGate overlay (children stay mounted while gated), Button literal-px paddings/press + tokens.css transition timings, `--radius-none`, `CONFIRM`/`CANCEL` centralized in `copy.ts`. Post-patch gate: typecheck 0 errors, build green, client tests 6/6.
 
 ### File List
 

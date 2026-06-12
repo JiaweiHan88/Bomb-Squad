@@ -16,11 +16,19 @@ function GateScreen({ message }: { message: string }) {
  * Outermost UI boundary (AC4, AC5). Wins before any connecting/loading UI:
  * a mobile or too-small user sees the gate even while the socket is connecting.
  * Precedence top-to-bottom: platform gate -> loading screen -> app shell.
+ *
+ * The gate is a full-bleed overlay — children stay MOUNTED (but hidden) while
+ * gated, so a transient dip below 1280×720 (window snap, dock/undock) does not
+ * destroy in-progress UI state.
  */
 export default function PlatformGate({ children }: { children: ReactNode }) {
   const gate = useViewportGate();
 
-  if (gate === 'mobile') return <GateScreen message={GATE_MOBILE} />;
-  if (gate === 'too-small') return <GateScreen message={GATE_RESIZE} />;
-  return <>{children}</>;
+  return (
+    <>
+      {gate === 'mobile' && <GateScreen message={GATE_MOBILE} />}
+      {gate === 'too-small' && <GateScreen message={GATE_RESIZE} />}
+      <div hidden={gate !== 'ok'}>{children}</div>
+    </>
+  );
 }
