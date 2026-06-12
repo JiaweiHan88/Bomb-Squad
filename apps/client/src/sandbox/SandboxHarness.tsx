@@ -156,7 +156,8 @@ export default function SandboxHarness() {
         ) : null}
 
         <p className="mt-auto text-xs text-zinc-500">
-          Local reducer backend — production dispatch (MODULE_INTERACT) lands in 5.3/Epic 8.
+          Local reducer backend — production dispatch (MODULE_INTERACT) lands in Epic 8
+          (resolved in 5.3: no server bomb lifecycle exists yet).
           Same seed regenerates the identical instance.
         </p>
       </aside>
