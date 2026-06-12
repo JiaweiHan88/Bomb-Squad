@@ -4,6 +4,8 @@ import { bindServerEvents } from './net/bindServerEvents.js';
 import { useGameStore } from './store/gameStore.js';
 import { AppShell, LoadingScreen, PlatformGate } from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
+import BombStage from './scenes/BombStage.js';
+import BombScene from './scenes/BombScene.js';
 
 // Production builds are served through Caddy, which proxies /socket.io/* to
 // the game server — same-origin works on any domain without baking a URL into
@@ -30,10 +32,22 @@ export default function App() {
     };
   }, []);
 
+  // Dev harness for the bomb scene (Story 4.1) — no router exists yet; the
+  // real round flow mounts the scene from session state in later stories.
+  // Known gap: `vite preview` has no SPA fallback, so this 404s in the prod
+  // container (deferred-work.md) — acceptable for a dev-mode harness.
+  const isBombDevRoute =
+    window.location.pathname === '/dev/bomb' &&
+    (import.meta.env.DEV || connection === 'connected');
+
   // Precedence: platform gate → loading screen → app shell.
   return (
     <PlatformGate>
-      {connection !== 'connected' ? (
+      {isBombDevRoute ? (
+        <BombStage>
+          <BombScene />
+        </BombStage>
+      ) : connection !== 'connected' ? (
         <LoadingScreen status={CONNECTING} />
       ) : (
         <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>

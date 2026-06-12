@@ -47,3 +47,7 @@
 - `aria-live="polite"` on a freshly mounted LoadingScreen may never announce its status to screen readers — live regions announce changes, not initial content (`apps/client/src/ui/LoadingScreen.tsx`). Minor a11y polish; revisit with the accessibility-floor pass.
 - No component tests for ConfirmButton's two-step state machine or PlatformGate precedence — story 2.1 test scope was pure logic only per project testing rules; revisit when component-test / visual-regression infra (Playwright) lands.
 - iPad desktop-UA bypasses the mobile bounce (`apps/client/src/ui/platform.ts`) — iPadOS 13+ Safari reports a `Macintosh` UA, so `isMobileUA` never matches. Accepted gap (decision 2026-06-12): an iPad Pro at 1366×1024 passes the viewport gate and may be usable; revisit with `maxTouchPoints` heuristic if iPad reports surface.
+
+## Deferred from: code review of 4-1-3d-bomb-scene-and-camera-rig (2026-06-12)
+
+- **Bomb-scene focus state not auto-cleared on remount or module-count shrink** (`apps/client/src/scenes/BombScene.tsx` CameraRig) — `uiStore.activeModuleIndex` persists across a `BombScene` remount and is not validated against the current slot count. A stale index leaves the camera framed on a now-absent module (`slots.find` returns undefined → effect no-ops; ESC recovers). Harmless in 4.1 (no remount path, store defaults to null), but the round-lifecycle stories (4.6/4.7) that mount the scene from session state must clear/validate focus on round transitions.

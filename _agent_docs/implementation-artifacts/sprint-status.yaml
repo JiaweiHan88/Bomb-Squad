@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # story 2-1 → done (code review + patches + manual smoke confirmed)
+last_updated: 2026-06-12  # story 4-1 → done (code review passed; layout-overlap patch applied)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -75,8 +75,8 @@ development_status:
   epic-3-retrospective: optional
 
   # ---- Epic 4: Bomb Renderer & HUD ----
-  epic-4: backlog
-  4-1-3d-bomb-scene-and-camera-rig: backlog
+  epic-4: in-progress
+  4-1-3d-bomb-scene-and-camera-rig: done
   4-2-chassis-and-bomb-metadata-rendering: backlog
   4-3-module-slots-and-solve-leds: backlog
   4-4-diegetic-timer-lcd-with-client-extrapolation: backlog
