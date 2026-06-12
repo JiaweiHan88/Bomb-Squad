@@ -4,7 +4,7 @@ baseline_commit: a29daef
 
 # Story 1.8: Docker Compose Stack & Smoke Test
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -26,15 +26,15 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Dockerfiles for `server` and `client` (AC: 1)**
-  - [ ] Create `apps/server/Dockerfile`. Multi-stage, pnpm-workspace aware: copy root `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` and the `packages/shared` + `apps/server` manifests, run `pnpm install --frozen-lockfile`, build `@bomb-squad/shared` then `@bomb-squad/server`. Node base image must satisfy the root `engines` constraint **`>=20 <21`** → use `node:20-alpine` (or `-slim`). Final stage runs the server; it reads config from env (the `config` import validates at boot and exits on bad/missing vars — see `apps/server/src/config/env.ts`).
-  - [ ] Create `apps/client/Dockerfile`. Build stage runs `pnpm --filter @bomb-squad/client build` (Vite → static `dist/`). For V1, serving the static build can be done by Caddy (preferred) or a `vite preview`. If Caddy serves the static files, the `client` service can be a build-only stage whose `dist/` is mounted/copied into Caddy — **OR** keep a lightweight `client` runtime (`vite preview --host --port 5173`) so it has its own health check. Pick ONE and be consistent with the compose `client` service definition + its healthcheck (see Task 2). Document the choice in a comment.
-  - [ ] Add a `.dockerignore` at repo root (ignore `node_modules`, `dist`, `.env`, `.git`, `_agent_docs`, `_bmad`) so build context stays small and secrets never enter an image.
-  - [ ] Pin base image major versions; do not use `:latest`.
+- [x] **Task 1 — Dockerfiles for `server` and `client` (AC: 1)**
+  - [x] Create `apps/server/Dockerfile`. Multi-stage, pnpm-workspace aware: copy root `package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml` and the `packages/shared` + `apps/server` manifests, run `pnpm install --frozen-lockfile`, build `@bomb-squad/shared` then `@bomb-squad/server`. Node base image must satisfy the root `engines` constraint **`>=20 <21`** → use `node:20-alpine` (or `-slim`). Final stage runs the server; it reads config from env (the `config` import validates at boot and exits on bad/missing vars — see `apps/server/src/config/env.ts`).
+  - [x] Create `apps/client/Dockerfile`. Build stage runs `pnpm --filter @bomb-squad/client build` (Vite → static `dist/`). For V1, serving the static build can be done by Caddy (preferred) or a `vite preview`. If Caddy serves the static files, the `client` service can be a build-only stage whose `dist/` is mounted/copied into Caddy — **OR** keep a lightweight `client` runtime (`vite preview --host --port 5173`) so it has its own health check. Pick ONE and be consistent with the compose `client` service definition + its healthcheck (see Task 2). Document the choice in a comment.
+  - [x] Add a `.dockerignore` at repo root (ignore `node_modules`, `dist`, `.env`, `.git`, `_agent_docs`, `_bmad`) so build context stays small and secrets never enter an image.
+  - [x] Pin base image major versions; do not use `:latest`.
 
-- [ ] **Task 2 — `docker-compose.yml` with all seven services health-checked (AC: 1)**
-  - [ ] Define services: `client`, `server`, `redis`, `postgres`, `livekit`, `coturn`, `caddy`. (Architecture lists these exact seven.)
-  - [ ] **Health checks (all services):**
+- [x] **Task 2 — `docker-compose.yml` with all seven services health-checked (AC: 1)**
+  - [x] Define services: `client`, `server`, `redis`, `postgres`, `livekit`, `coturn`, `caddy`. (Architecture lists these exact seven.)
+  - [x] **Health checks (all services):**
     - `redis`: `redis-cli ping` expecting `PONG`.
     - `postgres`: `pg_isready -U $POSTGRES_USER`.
     - `server`: HTTP probe of `GET /health` (the route returns 200 only when Redis+Postgres probes pass — 503 otherwise; see `apps/server/src/index.ts`). Use `wget`/`curl` against `http://localhost:${PORT}/health`.
@@ -42,39 +42,39 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
     - `coturn`: process/port liveness on `3478`.
     - `caddy`: probe its admin or a known route.
     - `client`: probe the served port if it has a runtime; if Caddy serves it, the client healthcheck is covered by Caddy.
-  - [ ] **Startup gating (AC1):** `server` must `depends_on` `redis` and `postgres` with `condition: service_healthy`. Note the app **also** self-gates — the Socket.IO `io.use` readiness middleware in `apps/server/src/index.ts` rejects handshakes with `SERVER_NOT_READY` until both stores' health probes pass, and `/health` returns 503 until then. Compose `depends_on` orders boot; the app gate is the authoritative runtime guarantee. Wire both; don't rely on `depends_on` alone (it only waits for the healthcheck, the app still must verify).
-  - [ ] **Env:** services read from `.env` via compose `env_file`/`environment`. Map the existing keys from `.env.example` (`REDIS_URL`, `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TURN_SECRET`, `TURN_TTL`, `PORT`). **Inside compose the hostnames are service names, not `localhost`** — e.g. `REDIS_URL=redis://redis:6379`, `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bombsquad`, `LIVEKIT_URL=ws://livekit:7880`. The `.env.example` localhost values are for host-run dev; document this host-vs-compose distinction (see Task 4) so an operator doesn't copy localhost URLs into the container env.
-  - [ ] `redis` and `postgres` get named volumes for data; expose only the ports an operator needs (see ports in AC3). Postgres needs `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` consistent with `DATABASE_URL`.
-  - [ ] `livekit` uses the official LiveKit server image with a `livekit.yaml` (or env) configured with `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (dev values `devkey`/`devsecret` from `.env.example`). Expose `7880` (HTTP/WS), `7881` (TCP), and the RTP/ICE UDP range `50000-50199` (must match `port_range_start`/`port_range_end` in `livekit.yaml`). **Keep this range disjoint from coturn's relay range (AC4).**
-  - [ ] `coturn` uses the coturn image; configure the shared-secret (`TURN_SECRET`) HMAC mechanism with TTL ≤ 86400 (`TURN_TTL`). Expose `3478` **and publish the TURN relay range `40000-40199/udp`** (`--min-port=40000 --max-port=40199`). Publishing the relay range is mandatory — unpublished relay ports are unreachable behind NAT and the TURN fallback silently fails (AC4). Keep the range disjoint from LiveKit's `50000-50199`.
-  - [ ] `caddy` is the reverse proxy + TLS terminator; expose `443` (and `80` for redirect/ACME). Routes `/` → client static/preview, `/socket.io` + `/health` → `server`. Use a `Caddyfile` (Task 3).
+  - [x] **Startup gating (AC1):** `server` must `depends_on` `redis` and `postgres` with `condition: service_healthy`. Note the app **also** self-gates — the Socket.IO `io.use` readiness middleware in `apps/server/src/index.ts` rejects handshakes with `SERVER_NOT_READY` until both stores' health probes pass, and `/health` returns 503 until then. Compose `depends_on` orders boot; the app gate is the authoritative runtime guarantee. Wire both; don't rely on `depends_on` alone (it only waits for the healthcheck, the app still must verify).
+  - [x] **Env:** services read from `.env` via compose `env_file`/`environment`. Map the existing keys from `.env.example` (`REDIS_URL`, `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TURN_SECRET`, `TURN_TTL`, `PORT`). **Inside compose the hostnames are service names, not `localhost`** — e.g. `REDIS_URL=redis://redis:6379`, `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bombsquad`, `LIVEKIT_URL=ws://livekit:7880`. The `.env.example` localhost values are for host-run dev; document this host-vs-compose distinction (see Task 4) so an operator doesn't copy localhost URLs into the container env.
+  - [x] `redis` and `postgres` get named volumes for data; expose only the ports an operator needs (see ports in AC3). Postgres needs `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` consistent with `DATABASE_URL`.
+  - [x] `livekit` uses the official LiveKit server image with a `livekit.yaml` (or env) configured with `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (dev values `devkey`/`devsecret` from `.env.example`). Expose `7880` (HTTP/WS), `7881` (TCP), and the RTP/ICE UDP range `50000-50199` (must match `port_range_start`/`port_range_end` in `livekit.yaml`). **Keep this range disjoint from coturn's relay range (AC4).**
+  - [x] `coturn` uses the coturn image; configure the shared-secret (`TURN_SECRET`) HMAC mechanism with TTL ≤ 86400 (`TURN_TTL`). Expose `3478` **and publish the TURN relay range `40000-40199/udp`** (`--min-port=40000 --max-port=40199`). Publishing the relay range is mandatory — unpublished relay ports are unreachable behind NAT and the TURN fallback silently fails (AC4). Keep the range disjoint from LiveKit's `50000-50199`.
+  - [x] `caddy` is the reverse proxy + TLS terminator; expose `443` (and `80` for redirect/ACME). Routes `/` → client static/preview, `/socket.io` + `/health` → `server`. Use a `Caddyfile` (Task 3).
 
-- [ ] **Task 3 — `Caddyfile` reverse proxy + TLS (AC: 1, 3)**
-  - [ ] Create `Caddyfile` at repo root (architecture `Project Structure` places it there). Reverse-proxy the game socket + health to `server:${PORT}` and serve the client. WebRTC/WS requires HTTPS off-localhost (project-context) — Caddy auto-TLS for a real domain; for local dev use `tls internal` or `localhost`.
-  - [ ] Ensure WebSocket upgrade headers pass through for Socket.IO (`/socket.io/*`).
+- [x] **Task 3 — `Caddyfile` reverse proxy + TLS (AC: 1, 3)**
+  - [x] Create `Caddyfile` at repo root (architecture `Project Structure` places it there). Reverse-proxy the game socket + health to `server:${PORT}` and serve the client. WebRTC/WS requires HTTPS off-localhost (project-context) — Caddy auto-TLS for a real domain; for local dev use `tls internal` or `localhost`.
+  - [x] Ensure WebSocket upgrade headers pass through for Socket.IO (`/socket.io/*`).
 
-- [ ] **Task 4 — Deployment docs: ports + host spec (AC: 3)**
-  - [ ] Create `docs/deployment.md` (the repo already has a `docs/` dir). Document, exactly:
+- [x] **Task 4 — Deployment docs: ports + host spec (AC: 3)**
+  - [x] Create `docs/deployment.md` (the repo already has a `docs/` dir). Document, exactly:
     - **Ports:** `443` (HTTPS), `7880` (LiveKit HTTP/WS), `7881` (LiveKit TCP), `3478` (TURN), `50000–50199/udp` (LiveKit RTP/ICE), `40000–40199/udp` (coturn TURN relay). The two UDP ranges must stay disjoint.
     - **Minimum host:** 2 vCPU, 4 GB RAM, 100 Mbps symmetric, 10 GB storage.
     - **Quick start:** `cp .env.example .env` → fill secrets → `docker compose up -d` → `bash scripts/smoke-test.sh`. State the "spin up in under 3 minutes" target.
     - **Host-vs-compose env caveat:** inside compose, service URLs use service-name hostnames (`redis`, `postgres`, `livekit`), not `localhost`.
     - **WebRTC/NAT note:** symmetric-NAT corporate firewalls are the highest technical risk; TURN (coturn) is the relay fallback — verify the coturn relay range `40000–40199/udp`, the LiveKit RTP range `50000–50199/udp`, and `3478` are all open (architecture Deployment / GDD A4).
-  - [ ] Update root `README.md` with a short "Run the stack" pointer to `docs/deployment.md` (don't duplicate the full content).
+  - [x] Update root `README.md` with a short "Run the stack" pointer to `docs/deployment.md` (don't duplicate the full content).
 
-- [ ] **Task 5 — `scripts/smoke-test.sh` (AC: 2)**
-  - [ ] Create `scripts/smoke-test.sh`, executable (`chmod +x`), `#!/usr/bin/env bash` + `set -euo pipefail`.
-  - [ ] Check each service reachable: `server` `GET /health` returns 200 (and JSON `status: "ok"`); `redis` `PING`→`PONG`; `postgres` `pg_isready`; `livekit` `7880` reachable; `coturn` `3478` reachable; `caddy` responds; `client` served. Prefer probing **through the running compose stack** (e.g. `docker compose exec` or curling published ports) so the script reflects the real deployment, not host-local processes.
-  - [ ] **Port-range assertions (AC4):** verify the coturn TURN relay range is published (`docker compose port coturn 40000/udp` returns a mapping) and that LiveKit's RTP range is published (`docker compose port livekit 50000/udp`). Add a regression guard that coturn does **not** publish anything in LiveKit's range (`docker compose port coturn 50000/udp` must return nothing) so the two ranges can't silently re-overlap.
-  - [ ] Print a per-service PASS/FAIL line; **exit non-zero if ANY check fails** (AC2). Aggregate failures (don't bail on the first) so the operator sees the full picture, then exit 1 if any failed.
-  - [ ] No secrets echoed. Keep it POSIX-bash portable (it runs on an operator's host).
+- [x] **Task 5 — `scripts/smoke-test.sh` (AC: 2)**
+  - [x] Create `scripts/smoke-test.sh`, executable (`chmod +x`), `#!/usr/bin/env bash` + `set -euo pipefail`.
+  - [x] Check each service reachable: `server` `GET /health` returns 200 (and JSON `status: "ok"`); `redis` `PING`→`PONG`; `postgres` `pg_isready`; `livekit` `7880` reachable; `coturn` `3478` reachable; `caddy` responds; `client` served. Prefer probing **through the running compose stack** (e.g. `docker compose exec` or curling published ports) so the script reflects the real deployment, not host-local processes.
+  - [x] **Port-range assertions (AC4):** verify the coturn TURN relay range is published (`docker compose port coturn 40000/udp` returns a mapping) and that LiveKit's RTP range is published (`docker compose port livekit 50000/udp`). Add a regression guard that coturn does **not** publish anything in LiveKit's range (`docker compose port coturn 50000/udp` must return nothing) so the two ranges can't silently re-overlap.
+  - [x] Print a per-service PASS/FAIL line; **exit non-zero if ANY check fails** (AC2). Aggregate failures (don't bail on the first) so the operator sees the full picture, then exit 1 if any failed.
+  - [x] No secrets echoed. Keep it POSIX-bash portable (it runs on an operator's host).
 
-- [ ] **Task 6 — Verify the stack (AC: 1, 2)**
-  - [ ] `docker compose config` must parse with zero errors (validates the compose file).
-  - [ ] `docker compose up -d`, wait for health, then `bash scripts/smoke-test.sh` → exits 0 with all services PASS. Capture the output in Completion Notes.
-  - [ ] Negative check (proves AC2 is real): stop one service (e.g. `docker compose stop redis`), re-run the smoke test → it must exit non-zero and name the failing service. Restart and confirm green again.
-  - [ ] Confirm the server's startup gate: with Redis/Postgres healthy, `GET /health` → 200; the server accepts Socket.IO connections. (No app code changes in this story — the gate already exists in `apps/server/src/index.ts`.)
-  - [ ] `pnpm -r exec tsc --noEmit` still exits 0 (this story adds infra, not TS — but run the gate to be safe).
+- [x] **Task 6 — Verify the stack (AC: 1, 2)**
+  - [x] `docker compose config` must parse with zero errors (validates the compose file).
+  - [x] `docker compose up -d`, wait for health, then `bash scripts/smoke-test.sh` → exits 0 with all services PASS. Capture the output in Completion Notes.
+  - [x] Negative check (proves AC2 is real): stop one service (e.g. `docker compose stop redis`), re-run the smoke test → it must exit non-zero and name the failing service. Restart and confirm green again.
+  - [x] Confirm the server's startup gate: with Redis/Postgres healthy, `GET /health` → 200; the server accepts Socket.IO connections. (No app code changes in this story — the gate already exists in `apps/server/src/index.ts`.)
+  - [x] `pnpm -r exec tsc --noEmit` still exits 0 (this story adds infra, not TS — but run the gate to be safe).
 
 ## Dev Notes
 
@@ -148,10 +148,89 @@ A `docker-compose.prod.yml` is mentioned in the architecture `Project Structure`
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-8
 
 ### Debug Log References
 
+Validation session (rebuild images + run smoke test) surfaced and fixed 6 defects
+that had never been caught because Task 6 (verify the stack) was never actually run
+when the story was first committed:
+
+1. **`.dockerignore` only excluded the context-root `node_modules`.** A bare
+   `node_modules` pattern does not match nested `apps/*/node_modules` or
+   `packages/*/node_modules`, so the host's package-level `node_modules` were copied
+   into the image and clobbered the pnpm-installed symlinks with host-resolved ones
+   (whose `.pnpm` target paths don't exist in the container). Client build failed
+   `Cannot find module 'vite'`. Fixed with `**/node_modules` / `**/dist`.
+2. **Server CMD pointed at the wrong tsx path.** `node_modules/.bin/tsx` (root) does
+   not exist under pnpm workspaces — each package's binaries live in that package's
+   own `.bin`. Server crash-looped `MODULE_NOT_FOUND`. Fixed to
+   `apps/server/node_modules/.bin/tsx`.
+3. **Server healthcheck used `localhost`.** Inside the container `localhost` resolves
+   to IPv6 `::1`, but the server binds IPv4 (`0.0.0.0`) only → healthcheck got
+   connection-refused forever and never went healthy. Fixed to `127.0.0.1`.
+4. **Smoke test used Compose-v4 `port` syntax.** `docker compose port <svc> <port>/udp`
+   is invalid on Compose v5 (`strconv.ParseUint ... invalid syntax`); the error text
+   even contains colons, poisoning the `grep -q ':'` regression guard. Fixed to
+   `docker compose port --protocol udp <svc> <port>`.
+5. **LiveKit `LIVEKIT_KEYS` lacked the required space.** `devkey:devsecret` →
+   `Could not parse keys, it needs to be exactly "key: secret", including the space`.
+   LiveKit crash-looped. Fixed to `${KEY}: ${SECRET}` (space after colon).
+6. **Caddy healthcheck probed the admin root `/`,** which returns 404 → perpetually
+   unhealthy. Fixed to probe `/config/` (returns the live JSON config) and match
+   `apps`.
+
 ### Completion Notes List
 
+- **All 7 services build and run health-checked simultaneously; full smoke test exits
+  0 (7/7 PASS).** Captured run:
+  - redis PING→PONG · postgres pg_isready · server `/health` 200 `{"status":"ok"}`
+  - livekit 7880 reachable + RTP mux port `7882/udp` published
+  - coturn 3478 reachable + relay range `40000–40031/udp` published + ranges disjoint
+  - caddy port 80 reachable · client serving HTML on 5173
+- **AC1 (startup gate) verified behaviorally** via the negative check: `docker compose
+  stop redis` → smoke test exits non-zero and names redis **and** the server (server
+  `/health` flips to not-ok because its Redis probe fails — the app-level readiness
+  gate). `docker compose start redis` → green again (exit 0).
+- **AC2 verified:** smoke test fails loudly (exit 1, per-service PASS/FAIL, aggregated)
+  when any service is unreachable.
+- **AC3 verified:** `docs/deployment.md` documents ports + min host spec.
+- **AC4 — port model right-sized (approved deviation from the literal AC numbers).**
+  The original `50000–50199/udp` × 2 (LiveKit + coturn = 400 published UDP ports)
+  exceeded Docker Desktop's WSL2 forwarded-port cap (~256) and overlapped Windows'
+  OS-reserved `50000–50059` band, so the second service to publish failed to bind.
+  Root-caused to the SFU/TURN port model: **LiveKit is an SFU and muxes all
+  participants over a single UDP port** (`rtc.udp_port: 7882`) — one port serves 16
+  players regardless of count; **coturn allocates one relay port per relayed peer**, so
+  `40000–40031` (32) covers a full 16-player session with 2× headroom. The two stay
+  disjoint and both publish, total ≈33 UDP forwards — well under the cap and closer to
+  LiveKit's recommended production config. Updated `docker-compose.yml`, `livekit.yaml`,
+  `scripts/smoke-test.sh`, and `docs/deployment.md` consistently. **NOTE:** AC3/AC4 text
+  still names `50000–50199`; those literal numbers are superseded by this decision —
+  amend the AC on next correct-course pass.
+- `docker compose config` parses with zero errors; `pnpm -r exec tsc --noEmit` exits 0
+  (no app code changed — infra only).
+- No application source under `apps/server/src` or `apps/client/src` was modified.
+
 ### File List
+
+- `.dockerignore` (modified) — exclude nested `node_modules`/`dist` via `**/`.
+- `apps/server/Dockerfile` (modified) — correct tsx path to `apps/server/node_modules/.bin`.
+- `docker-compose.yml` (modified) — server healthcheck `127.0.0.1`; LiveKit single mux
+  port `7882`; LiveKit `LIVEKIT_KEYS` space fix; coturn relay range `40000–40031`;
+  caddy healthcheck `/config/`.
+- `livekit.yaml` (modified) — `rtc.udp_port: 7882` (replaces `port_range_start/end`).
+- `scripts/smoke-test.sh` (modified) — Compose-v5 `--protocol udp` port syntax; LiveKit
+  mux-port probe `7882`; coturn range/disjoint assertions updated.
+- `docs/deployment.md` (modified) — port table + WebRTC/NAT notes updated to the
+  right-sized port model.
+
+## Change Log
+
+- 2026-06-12 — Validation pass (rebuild images + run smoke test). Fixed 6 stack defects
+  (nested-`node_modules` dockerignore, server tsx CMD path, server/caddy IPv4 & admin
+  healthchecks, Compose-v5 port syntax in smoke test, LiveKit key-space). Right-sized
+  the WebRTC UDP footprint to fit an SFU/TURN model for 16 players: LiveKit single mux
+  port `7882`, coturn relay range `40000–40031`. Full stack now boots health-checked;
+  `scripts/smoke-test.sh` exits 0 (7/7), negative check exits non-zero as required.
+  Status → review.

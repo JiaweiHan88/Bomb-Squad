@@ -34,16 +34,23 @@ health checks passing.
 | 7880 | TCP | LiveKit | Signaling HTTP/WebSocket |
 | 7881 | TCP | LiveKit | RTP over TCP (firewall fallback) |
 | 3478 | TCP + UDP | coturn | STUN/TURN NAT traversal |
-| 40000–40199 | UDP | coturn | TURN relay allocations |
-| 50000–50199 | UDP | LiveKit | RTP/ICE media |
+| 40000–40031 | UDP | coturn | TURN relay allocations (32 = 16 peers + headroom) |
+| 7882 | UDP | LiveKit | RTP/ICE media (single UDP mux port) |
 
-> The two UDP ranges are deliberately **disjoint** — LiveKit and coturn must not
-> share a relay range or they collide on host ports. Both ranges are narrowed
-> (200 ports each) to avoid Docker spawning a userland-proxy process per published
-> port; 200 ports comfortably cover a 16-player, 2-room SFU. On a Linux host you may
-> instead switch the `livekit` (and optionally `coturn`) service to
-> `network_mode: host` and drop the `ports:` block entirely — faster startup and no
-> proxy overhead, but **not supported on Docker Desktop (macOS/Windows)**.
+> **Right-sized for 16 players.** LiveKit is an SFU and muxes *all* participants
+> over a **single** UDP port (`rtc.udp_port: 7882`) — port count is constant
+> regardless of player count, so one port covers a full session. coturn allocates
+> one relay port per peer that needs TURN fallback, so 32 ports cover all 16
+> players (2× headroom). LiveKit's mux port and coturn's relay range stay
+> **disjoint** so they never collide on a host UDP port.
+>
+> This also keeps total published UDP forwards small (~33), which matters on
+> **Docker Desktop (Windows/macOS)**: its WSL2/HyperKit userland proxy caps total
+> forwarded ports (~256) and reserves some host UDP bands (e.g. Windows reserves
+> `50000–50059`). A large published range (the old `50000–50199` × two services)
+> exceeds that cap and the second service fails to bind. On a Linux host you may
+> alternatively give `livekit`/`coturn` `network_mode: host` and drop `ports:`
+> entirely — no proxy, no cap — but that is **not supported on Docker Desktop**.
 
 **Internal ports** (not publicly exposed): `redis:6379`, `postgres:5432`.
 The game server's HTTP port (`${PORT}`, default `3001`) is published to the host
@@ -80,10 +87,10 @@ firewalls**. coturn acts as the TURN relay fallback for clients behind such fire
 Before any team demo verify that:
 
 - Port `3478` (TCP + UDP) is reachable from participant machines.
-- The coturn TURN relay range `40000–40199/udp` is reachable from participant
+- The coturn TURN relay range `40000–40031/udp` is reachable from participant
   machines (relayed media flows over these ports — if they're blocked, the relay
   fallback silently fails).
-- The LiveKit RTP range `50000–50199/udp` is open outbound from the server.
+- The LiveKit RTP mux port `7882/udp` is open outbound from the server.
 
 ---
 

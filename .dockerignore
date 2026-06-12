@@ -1,8 +1,11 @@
-node_modules
-dist
+# Match at every level — a bare `node_modules` only excludes the context root,
+# leaving apps/*/node_modules and packages/*/node_modules to clobber the
+# image's pnpm-installed symlinks with host-resolved (broken) ones.
+**/node_modules
+**/dist
+**/*.log
+**/coverage
 .env
 .git
 _agent_docs
 _bmad
-*.log
-coverage

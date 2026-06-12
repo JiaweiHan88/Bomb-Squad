@@ -47,11 +47,12 @@ if [ "${LIVEKIT_EXIT}" -ne 7 ]; then
 else
   fail "livekit: port 7880 not reachable (curl exit ${LIVEKIT_EXIT})"
 fi
-# RTP/ICE media range must be published (must match port_range_* in livekit.yaml).
-if docker compose port livekit 50000/udp 2>/dev/null | grep -q ':'; then
-  pass "livekit: RTP range 50000-50199/udp published"
+# RTP/ICE media on a single UDP mux port (must match rtc.udp_port in livekit.yaml).
+# Compose v5 dropped the `<port>/udp` arg form — use `--protocol udp <svc> <port>`.
+if docker compose port --protocol udp livekit 7882 2>/dev/null | grep -q ':'; then
+  pass "livekit: RTP mux port 7882/udp published"
 else
-  fail "livekit: RTP range 50000-50199/udp NOT published"
+  fail "livekit: RTP mux port 7882/udp NOT published"
 fi
 
 # ── coturn ────────────────────────────────────────────────────────────────────
@@ -68,17 +69,17 @@ fi
 # (the actual bug this guards). `docker compose port` prints a host mapping only
 # when the range is published; relay ports open on allocation, so we assert the
 # publish mapping rather than probing a live socket.
-if docker compose port coturn 40000/udp 2>/dev/null | grep -q ':'; then
-  pass "coturn: TURN relay range 40000-40199/udp published"
+if docker compose port --protocol udp coturn 40000 2>/dev/null | grep -q ':'; then
+  pass "coturn: TURN relay range 40000-40031/udp published"
 else
-  fail "coturn: TURN relay range 40000-40199/udp NOT published — relay path dead behind NAT"
+  fail "coturn: TURN relay range 40000-40031/udp NOT published — relay path dead behind NAT"
 fi
-# Regression guard: coturn and LiveKit must keep DISJOINT UDP ranges. If coturn
-# publishes anything in LiveKit's RTP range (50000-50199) they collide on host ports.
-if docker compose port coturn 50000/udp 2>/dev/null | grep -q ':'; then
-  fail "coturn publishes 50000/udp — overlaps LiveKit RTP range (port-range regression)"
+# Regression guard: coturn and LiveKit must keep DISJOINT UDP ports. If coturn
+# publishes LiveKit's RTP mux port (7882) they collide on the host UDP port.
+if docker compose port --protocol udp coturn 7882 2>/dev/null | grep -q ':'; then
+  fail "coturn publishes 7882/udp — overlaps LiveKit RTP mux port (port regression)"
 else
-  pass "coturn/livekit UDP ranges are disjoint"
+  pass "coturn/livekit UDP ports are disjoint"
 fi
 
 # ── caddy ─────────────────────────────────────────────────────────────────────
