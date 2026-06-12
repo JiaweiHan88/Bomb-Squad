@@ -1,4 +1,5 @@
 export type { Reducer } from './reducer.js';
+export type { BombAction } from './actions.js';
 export type { TimerState } from './timer.js';
 export type {
   PlayerRole,
