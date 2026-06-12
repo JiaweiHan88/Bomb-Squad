@@ -51,3 +51,12 @@
 ## Deferred from: code review of 4-1-3d-bomb-scene-and-camera-rig (2026-06-12)
 
 - **Bomb-scene focus state not auto-cleared on remount or module-count shrink** (`apps/client/src/scenes/BombScene.tsx` CameraRig) — `uiStore.activeModuleIndex` persists across a `BombScene` remount and is not validated against the current slot count. A stale index leaves the camera framed on a now-absent module (`slots.find` returns undefined → effect no-ops; ESC recovers). Harmless in 4.1 (no remount path, store defaults to null), but the round-lifecycle stories (4.6/4.7) that mount the scene from session state must clear/validate focus on round transitions.
+
+## Deferred from: implementation of 4-2-chassis-and-bomb-metadata-rendering (2026-06-12)
+
+- **Camera can clip through the chassis ends at max wheel-zoom** (`apps/client/src/scenes/BombScene.tsx` CameraRig `MIN_DISTANCE = 1.2`) — the distance clamp is smaller than the chassis half-width (1.5), so wheel-zooming while orbited to a ±x end face pushes the camera inside the geometry (observed in the 4.2 headless smoke). Pre-existing 4.1 clamp characteristic, newly observable now that the end faces carry the serial sticker; front/top/bottom faces are safe (half-extents < 1.2). The serial is fully legible well before the clamp, so AC2 of 4.2 holds. Fixing it means raising `MIN_DISTANCE` above ~1.8 (the rib corner radius), which clamps the 4.1 focus-dolly pose (`FOCUS_DISTANCE = 1.6`) — a camera-feel decision belonging to the bomb-view polish/hardening stories (4.7/10.2), not a metadata-rendering change.
+
+## Deferred from: code review of 4-2-chassis-and-bomb-metadata-rendering (2026-06-12)
+
+- **Battery cells/tray spill off the top face at batteryCount ≥17** (`apps/client/src/scenes/chassis.ts`) — beyond the documented ~12 max, so unreachable in the dev harness; `batteryCount` is an unbounded `number` with no clamp, so a generator emitting a high count would silently place geometry off-chassis. Add a clamp/guard when server-side `BombContext` generation lands (Story 8.2). Deferred — beyond current realistic domain.
+- **Manual-smoke results (a)–(g), incl. AC2 <10 s timing, are headless-only and unverifiable from code** — recommend a human interactive browser pass to confirm sticker size at preferred zoom and indicator glow intensity (the implementer's own recommendation). Deferred — human verification, not a code defect.
