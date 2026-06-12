@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # merge worktree-story-4-1 (4-1/4-2/4-3 → done)
+last_updated: 2026-06-12  # sprint-1 retro complete (see sprint-1-retro-2026-06-12.md); 2-7 scheduled into Sprint 3
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
