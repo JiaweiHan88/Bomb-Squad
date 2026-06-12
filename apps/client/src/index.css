@@ -1,0 +1,118 @@
+/* ============================================================================
+   Bomb Squad — design tokens (single source of truth)
+   Values mapped 1:1 from DESIGN.md frontmatter (via mockups/tokens.css).
+   Do NOT invent or round values — every token maps to DESIGN.md.
+
+   Tailwind v4 CSS-first: each token below becomes BOTH a CSS custom property
+   AND a generated utility (e.g. --color-bakelite -> bg-bakelite / text-bakelite;
+   --font-body -> font-body; --text-base -> text-base). One definition, one source.
+
+   ── SEMANTIC COLOR RESERVATIONS (DESIGN.md) — NEVER decorative ──────────────
+     led-green   = solved / safe / armed-clear
+     led-red     = strike / error / explode
+     led-amber   = caution / strike-1 escalation
+     speaker-self (cool blue) = "this is you" — voice presence ONLY
+     cream       = manual / printed-paper content — never game-state signaling
+   ── UI SURFACE RULE: bomb / HUD-overlay / modal-or-manual. No fourth surface. ─
+   ============================================================================ */
+
+/* Fonts first (CSS @import must precede other statements). */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=JetBrains+Mono:wght@500;700&display=swap');
+/* DSEG7 (LCD) — only consumed by the bomb timer in Epic 4; loaded for token completeness. */
+@import url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/css/dseg.css');
+@import 'tailwindcss';
+
+@theme {
+  /* === COLORS — brand (bomb world / diegetic) === */
+  --color-bakelite: #c2491f; /* warm 1960s prop orange — primary chassis */
+  --color-bakelite-deep: #7a2a10; /* shadowed chassis edge */
+  --color-cream: #e8dcc2; /* printed-manual paper, panel labels */
+  --color-graphite: #1a1a1f; /* bomb steel, deep contrast */
+  --color-brass: #b8924a; /* screws, hinges, accents */
+
+  /* === COLORS — hud (bomb world / diegetic) === */
+  --color-led-green: #3dff7a; /* solved module LED, armed/clear */
+  --color-led-green-glow: #15b548;
+  --color-led-amber: #ffb300; /* strike 1, caution */
+  --color-led-red: #ff2e2e; /* strike 2, error, explode */
+  --color-led-red-glow: #7a0000;
+  --color-timer-lcd: #ff3b30; /* 7-segment LCD red */
+  --color-timer-lcd-bg: #240807;
+
+  /* === COLORS — ui (operator world / non-diegetic) === */
+  --color-surface: #161318; /* app shell background */
+  --color-surface-raised: #221e26; /* panel background */
+  --color-surface-manual: #f2e8d0; /* manual page (printed paper) */
+  --color-ink-primary: #f4ecda; /* text on dark */
+  --color-ink-manual: #1a1410; /* text on manual page */
+  --color-ink-muted: #9a8e78;
+  --color-focus: #3dff7a; /* keyboard focus ring (LED green) */
+  --color-danger: #ff2e2e;
+
+  /* === COLORS — voice === */
+  --color-speaker-active: #3dff7a;
+  --color-speaker-self: #4fb8ff; /* cool blue — self only */
+  --color-voice-muted: #6b6470;
+
+  /* === TYPOGRAPHY — families === */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-manual: 'Source Serif 4', 'Georgia', serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  --font-lcd: 'DSEG7 Classic', 'Share Tech Mono', monospace;
+
+  /* === TYPOGRAPHY — scale (coarse on purpose; see DESIGN.md) === */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 22px;
+  --text-xl: 32px;
+  --text-2xl: 48px;
+  --text-timer: 84px;
+
+  /* === RADII === */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-chassis: 6px; /* bomb panel corners — barely rounded, industrial */
+  --radius-pill: 9999px;
+
+  /* === SPACING — named insets (4px base unit lives in Tailwind's default scale) === */
+  --spacing-hud: 24px; /* hud gutter */
+  --spacing-inset: 16px; /* panel inset */
+  --spacing-safe: 32px; /* HUD safe-area from viewport edges */
+}
+
+/* ── Derived component shadows (not utility-generated; referenced by components) ── */
+:root {
+  --btn-primary-shadow: 0 2px 0 var(--color-bakelite-deep), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --panel-chassis-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --panel-manual-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --timer-glow: 0 0 16px rgba(255, 59, 48, 0.45);
+  --hud-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+
+/* ── Base document (operator world) ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-ink-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Accessibility floor: keyboard focus ring = LED green, 2px + 2px offset ── */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

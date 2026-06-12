@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
 import { useGameStore } from './store/gameStore.js';
+import { AppShell, LoadingScreen, PlatformGate } from './ui/index.js';
+import { CONNECTING } from './ui/copy.js';
 
 // Production builds are served through Caddy, which proxies /socket.io/* to
 // the game server — same-origin works on any domain without baking a URL into
@@ -28,24 +30,18 @@ export default function App() {
     };
   }, []);
 
+  // Precedence: platform gate → loading screen → app shell.
   return (
-    <div style={{ fontFamily: 'monospace', padding: '2rem' }}>
-      <h1>Bomb Squad</h1>
-      <p>
-        Server:{' '}
-        <strong
-          style={{
-            color:
-              connection === 'connected'
-                ? 'green'
-                : connection === 'connecting'
-                  ? 'orange'
-                  : 'red',
-          }}
-        >
-          {connection}
-        </strong>
-      </p>
-    </div>
+    <PlatformGate>
+      {connection !== 'connected' ? (
+        <LoadingScreen status={CONNECTING} />
+      ) : (
+        <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>
+          <div className="flex flex-1 items-center justify-center text-ink-muted">
+            <p>Connected. Lobby lands in Story 2.2.</p>
+          </div>
+        </AppShell>
+      )}
+    </PlatformGate>
   );
 }
