@@ -7,6 +7,7 @@ import type {
   ModuleInteractPayload,
   RoundRetryPayload,
   LifelineSendPayload,
+  ManualPositionPayload,
 } from './payloads.js';
 
 /**
@@ -31,6 +32,7 @@ export interface ClientToServerEvents {
   ROUND_CONFIGURE: (payload: RoundConfigurePayload) => void;
   ROUND_START: () => void;
   MODULE_INTERACT: (payload: ModuleInteractPayload) => void;
+  MANUAL_NAVIGATE: (payload: ManualPositionPayload) => void;
   FACILITATOR_PAUSE: () => void;
   FACILITATOR_RESUME: () => void;
   ROUND_RETRY: (payload: RoundRetryPayload) => void;

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # sprint-1 retro complete (see sprint-1-retro-2026-06-12.md); 2-7 scheduled into Sprint 3
+last_updated: 2026-06-12  # story 5-2 implemented → review (worktree-story-5-2); sprint-1 retro complete; 2-7 scheduled into Sprint 3
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -87,9 +87,9 @@ development_status:
   epic-4-retrospective: optional
 
   # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----
-  epic-5: backlog
+  epic-5: in-progress
   5-1-module-plugin-scaffold-sandbox-and-click-primitive: backlog
-  5-2-expert-manual-viewer: backlog
+  5-2-expert-manual-viewer: review
   5-3-wires-module-walking-skeleton: backlog
   5-4-the-button-module: backlog
   5-5-passwords-module: backlog

@@ -59,6 +59,16 @@ export interface LifelineSendPayload {
   promptId: string;
 }
 
+/**
+ * Expert manual navigation (Story 5.2 → consumed by Spectator Lounge, 9.4).
+ * Untrusted client input — the server MUST validate (kebab-case chapter id,
+ * bounded length) before persisting or rebroadcasting.
+ */
+export interface ManualPositionPayload {
+  /** Chapter identifier in kebab-case, e.g. "wires". */
+  chapterId: string;
+}
+
 // ─── Server → Client payloads ────────────────────────────────────────────────
 
 export interface ModuleUpdate {
@@ -109,4 +119,16 @@ export interface ErrorPayload {
   code: string;
   message: string;
   recoverable: boolean;
+}
+
+/**
+ * Broadcast of an Expert's current manual position. `playerId` lets Story 9.4
+ * resolve "most-recently-navigated Expert" when a team has several (GDD A3:
+ * the spectator manual is LOCKED to the active Expert's current page).
+ */
+export interface ExpertManualPositionPayload {
+  /** Chapter identifier in kebab-case, e.g. "wires". */
+  chapterId: string;
+  /** The navigating Expert's player id. */
+  playerId: string;
 }
