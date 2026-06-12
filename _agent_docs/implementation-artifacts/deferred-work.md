@@ -47,3 +47,7 @@
 - `aria-live="polite"` on a freshly mounted LoadingScreen may never announce its status to screen readers — live regions announce changes, not initial content (`apps/client/src/ui/LoadingScreen.tsx`). Minor a11y polish; revisit with the accessibility-floor pass.
 - No component tests for ConfirmButton's two-step state machine or PlatformGate precedence — story 2.1 test scope was pure logic only per project testing rules; revisit when component-test / visual-regression infra (Playwright) lands.
 - iPad desktop-UA bypasses the mobile bounce (`apps/client/src/ui/platform.ts`) — iPadOS 13+ Safari reports a `Macintosh` UA, so `isMobileUA` never matches. Accepted gap (decision 2026-06-12): an iPad Pro at 1366×1024 passes the viewport gate and may be usable; revisit with `maxTouchPoints` heuristic if iPad reports surface.
+
+## Deferred from: code review of story-2.2 (2026-06-12)
+
+- Facilitator identity persisted as the ephemeral `socket.id` (`apps/server/src/session/createSession.ts`, `handlers/sessionHandlers.ts`) — `players` is keyed by `socket.id`, which Socket.IO rotates on every (re)connection. Functional for V1 single-process with no reattach (the spec deliberately defers reattach and accepts losing the lobby on refresh), but the session-reattach story must introduce a stable, durable player id before any reconnect/rejoin flow, or the facilitator will no longer match their own stored player record.

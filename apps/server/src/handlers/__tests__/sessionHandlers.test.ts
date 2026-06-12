@@ -158,6 +158,33 @@ describe('SESSION_CREATE handler', () => {
     expect(stateSpy).not.toHaveBeenCalled();
     expect(store.data.size).toBe(0);
   });
+
+  it('emits ERROR and persists nothing when the collision-check read throws', async () => {
+    await server.close();
+    // RedisStore.getJSON throws on a malformed value / mid-session drop; the
+    // collision check awaits it, so the throw must route to SESSION_CREATE_FAILED.
+    store = createMemoryRedisStore({
+      getJSON: async () => {
+        throw new Error('redis down');
+      },
+    });
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, { redis: store, log: noopLog }),
+    );
+    client = await server.connectClient();
+
+    const stateSpy = jest.fn();
+    client.on('SESSION_STATE', stateSpy);
+    const errorPromise = nextEvent<ErrorPayload>(client, 'ERROR');
+    const ackSpy = jest.fn();
+    client.emit('SESSION_CREATE', {}, ackSpy);
+    const error = await errorPromise;
+
+    expect(error.code).toBe('SESSION_CREATE_FAILED');
+    expect(ackSpy).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+    expect(store.data.size).toBe(0);
+  });
 });
 
 describe('parseSessionCreatePayload (boundary validation)', () => {
@@ -185,6 +212,7 @@ describe('parseSessionCreatePayload (boundary validation)', () => {
     expect(parseSessionCreatePayload({ config: { timerMs: -1 } }).ok).toBe(false);
     expect(parseSessionCreatePayload({ config: { strikeSpeedUpPct: 51 } }).ok).toBe(false);
     expect(parseSessionCreatePayload({ config: { strikeSpeedUpPct: -1 } }).ok).toBe(false);
+    expect(parseSessionCreatePayload({ config: { strikeSpeedUpPct: 25.5 } }).ok).toBe(false);
   });
 
   it('rejects unknown config keys and unknown/non-boolean modifiers', () => {

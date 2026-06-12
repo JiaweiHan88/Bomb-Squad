@@ -78,8 +78,8 @@ export function parseSessionCreatePayload(payload: unknown): ParseResult {
         out.timerMs = value as number;
         break;
       case 'strikeSpeedUpPct':
-        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 50) {
-          return { ok: false, message: 'config.strikeSpeedUpPct must be a number in 0–50' };
+        if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 50) {
+          return { ok: false, message: 'config.strikeSpeedUpPct must be an integer in 0–50' };
         }
         out.strikeSpeedUpPct = value;
         break;
@@ -146,9 +146,10 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         return;
       }
 
+      const sessionId = randomUUID();
+      let joinCode: string | null = null;
       try {
-        const sessionId = randomUUID();
-        const joinCode = await mintJoinCode(deps.redis);
+        joinCode = await mintJoinCode(deps.redis);
         const state = createSessionState({
           sessionId,
           joinCode,
@@ -166,6 +167,15 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         // AR15: never log the joinCode — it is the session's only secret.
         deps.log.info({ sessionId }, 'session created');
       } catch (err) {
+        // Best-effort rollback: the two persists are not atomic, so the session
+        // key may have been written before the joincode write failed. Without
+        // cleanup that leaves an unreachable session orphaned in Redis.
+        try {
+          await deps.redis.del(sessionKey(sessionId));
+          if (joinCode !== null) await deps.redis.del(joinCodeKey(joinCode));
+        } catch {
+          // Already in the failure path — swallow so the ERROR still reaches the client.
+        }
         deps.log.error({ err, socketId: socket.id }, 'SESSION_CREATE failed');
         socket.emit('ERROR', {
           code: 'SESSION_CREATE_FAILED',

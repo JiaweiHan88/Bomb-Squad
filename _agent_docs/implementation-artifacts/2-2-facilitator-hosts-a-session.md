@@ -4,7 +4,7 @@ baseline_commit: 8355fda
 
 # Story 2.2: Facilitator Hosts a Session
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -205,6 +205,17 @@ claude-fable-5
 - apps/client/src/net/socket.ts (modified — module-level instance + `getSocket()`)
 - apps/client/src/App.tsx (modified — Landing/Lobby branch in connected shell)
 - pnpm-lock.yaml (modified)
+
+### Review Findings
+
+_Code review 2026-06-12 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). Both ACs and all 8 tasks verified faithfully implemented; the Jest-vs-Vitest deviation was assessed and cleared. Findings below are hardening/robustness — no AC violation._
+
+- [x] [Review][Patch] Orphaned `session:` key on partial-persist failure — the two `setJSON`s are sequential awaits; if the session write succeeds but the joincode write rejects (Redis drops between them), the catch emits `SESSION_CREATE_FAILED` but leaves an unreachable `session:{id}` in Redis with no cleanup. FIXED: best-effort `del(sessionKey(sessionId))` + `del(joinCodeKey(joinCode))` in the catch (swallowing del errors) before emitting ERROR. [apps/server/src/handlers/sessionHandlers.ts]
+- [x] [Review][Patch] `creating` wedges `true` after a successful ack if `SESSION_STATE` never arrives — the ack success branch did nothing (relied on the broadcast to mount Lobby). FIXED: clear `creating` on a successful ack via the shared `pending` ref; the button unmounts once Lobby renders, so a flash is harmless. [apps/client/src/ui/Landing.tsx]
+- [x] [Review][Patch] Landing `ERROR` listener is global and not gated on an in-flight create (cross-talk), and a late ack-timeout overwrote the specific server message with the generic `HOST_FAILED` (double-handling). FIXED: `settleFailure` is gated on a `pending` ref so an unrelated ERROR is ignored and whichever of ack-`err`/`ERROR` arrives first resolves the attempt exactly once. [apps/client/src/ui/Landing.tsx]
+- [x] [Review][Patch] `strikeSpeedUpPct` validation accepted floats while sibling numeric fields require integers. FIXED: now requires `Number.isInteger` (0–50); regression assertion added (`25.5` rejected). [apps/server/src/handlers/sessionHandlers.ts]
+- [x] [Review][Patch] The `getJSON`-throws-during-collision-check branch was untested. FIXED: added a handler test injecting a throwing `getJSON` → asserts `SESSION_CREATE_FAILED`, no ack, no `SESSION_STATE`, nothing persisted. [apps/server/src/handlers/__tests__/sessionHandlers.test.ts]
+- [x] [Review][Defer] Facilitator identity persisted as the ephemeral `socket.id` — `players` is keyed by `socket.id`, which changes on every reconnect; the facilitator becomes a stranger to their own session the moment session-reattach lands. The spec explicitly defers reattach ("losing the lobby on refresh is expected"), so this is correct for V1 single-process. [apps/server/src/session/createSession.ts] — deferred, pre-existing scope boundary; the session-reattach story must introduce a stable player id.
 
 ## Change Log
 
