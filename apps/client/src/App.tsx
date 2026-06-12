@@ -9,8 +9,9 @@ import { CONNECTING } from './ui/copy.js';
 // the game server — same-origin works on any domain without baking a URL into
 // the image. Host-run dev serves client (5173) and server (3001) separately,
 // so dev keeps the explicit localhost default.
+// `||` (not `??`) so an empty VITE_SERVER_URL= line in .env also falls back.
 const SERVER_URL =
-  import.meta.env.VITE_SERVER_URL ??
+  import.meta.env.VITE_SERVER_URL ||
   (import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin);
 
 export default function App() {
@@ -25,8 +26,11 @@ export default function App() {
     socket.connect();
 
     return () => {
+      // unbind() removes the 'disconnect' listener before disconnect() fires it,
+      // so reflect the teardown in the store explicitly.
       unbind();
       socket.disconnect();
+      useGameStore.getState().setConnection('disconnected');
     };
   }, []);
 

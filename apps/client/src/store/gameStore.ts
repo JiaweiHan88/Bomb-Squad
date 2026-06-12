@@ -17,7 +17,8 @@ interface GameState {
   setTimer: (timer: TimerState) => void;
   /**
    * Immutably replaces one module in the bomb's modules array.
-   * Out-of-range moduleIndex is silently ignored (defensive against malformed payloads).
+   * Non-integer or out-of-range moduleIndex is dropped with a console warning
+   * (defensive against malformed payloads; the warning surfaces desync).
    * Does NOT touch strikes or timer — those arrive via STRIKE / TIMER_UPDATE events.
    */
   applyModuleUpdate: (update: ModuleUpdate) => void;
@@ -26,7 +27,9 @@ interface GameState {
 }
 
 /**
- * Authoritative client game state — render-only, non-authoritative snapshot of last server state.
+ * Render-only, NON-authoritative snapshot of the last server-sent game state.
+ * The server owns all game truth — never derive strikes, solved-state, or
+ * timer expiry on the client.
  *
  * ACCESS PATTERN: Inside a render loop (useFrame / RAF), read state via:
  *   useGameStore.getState()
@@ -45,8 +48,16 @@ export const useGameStore = create<GameState>((set) => ({
 
   applyModuleUpdate: ({ moduleIndex, state }) =>
     set((s) => {
-      if (!s.bomb) return {};
-      if (moduleIndex < 0 || moduleIndex >= s.bomb.modules.length) return {};
+      if (!s.bomb) {
+        console.warn('[gameStore] MODULE_UPDATE dropped: no bomb in store', { moduleIndex });
+        return {};
+      }
+      // Number.isInteger also rejects NaN/fractional indices, which would
+      // corrupt the array via slice(0, NaN).
+      if (!Number.isInteger(moduleIndex) || moduleIndex < 0 || moduleIndex >= s.bomb.modules.length) {
+        console.warn('[gameStore] MODULE_UPDATE dropped: moduleIndex out of range', { moduleIndex });
+        return {};
+      }
       const modules = [
         ...s.bomb.modules.slice(0, moduleIndex),
         state,
@@ -56,10 +67,13 @@ export const useGameStore = create<GameState>((set) => ({
     }),
 
   setStrike: ({ strikes, timer }) =>
-    set((s) => ({
-      bomb: s.bomb ? { ...s.bomb, strikes } : null,
-      timer,
-    })),
+    set((s) => {
+      if (!s.bomb) {
+        console.warn('[gameStore] STRIKE before BOMB_INIT: strike count dropped', { strikes });
+        return { timer };
+      }
+      return { bomb: { ...s.bomb, strikes }, timer };
+    }),
 
   setConnection: (connection) => set({ connection }),
 }));

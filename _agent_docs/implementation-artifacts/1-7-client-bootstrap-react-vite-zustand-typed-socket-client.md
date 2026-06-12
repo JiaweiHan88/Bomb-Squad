@@ -4,7 +4,7 @@ baseline_commit: a29daef
 
 # Story 1.7: Client Bootstrap — React/Vite/Zustand + Typed Socket Client
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -71,6 +71,22 @@ so that I can connect to a session and receive server state.
   - [x] Run `pnpm --filter @bomb-squad/client build` (`tsc && vite build`) → must succeed.
   - [x] Manual smoke (document the result in Completion Notes): with the server running (`pnpm --filter @bomb-squad/server dev`) and `.env` present, `pnpm --filter @bomb-squad/client dev` and confirm the status indicator reaches `connected`. If the server isn't running locally, at minimum confirm the client builds and the status sits at `connecting`/`disconnected` without crashing.
   - [x] If you add any unit test, place client tests under `apps/client/` per the existing `"test"` script convention; a full Vitest setup is NOT required by this story — do not pull in a test framework just to satisfy this. The typecheck + build are the gate.
+
+### Review Findings
+
+- [x] [Review][Patch] Remove invented LIFELINE_TOAST side effect — stub calls `useUiStore.getState().setManualOpen(false)`, a user-visible behavior (force-closing the manual on a hint toast) specified nowhere in story/epics/context [apps/client/src/net/bindServerEvents.ts:30]
+- [x] [Review][Patch] Unmount cleanup leaves connection stuck at `connected` — `unbind()` removes the `disconnect` listener before `socket.disconnect()` fires it; set `setConnection('disconnected')` explicitly in cleanup [apps/client/src/App.tsx:18]
+- [x] [Review][Patch] `removeAllListeners` removes listeners it doesn't own (incl. socket.io internals on `connect`/`disconnect`) — use named handler refs + `socket.off(event, handler)` for all 15 events, matching the discipline already used for the first 5 [apps/client/src/net/bindServerEvents.ts:51]
+- [x] [Review][Patch] `VITE_SERVER_URL` typed non-optional while runtime uses `??` fallback; empty string (`VITE_SERVER_URL=`) also bypasses `??` — declare optional in `vite-env.d.ts` and use `||` fallback [apps/client/src/vite-env.d.ts:4, apps/client/src/App.tsx:6]
+- [x] [Review][Patch] Reconnect attempts render as `disconnected`, never `connecting` — bind `socket.io.on('reconnect_attempt', …)` → `setConnection('connecting')` [apps/client/src/net/bindServerEvents.ts:42]
+- [x] [Review][Patch] `applyModuleUpdate` bounds guard passes `NaN`/fractional `moduleIndex` (array corruption via `slice(0, NaN)`), and silently swallows out-of-range payloads — add `Number.isInteger` to the guard + `console.warn` on rejection (desync telemetry) [apps/client/src/store/gameStore.ts:46]
+- [x] [Review][Patch] `setStrike` half-applies when `bomb` is null — timer updated, strike count silently dropped — `console.warn` on the dropped strike [apps/client/src/store/gameStore.ts:56]
+- [x] [Review][Patch] gameStore JSDoc opens with "Authoritative client game state" — contradicts the non-authoritative guard the comment exists to enforce; reword [apps/client/src/store/gameStore.ts:27]
+- [x] [Review][Patch] Task 6 smoke fallback not evidenced — Completion Notes assert the indicator "would show" the right status (prediction, not observation); run `pnpm --filter @bomb-squad/client dev` without a server and record the observed result
+- [x] [Review][Defer] `transports: ['websocket']` has no polling fallback — deferred, spec-prescribed in Task 2; revisit during NAT/firewall testing (voice epic) [apps/client/src/net/socket.ts:10]
+- [x] [Review][Defer] `applyModuleUpdate` doesn't verify the documented `moduleId` invariant — deferred, server-guaranteed invariant; revisit when MODULE_UPDATE is actually emitted (Epic 2/3) [apps/client/src/store/gameStore.ts:44]
+- [x] [Review][Defer] `ERROR` with `recoverable: false` has no fatal-path handling — deferred, handler is a spec-sanctioned stub; real handling lands with Epic 2+ UI [apps/client/src/net/bindServerEvents.ts:38]
+- [x] [Review][Defer] Reconnect leaves stale `session`/`bomb`/`timer` with no resync — deferred, resync arrives with SESSION_STATE emission in Epic 2 [apps/client/src/net/bindServerEvents.ts:42]
 
 ## Dev Notes
 
@@ -176,3 +192,4 @@ claude-sonnet-4-6
 ## Change Log
 
 - 2026-06-12: Story 1.7 implemented — client bootstrap with Zustand stores (game/voice/ui), typed Socket.IO wrapper, inbound event binding, Vite env config, and connection-status UI. All typecheck and build gates pass.
+- 2026-06-12: Code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) — 9 patches applied: removed invented LIFELINE_TOAST manual-close side effect; explicit `setConnection('disconnected')` on unmount cleanup; named handler refs + `socket.off` for all 16 listeners (no more `removeAllListeners`); `VITE_SERVER_URL` declared optional + `||` fallback (empty-string safe); `reconnect_attempt` → `connecting`; `Number.isInteger` guard + warn in `applyModuleUpdate`; warn on STRIKE-before-BOMB_INIT dropped strikes; reworded "Authoritative" JSDoc; smoke observed (Vite dev boots, HTTP 200, App.tsx transforms with no `.env`, fallback path active, no crash). 4 findings deferred to deferred-work.md. Gates re-run: `pnpm -r exec tsc --noEmit` → 0 errors; client build → success. Status → done.

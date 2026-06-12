@@ -1,14 +1,50 @@
+import type {
+  RoundEndPayload,
+  ScoreboardPayload,
+  LifelineToastPayload,
+  PauseResumePayload,
+  ErrorPayload,
+} from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
 import { useGameStore } from '../store/gameStore.js';
-import { useUiStore } from '../store/uiStore.js';
 
 /**
  * Registers typed handlers for all ServerToClientEvents on the given socket.
- * Returns an unsubscribe function that removes all listeners.
+ * Returns an unsubscribe function that removes exactly the handlers registered
+ * here — never listeners owned by other modules or socket.io internals.
  */
 export function bindServerEvents(socket: AppClientSocket): () => void {
   const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setConnection } =
     useGameStore.getState();
+
+  const onBombDefused = (payload: RoundEndPayload) => {
+    console.info('[socket] BOMB_DEFUSED', payload);
+  };
+  const onBombExploded = (payload: RoundEndPayload) => {
+    console.info('[socket] BOMB_EXPLODED', payload);
+  };
+  const onScoreboard = (payload: ScoreboardPayload) => {
+    console.info('[socket] SCOREBOARD', payload);
+  };
+  const onLifelineToast = (payload: LifelineToastPayload) => {
+    console.info('[socket] LIFELINE_TOAST', payload);
+  };
+  const onPaused = (payload: PauseResumePayload) => {
+    console.info('[socket] PAUSED', payload);
+  };
+  const onResumed = (payload: PauseResumePayload) => {
+    console.info('[socket] RESUMED', payload);
+  };
+  const onError = (payload: ErrorPayload) => {
+    console.error('[socket] ERROR', payload);
+  };
+
+  const onConnect = () => setConnection('connected');
+  const onDisconnect = () => setConnection('disconnected');
+  const onConnectError = () => setConnection('disconnected');
+  // Manager-level event: fires on every auto-reconnect attempt, so the UI
+  // shows "connecting" during the retry window instead of "disconnected".
+  const onReconnectAttempt = () => setConnection('connecting');
 
   socket.on('SESSION_STATE', setSession);
   socket.on('BOMB_INIT', setBomb);
@@ -16,32 +52,18 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   socket.on('TIMER_UPDATE', setTimer);
   socket.on('STRIKE', setStrike);
 
-  socket.on('BOMB_DEFUSED', (payload) => {
-    console.info('[socket] BOMB_DEFUSED', payload);
-  });
-  socket.on('BOMB_EXPLODED', (payload) => {
-    console.info('[socket] BOMB_EXPLODED', payload);
-  });
-  socket.on('SCOREBOARD', (payload) => {
-    console.info('[socket] SCOREBOARD', payload);
-  });
-  socket.on('LIFELINE_TOAST', (payload) => {
-    useUiStore.getState().setManualOpen(false);
-    console.info('[socket] LIFELINE_TOAST', payload);
-  });
-  socket.on('PAUSED', (payload) => {
-    console.info('[socket] PAUSED', payload);
-  });
-  socket.on('RESUMED', (payload) => {
-    console.info('[socket] RESUMED', payload);
-  });
-  socket.on('ERROR', (payload) => {
-    console.error('[socket] ERROR', payload);
-  });
+  socket.on('BOMB_DEFUSED', onBombDefused);
+  socket.on('BOMB_EXPLODED', onBombExploded);
+  socket.on('SCOREBOARD', onScoreboard);
+  socket.on('LIFELINE_TOAST', onLifelineToast);
+  socket.on('PAUSED', onPaused);
+  socket.on('RESUMED', onResumed);
+  socket.on('ERROR', onError);
 
-  socket.on('connect', () => setConnection('connected'));
-  socket.on('disconnect', () => setConnection('disconnected'));
-  socket.on('connect_error', () => setConnection('disconnected'));
+  socket.on('connect', onConnect);
+  socket.on('disconnect', onDisconnect);
+  socket.on('connect_error', onConnectError);
+  socket.io.on('reconnect_attempt', onReconnectAttempt);
 
   return () => {
     socket.off('SESSION_STATE', setSession);
@@ -49,15 +71,16 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     socket.off('MODULE_UPDATE', applyModuleUpdate);
     socket.off('TIMER_UPDATE', setTimer);
     socket.off('STRIKE', setStrike);
-    socket.removeAllListeners('BOMB_DEFUSED');
-    socket.removeAllListeners('BOMB_EXPLODED');
-    socket.removeAllListeners('SCOREBOARD');
-    socket.removeAllListeners('LIFELINE_TOAST');
-    socket.removeAllListeners('PAUSED');
-    socket.removeAllListeners('RESUMED');
-    socket.removeAllListeners('ERROR');
-    socket.removeAllListeners('connect');
-    socket.removeAllListeners('disconnect');
-    socket.removeAllListeners('connect_error');
+    socket.off('BOMB_DEFUSED', onBombDefused);
+    socket.off('BOMB_EXPLODED', onBombExploded);
+    socket.off('SCOREBOARD', onScoreboard);
+    socket.off('LIFELINE_TOAST', onLifelineToast);
+    socket.off('PAUSED', onPaused);
+    socket.off('RESUMED', onResumed);
+    socket.off('ERROR', onError);
+    socket.off('connect', onConnect);
+    socket.off('disconnect', onDisconnect);
+    socket.off('connect_error', onConnectError);
+    socket.io.off('reconnect_attempt', onReconnectAttempt);
   };
 }

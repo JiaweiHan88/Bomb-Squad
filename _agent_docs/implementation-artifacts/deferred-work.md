@@ -47,3 +47,10 @@
 - `aria-live="polite"` on a freshly mounted LoadingScreen may never announce its status to screen readers — live regions announce changes, not initial content (`apps/client/src/ui/LoadingScreen.tsx`). Minor a11y polish; revisit with the accessibility-floor pass.
 - No component tests for ConfirmButton's two-step state machine or PlatformGate precedence — story 2.1 test scope was pure logic only per project testing rules; revisit when component-test / visual-regression infra (Playwright) lands.
 - iPad desktop-UA bypasses the mobile bounce (`apps/client/src/ui/platform.ts`) — iPadOS 13+ Safari reports a `Macintosh` UA, so `isMobileUA` never matches. Accepted gap (decision 2026-06-12): an iPad Pro at 1366×1024 passes the viewport gate and may be usable; revisit with `maxTouchPoints` heuristic if iPad reports surface.
+
+## Deferred from: code review of story 1-7 (2026-06-12)
+
+- `transports: ['websocket']` has no polling fallback (`apps/client/src/net/socket.ts:10`) — clients behind proxies/firewalls that block the WS upgrade can never connect. Spec-prescribed in story 1.7 Task 2; revisit during NAT/firewall testing (voice epic, per project-context "test behind symmetric NAT").
+- `applyModuleUpdate` doesn't verify the documented `moduleId` invariant (`apps/client/src/store/gameStore.ts`) — shared contract says `modules[moduleIndex].moduleId === state.moduleId`; a mismatched payload would overwrite the wrong module. Server-guaranteed today; add a guard when MODULE_UPDATE is actually emitted (Epic 2/3).
+- `ERROR` with `recoverable: false` has no fatal-path handling (`apps/client/src/net/bindServerEvents.ts`) — both branches just `console.error`. Handler is a spec-sanctioned stub; real error UX lands with Epic 2+.
+- Reconnect leaves stale `session`/`bomb`/`timer` with no resync (`apps/client/src/net/bindServerEvents.ts`) — after drop+reconnect the UI shows "connected" against dead-connection state. Resync arrives when the server emits SESSION_STATE on (re)join in Epic 2.
