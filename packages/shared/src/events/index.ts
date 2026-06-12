@@ -16,4 +16,6 @@ export type {
   LifelineToastPayload,
   PauseResumePayload,
   ErrorPayload,
+  ManualPositionPayload,
+  ExpertManualPositionPayload,
 } from './payloads.js';

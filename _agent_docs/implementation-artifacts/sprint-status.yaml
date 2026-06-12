@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 8-3 created (ready-for-dev); epic-8 → in-progress
+last_updated: 2026-06-13  # merge master (5-1/5-2 done, epic-5 in-progress); story 8-3 created (ready-for-dev); epic-8 → in-progress
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -87,9 +87,9 @@ development_status:
   epic-4-retrospective: optional
 
   # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----
-  epic-5: backlog
-  5-1-module-plugin-scaffold-sandbox-and-click-primitive: backlog
-  5-2-expert-manual-viewer: backlog
+  epic-5: in-progress
+  5-1-module-plugin-scaffold-sandbox-and-click-primitive: done
+  5-2-expert-manual-viewer: done
   5-3-wires-module-walking-skeleton: backlog
   5-4-the-button-module: backlog
   5-5-passwords-module: backlog
