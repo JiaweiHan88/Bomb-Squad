@@ -4,7 +4,7 @@ baseline_commit: 2aa2ad0
 
 # Story 4.5: Strike Indicator & Strike Roll-Up
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -56,6 +56,13 @@ So that the whole team feels the shared pressure.
   - [x] Gates: `pnpm -r exec tsc --noEmit` → 0 errors, no `@ts-ignore`; `pnpm --filter @bomb-squad/client build` → green; `pnpm -r test` → no regressions (baseline: shared 24 ✓, client 120 ✓, server 147 ✓).
   - [x] **Manual smoke (record honestly, check by check, in Completion Notes — house standard):** `/dev/bomb`, then: (a) idle: strike plate + 2 dim dots + `STRIKES` caption visible beside the timer at overview, nothing crowds indicators/batteries/timer from a normal orbit; (b) **T** then **Shift+1** → module LED flashes red 600ms AND dot 1 lights red AND the countdown visibly accelerates AND the LCD glow steps brighter — all four from one keypress, no modal, no overlay; (c) second **Shift+2** → dot 2 lights, speed compounds (×1.5625); (d) third **Shift+3** → both dots stay lit, count clamps, nothing explodes client-side (explosion is the server's, Epic 8); (e) **Shift+digit with no timer** → flash only, dots unchanged (guard works); (f) digit-toggle a module solved → solve LED green, strike dots unaffected; (g) `prefers-reduced-motion: reduce` → dots still swap state instantly (no animation to disable), module flash uses its static fallback (4.3 behaviour intact); (h) 4.1–4.4 regression: orbit/zoom/focus/ESC, cursor hide, serial/indicators/batteries/ports, timer T/P/U behaviours all intact (S is gone — expected); (i) several minutes running → no frame collapse (this component adds zero per-frame work — verify no new `useFrame` exists via grep).
   - [x] **Jay verifies interactively (required — story is not done until his observed result is recorded in Completion Notes):** real browser, run (b) and (c) — does a strike *land* as one coherent event (flash + dot + faster clock + brighter glow, no interruption)? Can he read the strike count at overview without zooming? Note: run the worktree dev server directly (`pnpm --filter @bomb-squad/client dev`) — worktrees lack compose env files.
+
+### Review Findings
+
+_Adversarial code review 2026-06-13 (Blind Hunter / Edge Case Hunter / Acceptance Auditor). Result: 0 decision-needed, 0 patch, 2 defer, 7 dismissed. Both ACs confirmed met; no Critical/High/Medium issues._
+
+- [x] [Review][Defer] STRIKE-before-`BOMB_INIT` shows the wrong dot floor [`apps/client/src/scenes/StrikeIndicator.tsx`] — if a `STRIKE` arrives before `BOMB_INIT`, `gameStore.setStrike` drops the count (keeps timer only, with a warn) and the `s.bomb?.strikes ?? 0` selector renders 0 dots while the server believes ≥1. Pre-existing store ordering guard; unreachable in the dev harness (`if (!module) return` guarantees a bomb). Defer to 8.4 (real server emitter / reconnect semantics).
+- [x] [Review][Defer] Strike-housing overlap proven only at the single-row envelope [`apps/client/src/scenes/strikeIndicator.ts`, `__tests__/strikeIndicator.test.ts`] — the footprint tests assert clearance at `≤6` indicators / `≤8` batteries (the single-row corner), but not the two-row transition edge (9th battery / 7th indicator) where a second row consumes the band. The strike housing inherits the timer housing's z-band verbatim, so it extends the existing 8.2 two-row deferral; a range widening past the envelope must renegotiate both housings together (the overlap test fails loudly to catch it).
 
 ## Dev Notes
 
