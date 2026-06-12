@@ -4,7 +4,7 @@ baseline_commit: 4126960
 
 # Story 4.4: Diegetic Timer LCD with Client Extrapolation
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -64,6 +64,13 @@ So that I can read and call out the remaining time precisely.
   - [x] Gates: `pnpm -r exec tsc --noEmit` → 0 errors, no `@ts-ignore`; `pnpm --filter @bomb-squad/client build` → green; `pnpm -r test` → no regressions (baseline: shared 24 ✓, client 76 ✓, server 64 ✓).
   - [x] **Manual smoke (record honestly, check by check, in Completion Notes — house standard):** `/dev/bomb`, then: (a) idle LCD renders on its housing, ghost `8:88` visible, label `T — MINUS`, findable at overview, doesn't occlude indicators/batteries from a normal orbit; (b) **T** → 5:00 counts down smoothly, digits flip cleanly once per second with zero digit animation; (c) **P** → freeze, orbit while frozen, **P** → resumes from the frozen value (not jumped); (d) **S** → countdown visibly faster, glow a step brighter; second **S** → faster still (compounding); (e) **U** → under 10s the glow pulses on each second tick, phase-locked to the digit change; (f) reach 0:00 → display holds at 0:00, nothing else happens, no console errors (AC3); (g) `prefers-reduced-motion: reduce` → no pulse, static glow, digits still update; (h) 4.1–4.3 regression: orbit/zoom/focus/ESC, cursor hide, serial/indicators/batteries/ports, solve-LED toggles + strike flash all intact; (i) several minutes running → no frame collapse, no memory creep (troika sync ≤1/sec — confirm no per-frame sync calls via a counter or profiler sample).
   - [x] **Jay verifies interactively (required — story is not done until his observed result is recorded in Completion Notes):** real browser, run (b), (e) and (f) — readability of the LCD at overview ("can you call out the time without zooming?"), the under-10s pulse feel, and the 0:00 hold. Note: worktree dev servers need their own env/`--build` if run through compose — plain `pnpm --filter @bomb-squad/client dev` from the worktree is the simplest path.
+
+## Review Findings
+
+_Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor), 2026-06-12. No Critical/High defects. All three ACs verified met. 0 decisions, 0 patches, 2 deferred, 8 dismissed as noise/false-positive/documented-deviation._
+
+- [x] [Review][Defer] Server-clock offset not reset on disconnect/reconnect [apps/client/src/net/serverClock.ts:25] — `clockOffsetMs` is process-global and only cleared by the test-only `resetClockOffsetForTest()`. On a future reconnect to a different server epoch, the stale offset persists until the first running broadcast, momentarily biasing `serverNow()` (potentially *ahead* — phantom-expiry direction). Unreachable in the single-connection dev harness. Deferred to Story 8.4 (the real server emitter + RTT/smoothing scope the file already defers to).
+- [x] [Review][Defer] Housing↔feature overlap clearance proven for single-row layouts only [apps/client/src/scenes/timerLcd.ts:83] — the top-band housing clears the indicator zone + battery tray for ≤6 indicators / ≤8 batteries (overlap test enforced); two-row layouts would consume the central band. Deferred to Story 8.2 when generation ranges land; the overlap test fails loudly if the envelope is exceeded. Already flagged in Completion Notes.
 
 ## Dev Notes
 
