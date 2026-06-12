@@ -14,9 +14,17 @@ export interface PostgresConnection {
  * Construct a pg.Pool and wrap it with PostgresArchive.
  * The pool is lazy — the first query proves reachability.
  * Idle-client errors are logged; an unhandled pool 'error' event crashes Node.
+ *
+ * `connectionTimeoutMillis`/`query_timeout` bound the connect and query waits so a
+ * half-open Postgres endpoint makes the `SELECT 1` probe reject fast instead of
+ * hanging the readiness probe (and with it `/health` and every handshake gate).
  */
 export function connectPostgres(url: string): PostgresConnection {
-  const pool = new Pool({ connectionString: url });
+  const pool = new Pool({
+    connectionString: url,
+    connectionTimeoutMillis: 2000,
+    query_timeout: 2000,
+  });
   pool.on('error', (err: Error) => {
     console.error('[postgres] idle client error', err.message);
   });

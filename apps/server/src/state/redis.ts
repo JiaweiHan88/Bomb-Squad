@@ -25,7 +25,15 @@ export function createRedisStore(client: RedisLike): RedisStore {
     async getJSON<T>(key: string): Promise<T | null> {
       const raw = await client.get(key);
       if (raw === null) return null;
-      return JSON.parse(raw) as T;
+      try {
+        return JSON.parse(raw) as T;
+      } catch (err) {
+        // A non-null value that isn't valid JSON (empty string, a foreign/legacy
+        // write, a partial overwrite) must surface as a descriptive error, not a
+        // raw SyntaxError — and never silently as `null`, which would mask data loss.
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(`RedisStore.getJSON: malformed JSON at key "${key}": ${reason}`);
+      }
     },
 
     async setJSON<T>(key: string, value: T): Promise<void> {

@@ -4,7 +4,7 @@ baseline_commit: 0fece04
 
 # Story 1.5: Data-Store Adapters — Redis Keyspace & Postgres Pool
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -247,3 +247,14 @@ claude-sonnet-4-6
 - 2026-06-12: Story 1.5 implemented — Redis keyspace adapter (O(1) key-builders + typed get/set/del/ping/isReady), Postgres pool adapter (pool + SELECT 1 health probe, no writes), health-registry hardening (malformed-result normalization, duplicate-name throw), Socket.IO readiness gate, boot wiring + graceful shutdown. 38 tests pass, `tsc --noEmit` clean. Status: review.
 
 - 2026-06-11: Story 1.5 drafted — Redis keyspace adapter (O(1) key-builders + get/set/del/ping) + Postgres pool adapter (pool + SELECT 1 health, no writes) + health-registry hardening (malformed-result normalization, duplicate-name throw, resolving two Story 1.4 deferrals) + Socket.IO readiness connection gate. Status: ready-for-dev.
+
+## Review Findings (Code Review 2026-06-12)
+
+Three-layer adversarial review (Blind Hunter, Edge Case Hunter, Acceptance Auditor). All 3 ACs **SATISFIED**; no AC violations. 3 patch items, 3 deferred, 9 dismissed as noise/handled.
+
+- [x] [Review][Patch] `getJSON` throws on malformed/empty-string value instead of returning `null` [apps/server/src/state/redis.ts:getJSON] — **FIXED.** `JSON.parse` is now wrapped; a non-null, non-JSON value (incl. empty string) throws a descriptive `RedisStore.getJSON: malformed JSON at key "<key>": <reason>` instead of a raw `SyntaxError`, and never silently `null` (which would mask data loss). Two regression tests added.
+- [x] [Review][Patch] No timeout on readiness probes — a black-holed store hangs `/health` and every handshake [apps/server/src/state/redis.ts:ping, apps/server/src/persistence/postgres.ts:ping] — **FIXED.** Bounded the client waits: ioredis `connectTimeout`/`commandTimeout: 2000` (`state/index.ts`), pg `connectionTimeoutMillis`/`query_timeout: 2000` (`persistence/index.ts`). A half-open endpoint now makes the probe reject fast rather than wedge `runAll()`.
+- [x] [Review][Patch] `io.use` readiness gate has no try/catch — a rejecting `runAll()` hangs the handshake [apps/server/src/index.ts:79-89] — **FIXED.** Gate body wrapped in try/catch; any throw out of `runAll()` now logs and rejects the handshake with `SERVER_NOT_READY` (defense-in-depth, `next()` is always called).
+- [x] [Review][Defer] Signal during the blocking `await redisClient.connect()` is unguarded [apps/server/src/index.ts:59-63,119-120] — deferred, extends the pre-existing "signal before listen" shutdown-robustness item in deferred-work.md (Story 1.5 widened the window by inserting a blocking connect before handler registration).
+- [x] [Review][Defer] Adapter error events log via `console.error`, bypassing the pino logger; unbounded reconnect-storm spam [apps/server/src/state/index.ts:790-792, apps/server/src/persistence/index.ts:558-560] — deferred, operational polish (non-fatal; crash already prevented by the attached handlers). Inject `fastify.log` into the factories and/or cap reconnect logging.
+- [x] [Review][Defer] Key-builders don't guard `sessionId`/`teamId` containing `:` or empty string [apps/server/src/state/keys.ts] — deferred, spec-sanctioned ("keep IDs from containing `:` is a later-story concern; join codes are alphanumeric").

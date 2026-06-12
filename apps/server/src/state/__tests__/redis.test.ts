@@ -58,6 +58,22 @@ describe('createRedisStore', () => {
     expect(result).toBeNull();
   });
 
+  it('getJSON throws a descriptive error on a non-null, non-JSON value', async () => {
+    // A foreign/legacy write or partial overwrite — must surface as a clear error,
+    // never a raw SyntaxError and never silently as null (would mask data loss).
+    await fake.set('corrupt', 'not-json');
+    const store = createRedisStore(fake);
+    await expect(store.getJSON('corrupt')).rejects.toThrow(
+      'RedisStore.getJSON: malformed JSON at key "corrupt"',
+    );
+  });
+
+  it('getJSON throws on an empty-string value (passes the null guard)', async () => {
+    await fake.set('empty', '');
+    const store = createRedisStore(fake);
+    await expect(store.getJSON('empty')).rejects.toThrow('malformed JSON at key "empty"');
+  });
+
   it('del removes a key', async () => {
     const store = createRedisStore(fake);
     await store.setJSON('to-remove', { x: 1 });

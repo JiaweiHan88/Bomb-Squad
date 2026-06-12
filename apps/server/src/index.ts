@@ -77,9 +77,17 @@ async function start(): Promise<void> {
   // Per-connection runAll() is acceptable in V1 (infrequent handshakes).
   // Future optimization: cache the last readiness result with a ~1 s TTL.
   io.use(async (_socket, next) => {
-    const { healthy } = await healthRegistry.runAll();
-    if (healthy) return next();
-    next(new Error('SERVER_NOT_READY'));
+    try {
+      const { healthy } = await healthRegistry.runAll();
+      if (healthy) return next();
+      next(new Error('SERVER_NOT_READY'));
+    } catch (err) {
+      // runAll() normalizes per-probe failures, so this is defense-in-depth: an
+      // unexpected throw must still reject the handshake, never leave next() uncalled
+      // (which would wedge the connection silently).
+      fastify.log.error(err, 'readiness gate error — rejecting handshake');
+      next(new Error('SERVER_NOT_READY'));
+    }
   });
 
   let shuttingDown = false;
