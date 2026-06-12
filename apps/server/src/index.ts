@@ -5,6 +5,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@bomb-squad/shared';
 import { config } from './config/index.js';
 import { healthRegistry } from './health/index.js';
+import { connectRedis } from './state/index.js';
+import { connectPostgres } from './persistence/index.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
 export type AppIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
@@ -48,6 +50,38 @@ export async function buildServer(): Promise<BuiltServer> {
 async function start(): Promise<void> {
   const { fastify, io } = await buildServer();
 
+  // Connect data stores. A store that is down at boot must NOT crash start() —
+  // we catch/log and continue so /health is reachable and reports 503.
+  // Contrast Story 1.4: bad config exits (unrecoverable); a down store waits (recoverable).
+  const { client: redisClient, store: redisStore } = connectRedis(config.REDIS_URL);
+  const { pool, archive } = connectPostgres(config.DATABASE_URL);
+
+  try {
+    await redisClient.connect();
+  } catch (err) {
+    fastify.log.error(err, 'redis initial connect failed — will retry in background');
+  }
+
+  // Register readiness probes into the health registry (boot path, not module-load,
+  // so adapter files stay import-safe for unit tests — mirrors the parseEnv/config split).
+  healthRegistry.register('redis', async () => {
+    const ok = await redisStore.ping();
+    return { ok, ...(ok ? {} : { detail: 'redis PING failed' }) };
+  });
+  healthRegistry.register('postgres', async () => {
+    const ok = await archive.ping();
+    return { ok, ...(ok ? {} : { detail: 'postgres SELECT 1 failed' }) };
+  });
+
+  // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
+  // Per-connection runAll() is acceptable in V1 (infrequent handshakes).
+  // Future optimization: cache the last readiness result with a ~1 s TTL.
+  io.use(async (_socket, next) => {
+    const { healthy } = await healthRegistry.runAll();
+    if (healthy) return next();
+    next(new Error('SERVER_NOT_READY'));
+  });
+
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (shuttingDown) return;
@@ -68,6 +102,13 @@ async function start(): Promise<void> {
       // clean shutdown still exits 0.
       await fastify.close().catch((err: NodeJS.ErrnoException) => {
         if (err?.code !== 'ERR_SERVER_NOT_RUNNING') throw err;
+      });
+      // Close stores after HTTP/socket layer is down (no new work can arrive).
+      await redisClient.quit().catch((err: Error) => {
+        fastify.log.error(err, 'error closing redis');
+      });
+      await pool.end().catch((err: Error) => {
+        fastify.log.error(err, 'error closing postgres pool');
       });
       process.exit(0);
     } catch (err) {

@@ -16,17 +16,21 @@ export interface HealthReport {
 /**
  * Registry of readiness probes consulted by `GET /health`.
  *
- * Story 1.5 registers Redis and Postgres readiness probes here; this story
- * ships the registry with zero store checks. With no checks registered,
- * `runAll()` reports `healthy: true` — so `/health` is a liveness + config-valid
- * signal until 1.5 wires the store probes, at which point the "OK only after
- * deps reachable" behaviour holds with no change to the endpoint.
+ * Story 1.5 registers Redis and Postgres readiness probes here.
+ * With no checks registered, `runAll()` reports `healthy: true`.
  */
 export class HealthRegistry {
   private readonly checks = new Map<string, ReadinessCheck>();
 
-  /** Register (or replace) a named readiness probe. */
+  /**
+   * Register a named readiness probe.
+   * Throws if a probe with this name is already registered — duplicate registration
+   * is a boot bug that should be caught immediately (fail-loud).
+   */
   register(name: string, check: ReadinessCheck): void {
+    if (this.checks.has(name)) {
+      throw new Error(`HealthRegistry: duplicate probe name "${name}"`);
+    }
     this.checks.set(name, check);
   }
 
@@ -37,7 +41,8 @@ export class HealthRegistry {
 
   /**
    * Run every registered probe concurrently and aggregate. A probe that throws
-   * counts as `{ ok: false, detail: <error message> }` — a crashing probe must
+   * OR resolves a malformed (non-`{ok:boolean}`) shape counts as
+   * `{ ok: false, detail: 'malformed readiness result' }` — a crashing probe must
    * never crash the endpoint.
    */
   async runAll(): Promise<HealthReport> {
@@ -45,7 +50,11 @@ export class HealthRegistry {
     const results = await Promise.all(
       entries.map(async ([name, check]): Promise<[string, ReadinessResult]> => {
         try {
-          return [name, await check()];
+          const result = await check();
+          if (result === null || result === undefined || typeof result.ok !== 'boolean') {
+            return [name, { ok: false, detail: 'malformed readiness result' }];
+          }
+          return [name, result];
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
           return [name, { ok: false, detail }];

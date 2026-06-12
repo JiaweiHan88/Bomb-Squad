@@ -1,5 +1,5 @@
 import type { BuiltServer } from '../index.js';
-import type { HealthRegistry } from '../health/registry.js';
+import { HealthRegistry } from '../health/registry.js';
 
 // /health builds the full app (which imports `config`, validated at module load),
 // so give the config module a valid env before the dynamic import below.
@@ -53,5 +53,55 @@ describe('GET /health', () => {
     } finally {
       healthRegistry.unregister('always-fails');
     }
+  });
+});
+
+describe('HealthRegistry hardening (fresh registry, no infra)', () => {
+  it('a probe resolving {ok:false} makes runAll().healthy === false', async () => {
+    const registry = new HealthRegistry();
+    registry.register('db', async () => ({ ok: false, detail: 'down' }));
+    const report = await registry.runAll();
+    expect(report.healthy).toBe(false);
+    expect(report.checks['db']).toMatchObject({ ok: false });
+  });
+
+  it('a probe resolving undefined is normalized to {ok:false, detail:"malformed readiness result"}', async () => {
+    const registry = new HealthRegistry();
+    // Cast to bypass type-check — simulates a badly-typed real probe.
+    registry.register('bad', async () => undefined as unknown as { ok: boolean });
+    const report = await registry.runAll();
+    expect(report.healthy).toBe(false);
+    expect(report.checks['bad']).toEqual({ ok: false, detail: 'malformed readiness result' });
+  });
+
+  it('a probe resolving null is normalized to {ok:false, detail:"malformed readiness result"}', async () => {
+    const registry = new HealthRegistry();
+    registry.register('bad', async () => null as unknown as { ok: boolean });
+    const report = await registry.runAll();
+    expect(report.healthy).toBe(false);
+    expect(report.checks['bad']).toEqual({ ok: false, detail: 'malformed readiness result' });
+  });
+
+  it('a probe resolving a non-{ok:boolean} shape is normalized', async () => {
+    const registry = new HealthRegistry();
+    registry.register('bad', async () => ({ ok: 'yes' } as unknown as { ok: boolean }));
+    const report = await registry.runAll();
+    expect(report.healthy).toBe(false);
+    expect(report.checks['bad']).toEqual({ ok: false, detail: 'malformed readiness result' });
+  });
+
+  it('registering a duplicate name throws', () => {
+    const registry = new HealthRegistry();
+    registry.register('redis', async () => ({ ok: true }));
+    expect(() => registry.register('redis', async () => ({ ok: true }))).toThrow(
+      'HealthRegistry: duplicate probe name "redis"',
+    );
+  });
+
+  it('empty registry reports healthy: true', async () => {
+    const registry = new HealthRegistry();
+    const report = await registry.runAll();
+    expect(report.healthy).toBe(true);
+    expect(report.checks).toEqual({});
   });
 });
