@@ -530,7 +530,7 @@ Self-hosted Docker Compose (settled). A team lead runs one stack.
 
 - **All services have health checks**; the game server waits on Redis + Postgres health before accepting connections.
 - **`scripts/smoke-test.sh`** validates every service is reachable before a session runs.
-- **Ports:** 443 (HTTPS), 7880 (LiveKit HTTP/WS), 7881 (LiveKit TCP), 3478 (TURN), 50000–60000/udp (RTP). Document in the deployment README.
+- **Ports:** 443 (HTTPS), 7880 (LiveKit HTTP/WS), 7881 (LiveKit TCP), 3478 (TURN), **50000–50199/udp (LiveKit RTP/ICE)**, **40000–40199/udp (coturn TURN relay)**. The two UDP ranges MUST stay disjoint — LiveKit and coturn cannot share a relay range without colliding on host ports, and coturn's relay range must be published to the host or TURN relaying silently fails. Document in the deployment README.
 - **Minimum host:** 2 vCPU, 4 GB RAM, 100 Mbps symmetric, 10 GB storage.
 - **WebRTC reliability gate (GDD A4 / highest technical risk):** test behind a simulated symmetric-NAT corporate firewall before the first internal event; verify TURN relay path and document port requirements.
 - **Multi-session note:** one `server` process handles all concurrent sessions; sessions are keyed in Redis, so a process restart does not lose session state. No orchestrator, no per-session containers.
