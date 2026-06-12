@@ -5,7 +5,10 @@
 ```bash
 cp .env.example .env          # copy template
 # Edit .env: fill in LIVEKIT_API_KEY, LIVEKIT_API_SECRET, TURN_SECRET with real values
-docker compose up -d          # start all services (target: < 3 minutes to healthy)
+docker compose up -d --wait   # start all services; --wait blocks until every
+                              # health check passes (target: < 3 minutes).
+                              # Without --wait the smoke test races startup
+                              # (server alone has a 30 s health start_period).
 bash scripts/smoke-test.sh    # verify all services are reachable
 ```
 

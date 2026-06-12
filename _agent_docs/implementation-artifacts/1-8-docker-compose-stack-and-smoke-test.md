@@ -4,7 +4,7 @@ baseline_commit: a29daef
 
 # Story 1.8: Docker Compose Stack & Smoke Test
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -63,7 +63,7 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
   - [x] Update root `README.md` with a short "Run the stack" pointer to `docs/deployment.md` (don't duplicate the full content).
 
 - [x] **Task 5 — `scripts/smoke-test.sh` (AC: 2)**
-  - [x] Create `scripts/smoke-test.sh`, executable (`chmod +x`), `#!/usr/bin/env bash` + `set -euo pipefail`.
+  - [x] Create `scripts/smoke-test.sh`, executable (`chmod +x`), `#!/usr/bin/env bash` + `set -uo pipefail` (no `-e` — deliberate, so failures are aggregated per the "don't bail on the first failure" subtask below).
   - [x] Check each service reachable: `server` `GET /health` returns 200 (and JSON `status: "ok"`); `redis` `PING`→`PONG`; `postgres` `pg_isready`; `livekit` `7880` reachable; `coturn` `3478` reachable; `caddy` responds; `client` served. Prefer probing **through the running compose stack** (e.g. `docker compose exec` or curling published ports) so the script reflects the real deployment, not host-local processes.
   - [x] **Port assertions (AC4):** verify the coturn TURN relay range is published (`docker compose port --protocol udp coturn 40000` returns a mapping) and that LiveKit's RTP mux port is published (`docker compose port --protocol udp livekit 7882`). Add a regression guard that coturn does **not** publish LiveKit's mux port (`docker compose port --protocol udp coturn 7882` must return nothing) so the two can't silently collide.
   - [x] Print a per-service PASS/FAIL line; **exit non-zero if ANY check fails** (AC2). Aggregate failures (don't bail on the first) so the operator sees the full picture, then exit 1 if any failed.
@@ -75,6 +75,28 @@ so that I can spin up the whole game in under 3 minutes and verify it before a s
   - [x] Negative check (proves AC2 is real): stop one service (e.g. `docker compose stop redis`), re-run the smoke test → it must exit non-zero and name the failing service. Restart and confirm green again.
   - [x] Confirm the server's startup gate: with Redis/Postgres healthy, `GET /health` → 200; the server accepts Socket.IO connections. (No app code changes in this story — the gate already exists in `apps/server/src/index.ts`.)
   - [x] `pnpm -r exec tsc --noEmit` still exits 0 (this story adds infra, not TS — but run the gate to be safe).
+
+### Review Findings
+
+- [x] [Review][Decision→Fixed] Client image bakes `VITE_SERVER_URL` default `http://localhost:3001` at build time — resolved as **same-origin via Caddy**: production builds now fall back to `window.location.origin` (Caddy proxies `/socket.io/*`); dev keeps the explicit localhost default [apps/client/src/App.tsx].
+- [x] [Review][Decision→Deferred] Production WebRTC reachability gaps — (a) no `wss://` path for LiveKit signaling (mixed content blocks `ws://` from an `https://` page); (b) coturn lacks `--external-ip` (relay advertises container RFC1918 address). **Deferred to the LiveKit voice stories** — no voice client code exists yet; both gaps recorded in `deferred-work.md` with resolution guidance.
+- [x] [Review][Patch] Caddy never receives `PORT` — `{$PORT:3001}` always resolves to 3001 [Caddyfile:21,26; docker-compose.yml caddy service] — set `PORT≠3001` in `.env` and Caddy proxies `/socket.io` + `/health` to a dead port. Pass `PORT: ${PORT:-3001}` into the caddy service environment.
+- [x] [Review][Patch] Shell `PORT` vs `.env` `PORT` divergence — compose interpolation (port mapping, healthcheck URL) uses shell-exported `PORT`, while the container gets `.env`'s value via `env_file` → server can listen on an unmapped, unprobed port [docker-compose.yml server service]. Use `$$PORT` in the healthcheck and document the precedence.
+- [x] [Review][Patch] Postgres credentials hardcoded in two places; `.env` `DATABASE_URL` silently clobbered by the compose override [docker-compose.yml postgres.environment + server.environment] — parameterize `POSTGRES_PASSWORD` and build the override `DATABASE_URL` from it.
+- [x] [Review][Patch] `TURN_SECRET` / `LIVEKIT_KEYS` break on special characters — folded-scalar `command:` word-splits a secret containing whitespace; `LIVEKIT_KEYS` parsing breaks on `:` in the key [docker-compose.yml coturn.command, livekit.environment]. Quote where possible and document the character constraints in `.env.example`.
+- [x] [Review][Patch] smoke-test reads `PORT` from the shell only, never `.env` [scripts/smoke-test.sh:7] — false FAIL (or false PASS against an unrelated process) when `PORT` is set in `.env` only. Source `.env` if present.
+- [x] [Review][Patch] curl exit 28 (timeout) counted as PASS in livekit/caddy/client checks [scripts/smoke-test.sh livekit/caddy/client sections] — a service that accepts TCP but hangs past `--max-time 5` reports "reachable". Treat only genuine HTTP responses as pass.
+- [x] [Review][Patch] Quick-start races startup — README/deployment.md run smoke-test immediately after `docker compose up -d` with no wait; `start_period` alone is 30 s [README.md, docs/deployment.md] — document `docker compose up -d --wait` (or add a bounded retry loop to the script).
+- [x] [Review][Patch] `caddy` `depends_on` ignores health — bare list form starts Caddy while upstreams are down and its admin-API healthcheck passes regardless [docker-compose.yml caddy.depends_on] — use `condition: service_healthy`.
+- [x] [Review][Patch] Caddy admin API bound to all interfaces — `admin :2019` binds 0.0.0.0; any container on the compose network can reconfigure the proxy. Default `localhost:2019` already serves the in-container healthcheck [Caddyfile global block].
+- [x] [Review][Patch] Manual `header_up Connection/Upgrade` in the Socket.IO route — Caddy v2 handles WebSocket upgrades natively; force-copying hop-by-hop headers is at best a no-op and can break upgrade handling [Caddyfile @socketio block]. Remove.
+- [x] [Review][Patch] Smoke test never exercises the Caddy→app path — only "port 80 answers anything"; a broken Caddyfile route or TLS failure passes. Add `curl -k https://localhost/health` through Caddy [scripts/smoke-test.sh caddy section].
+- [x] [Review][Patch] `vite preview` Host-header check rejects proxied real domains — Vite ≥6.0.9 enforces `preview.allowedHosts` (localhost-only by default); Caddy forwards the original `Host` → 403 on any non-localhost domain [apps/client/vite.config.ts, apps/client/Dockerfile]. Configure `preview.allowedHosts`.
+- [x] [Review][Patch] Fabricated comment: "Compose v5 dropped the `<port>/udp` arg form" — no Compose v5 exists; fix the comment (the `--protocol udp` flag choice itself is fine) [scripts/smoke-test.sh:51].
+- [x] [Review][Patch] `docs/deployment.md` cites a deferred-work entry that doesn't exist — add the `docker-compose.prod.yml` prod-overlay note to `_agent_docs/implementation-artifacts/deferred-work.md` [docs/deployment.md Deferred section].
+- [x] [Review][Patch] Task 5 subtask says `set -euo pipefail` but the script deliberately uses `set -uo` (aggregate-failures design) — amend the subtask text so the [x] is truthful [this story file, Task 5].
+- [x] [Review][Defer] `vite preview` has no SPA fallback — deep links / refresh on client-side routes will 404 through Caddy's catch-all; no router exists yet (story 1.7 is single-page) [apps/client/Dockerfile] — deferred, becomes real when client routing lands.
+- [x] [Review][Defer] App containers run as root — no `USER` directive in either runtime stage; belongs in the deferred `docker-compose.prod.yml` hardening overlay [apps/server/Dockerfile, apps/client/Dockerfile] — deferred, prod hardening out of scope this milestone.
 
 ## Dev Notes
 

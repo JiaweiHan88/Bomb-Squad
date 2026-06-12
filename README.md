@@ -76,8 +76,8 @@ pnpm -r exec tsc --noEmit         # TypeScript must pass with zero errors
 ## Run the Full Stack
 
 ```bash
-cp .env.example .env   # fill in secrets
-docker compose up -d
+cp .env.example .env             # fill in secrets
+docker compose up -d --wait      # --wait blocks until all health checks pass
 bash scripts/smoke-test.sh
 ```
 
