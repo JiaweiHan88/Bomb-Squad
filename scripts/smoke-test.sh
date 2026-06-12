@@ -4,6 +4,12 @@
 # Exit 0 = all PASS; exit 1 = at least one FAIL.
 set -uo pipefail
 
+# PORT resolution mirrors Compose: shell export wins, then .env, then 3001.
+# Without the .env fallback, a PORT set only in .env makes this script probe
+# the wrong port and report a false FAIL against a healthy stack.
+if [ -z "${PORT:-}" ] && [ -f .env ]; then
+  PORT=$(grep -E '^PORT=' .env | tail -n 1 | cut -d= -f2- | tr -d '[:space:]')
+fi
 PORT="${PORT:-3001}"
 FAILED=0
 
@@ -38,20 +44,23 @@ fi
 
 # ── livekit ───────────────────────────────────────────────────────────────────
 printf "\n--- livekit ---\n"
-# Probe the HTTP port; any response (even 404) means the service is up.
-# curl exit 7 = "failed to connect"; anything else means the port is open.
+# Probe the HTTP port; any HTTP response (even 404) means the service is up.
+# curl exits 0 whenever it gets an HTTP response (no -f flag); any non-zero
+# exit — connect refused (7), timeout (28), reset — means the service is NOT
+# serving, so only exit 0 passes.
 LIVEKIT_EXIT=0
 curl -so /dev/null --max-time 5 "http://localhost:7880/" 2>/dev/null || LIVEKIT_EXIT=$?
-if [ "${LIVEKIT_EXIT}" -ne 7 ]; then
+if [ "${LIVEKIT_EXIT}" -eq 0 ]; then
   pass "livekit: port 7880 reachable"
 else
   fail "livekit: port 7880 not reachable (curl exit ${LIVEKIT_EXIT})"
 fi
-# RTP/ICE media range must be published (must match port_range_* in livekit.yaml).
-if docker compose port livekit 50000/udp 2>/dev/null | grep -q ':'; then
-  pass "livekit: RTP range 50000-50199/udp published"
+# RTP/ICE media on a single UDP mux port (must match rtc.udp_port in livekit.yaml).
+# `docker compose port` takes the protocol as a flag: `--protocol udp <svc> <port>`.
+if docker compose port --protocol udp livekit 7882 2>/dev/null | grep -q ':'; then
+  pass "livekit: RTP mux port 7882/udp published"
 else
-  fail "livekit: RTP range 50000-50199/udp NOT published"
+  fail "livekit: RTP mux port 7882/udp NOT published"
 fi
 
 # ── coturn ────────────────────────────────────────────────────────────────────
@@ -68,29 +77,38 @@ fi
 # (the actual bug this guards). `docker compose port` prints a host mapping only
 # when the range is published; relay ports open on allocation, so we assert the
 # publish mapping rather than probing a live socket.
-if docker compose port coturn 40000/udp 2>/dev/null | grep -q ':'; then
-  pass "coturn: TURN relay range 40000-40199/udp published"
+if docker compose port --protocol udp coturn 40000 2>/dev/null | grep -q ':'; then
+  pass "coturn: TURN relay range 40000-40031/udp published"
 else
-  fail "coturn: TURN relay range 40000-40199/udp NOT published — relay path dead behind NAT"
+  fail "coturn: TURN relay range 40000-40031/udp NOT published — relay path dead behind NAT"
 fi
-# Regression guard: coturn and LiveKit must keep DISJOINT UDP ranges. If coturn
-# publishes anything in LiveKit's RTP range (50000-50199) they collide on host ports.
-if docker compose port coturn 50000/udp 2>/dev/null | grep -q ':'; then
-  fail "coturn publishes 50000/udp — overlaps LiveKit RTP range (port-range regression)"
+# Regression guard: coturn and LiveKit must keep DISJOINT UDP ports. If coturn
+# publishes LiveKit's RTP mux port (7882) they collide on the host UDP port.
+if docker compose port --protocol udp coturn 7882 2>/dev/null | grep -q ':'; then
+  fail "coturn publishes 7882/udp — overlaps LiveKit RTP mux port (port regression)"
 else
-  pass "coturn/livekit UDP ranges are disjoint"
+  pass "coturn/livekit UDP ports are disjoint"
 fi
 
 # ── caddy ─────────────────────────────────────────────────────────────────────
 printf "\n--- caddy ---\n"
-# Port 80 returns a 301 redirect to HTTPS; any HTTP response means Caddy is up.
+# Port 80 returns a 301 redirect to HTTPS; curl (no -L) exits 0 on any HTTP
+# response including 3xx. Non-zero (refused=7, timeout=28, …) = Caddy not serving.
 CADDY_EXIT=0
 curl -so /dev/null --max-time 5 "http://localhost:80/" 2>/dev/null || CADDY_EXIT=$?
-# curl exits 0 on 2xx/3xx; 47 = too many redirects; anything but 7/6 = connected
-if [ "${CADDY_EXIT}" -ne 7 ] && [ "${CADDY_EXIT}" -ne 6 ]; then
-  pass "caddy: port 80 reachable (exit ${CADDY_EXIT})"
+if [ "${CADDY_EXIT}" -eq 0 ]; then
+  pass "caddy: port 80 reachable"
 else
   fail "caddy: port 80 not reachable (curl exit ${CADDY_EXIT})"
+fi
+# End-to-end through the proxy: TLS termination + the /health route to the
+# server. -k accepts the local "tls internal" cert. This is the path browsers
+# actually use, so a broken Caddyfile route must fail the smoke test.
+CADDY_HEALTH=$(curl -ksf --max-time 5 "https://localhost/health" 2>/dev/null || true)
+if echo "${CADDY_HEALTH}" | grep -q '"ok"'; then
+  pass "caddy: https://localhost/health → server via TLS route"
+else
+  fail "caddy: HTTPS /health route failed (response: ${CADDY_HEALTH:-<no response>})"
 fi
 
 # ── client ────────────────────────────────────────────────────────────────────
@@ -102,13 +120,14 @@ curl -sf --max-time 5 "http://localhost:5173/" 2>/dev/null | grep -qiE '<!DOCTYP
 if [ "${CLIENT_EXIT}" -eq 0 ]; then
   pass "client: port 5173 serving HTML"
 else
-  # Fallback: just check port is open
+  # Fallback: any HTTP response (exit 0 without -f) still proves the server
+  # is up; non-zero (refused/timeout) is a genuine failure.
   CONN_EXIT=0
   curl -so /dev/null --max-time 5 "http://localhost:5173/" 2>/dev/null || CONN_EXIT=$?
-  if [ "${CONN_EXIT}" -ne 7 ] && [ "${CONN_EXIT}" -ne 6 ]; then
-    pass "client: port 5173 reachable"
+  if [ "${CONN_EXIT}" -eq 0 ]; then
+    pass "client: port 5173 reachable (but not serving expected HTML)"
   else
-    fail "client: port 5173 not reachable"
+    fail "client: port 5173 not reachable (curl exit ${CONN_EXIT})"
   fi
 fi
 

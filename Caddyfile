@@ -4,8 +4,10 @@
 # and remove "tls internal" — Caddy will obtain a Let's Encrypt cert automatically.
 
 {
-  # Caddy admin API on 2019 (HTTP only) — used for health check probing.
-  admin :2019
+  # Caddy admin API on 2019 (HTTP only) — used by the in-container health check.
+  # Bound to localhost so other containers on the compose network can't reach
+  # the (unauthenticated) admin API and reconfigure the proxy.
+  admin localhost:2019
 }
 
 # Redirect HTTP → HTTPS
@@ -16,14 +18,11 @@
 :443 {
   tls internal
 
-  # ── Socket.IO — pass WebSocket upgrade headers through ──────────────────────
+  # ── Socket.IO — Caddy handles the WebSocket upgrade natively ────────────────
   @socketio {
     path /socket.io/*
   }
-  reverse_proxy @socketio server:{$PORT:3001} {
-    header_up Connection {http.request.header.Connection}
-    header_up Upgrade   {http.request.header.Upgrade}
-  }
+  reverse_proxy @socketio server:{$PORT:3001}
 
   # ── Health endpoint (for external probes through TLS) ───────────────────────
   reverse_proxy /health server:{$PORT:3001}

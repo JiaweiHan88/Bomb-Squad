@@ -4,10 +4,13 @@
 port: 7880
 rtc:
   tcp_port: 7881
-  # RTP/ICE UDP range. Kept disjoint from coturn's TURN relay range
-  # (40000-40199) and must match the published range in docker-compose.yml.
-  port_range_start: 50000
-  port_range_end: 50199
+  # Single UDP port with ICE/UDP mux: all participants share one port (LiveKit
+  # demuxes by ICE ufrag). An SFU needs exactly one RTP port regardless of
+  # participant count — 16 players use the same single port. 7882 sits next to
+  # the 7880/7881 signaling ports and clear of coturn's relay range. This is
+  # LiveKit's recommended production setup; replaces the old 200-port range.
+  # Must match the published 7882/udp mapping in docker-compose.yml.
+  udp_port: 7882
   # Set use_external_ip: true on a public server so SDP offers contain the
   # public IP rather than the container-internal address.
   use_external_ip: false

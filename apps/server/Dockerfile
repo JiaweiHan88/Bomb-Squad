@@ -20,4 +20,6 @@ FROM deps AS runtime
 COPY packages/shared/ packages/shared/
 COPY apps/server/ apps/server/
 EXPOSE 3001
-CMD ["node_modules/.bin/tsx", "apps/server/src/index.ts"]
+# pnpm workspaces install each package's binaries under that package's own
+# node_modules/.bin (NOT the root .bin), so tsx lives at apps/server/node_modules/.bin.
+CMD ["apps/server/node_modules/.bin/tsx", "apps/server/src/index.ts"]

@@ -100,7 +100,7 @@ This document provides the complete epic and story breakdown for Bomb Squad, dec
 - NFR12: Accessibility — non-bomb UI fully keyboard-traversable with visible focus ring; respect `prefers-reduced-motion`; no rapid-input modules.
 - NFR13: Minimum viewport 1280×720 (resize gate below); 1920×1080 baseline up to 4K; mobile bounce screen.
 - NFR14: Needy-module readiness — bomb layout, module state model, and Defuser UI must support V2 needy modules via additive changes only (no structural rewrite).
-- NFR15: Self-hosted Docker Compose deployment; minimum host 2 vCPU / 4 GB RAM / 100 Mbps symmetric / 10 GB storage; documented ports (443, 7880, 7881, 3478, 50000–60000/udp).
+- NFR15: Self-hosted Docker Compose deployment; minimum host 2 vCPU / 4 GB RAM / 100 Mbps symmetric / 10 GB storage; documented ports (443, 7880, 7881, 3478, 7882/udp [LiveKit RTP/ICE mux], 40000–40031/udp [coturn TURN relay]).
 
 ### Additional Requirements
 
@@ -404,7 +404,7 @@ So that I can spin up the whole game in under 3 minutes and verify it before a s
 
 **Given** the deployment docs
 **When** I read them
-**Then** the required ports (443, 7880, 7881, 3478, 50000–60000/udp) and minimum host spec (2 vCPU / 4 GB / 100 Mbps / 10 GB) are documented.
+**Then** the required ports (443, 7880, 7881, 3478, 7882/udp [LiveKit RTP/ICE mux port], 40000–40031/udp [coturn TURN relay]) and minimum host spec (2 vCPU / 4 GB / 100 Mbps / 10 GB) are documented.
 
 ---
 

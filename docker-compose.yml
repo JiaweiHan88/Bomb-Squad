@@ -18,7 +18,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # Single source of truth for the DB password — the server's DATABASE_URL
+      # override below is built from the same variable, so changing it in .env
+      # changes both sides at once.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
       POSTGRES_DB: bombsquad
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -36,19 +39,20 @@ services:
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     environment:
-      # Keys are set here rather than in livekit.yaml so secrets stay in .env
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-devsecret}"
+      # Keys are set here rather than in livekit.yaml so secrets stay in .env.
+      # LiveKit requires EXACTLY "key: secret" with the space after the colon —
+      # without it the server crash-loops "Could not parse keys".
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret}"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
     ports:
       - "7880:7880"
       - "7881:7881"
-      # LiveKit RTP/ICE media. Distinct from coturn's relay range (40000-40199)
-      # so the two services never collide on a host UDP port. Narrowed from the
-      # old 10k block to avoid Docker spawning a userland-proxy per port; 200
-      # ports comfortably cover a 16-player, 2-room SFU (LiveKit muxes media).
-      # Must match port_range_start/end in livekit.yaml.
-      - "50000-50199:50000-50199/udp"
+      # LiveKit RTP/ICE media on a SINGLE UDP mux port (7882). An SFU muxes all
+      # participants over one port, so 16 players need 1 port, not a range. One
+      # forward (vs 200) also keeps the full stack under Docker Desktop's WSL2
+      # forwarded-port cap. Must match rtc.udp_port in livekit.yaml.
+      - "7882:7882/udp"
     healthcheck:
       # LiveKit HTTP server on 7880 responds to GET / with a version/status page.
       # Use wget from BusyBox (Alpine-based image); exit codes: 0=ok, 4=conn fail.
@@ -62,26 +66,29 @@ services:
     image: coturn/coturn:4.6
     restart: unless-stopped
     # Pass TURN_SECRET from .env as a CLI arg so it's never baked into an image.
-    # Compose substitutes ${VAR} from .env before sending to the container.
-    command: >
-      -n
-      --log-file stdout
-      --use-auth-secret
-      --static-auth-secret=${TURN_SECRET:-changeme}
-      --realm=bombsquad.local
-      --total-quota=100
-      --min-port=40000
-      --max-port=40199
-      --fingerprint
-      --no-tlsv1
-      --no-tlsv1_1
+    # List form (not a folded string): Compose substitutes ${VAR} per element,
+    # so a secret containing whitespace cannot word-split into extra args.
+    command:
+      - "-n"
+      - "--log-file"
+      - "stdout"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SECRET:-changeme}"
+      - "--realm=bombsquad.local"
+      - "--total-quota=100"
+      - "--min-port=40000"
+      - "--max-port=40031"
+      - "--fingerprint"
+      - "--no-tlsv1"
+      - "--no-tlsv1_1"
     ports:
       - "3478:3478"
       - "3478:3478/udp"
       # Publish the TURN relay range — without this, allocated relay ports are
       # unreachable from external clients and the TURN fallback path is dead.
-      # Disjoint from LiveKit's RTP range (50000-50199) to avoid a host collision.
-      - "40000-40199:40000-40199/udp"
+      # 32 ports = one relay allocation per peer for a full 16-player session
+      # with 2x headroom. Disjoint from LiveKit's mux port (7882).
+      - "40000-40031:40000-40031/udp"
     healthcheck:
       # Debian-based coturn image has bash; /dev/tcp probe opens a TCP socket.
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/3478' 2>/dev/null"]
@@ -103,11 +110,14 @@ services:
       # The .env localhost values are for host-run dev only; inside the compose
       # network each service is reachable by its service name.
       REDIS_URL: "redis://redis:6379"
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/bombsquad"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/bombsquad"
       LIVEKIT_URL: "ws://livekit:7880"
     ports:
       # Publish server port to host for smoke-test health probing and debugging.
       # Production may remove this and route everything through Caddy (port 443).
+      # NOTE: this mapping is interpolated by Compose, which prefers a
+      # shell-exported PORT over .env's PORT. Set PORT in .env only — a
+      # divergent shell export maps a port the server doesn't listen on.
       - "${PORT:-3001}:${PORT:-3001}"
     depends_on:
       redis:
@@ -117,7 +127,11 @@ services:
     healthcheck:
       # /health returns 200 {"status":"ok"} when both Redis and Postgres probes pass.
       # The app's io.use readiness gate also blocks Socket.IO until stores are healthy.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-3001}/health 2>/dev/null | grep -q '\"ok\"'"]
+      # Use 127.0.0.1, not localhost: the server binds IPv4 (0.0.0.0) only, but in the
+      # container `localhost` resolves to IPv6 [::1] first → connection refused forever.
+      # $$PORT defers expansion to the container shell, so the probe always hits the
+      # port the server actually listens on (env_file value), not Compose's view.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3001}/health 2>/dev/null | grep -q '\"ok\"'"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -142,6 +156,10 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      # The Caddyfile proxies to server:{$PORT:3001} — without this, the
+      # placeholder always falls back to 3001 even when .env sets PORT.
+      PORT: "${PORT:-3001}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -150,11 +168,17 @@ services:
       - "80:80"
       - "443:443"
     depends_on:
-      - server
-      - client
+      # Health-gated: Caddy's own healthcheck only proves the admin API is up,
+      # so don't start it until the upstreams it proxies are actually healthy.
+      server:
+        condition: service_healthy
+      client:
+        condition: service_healthy
     healthcheck:
-      # Caddy admin API at :2019 (HTTP, no TLS) confirms the server is running.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/ 2>/dev/null | grep -qi caddy"]
+      # Caddy admin API at :2019 (HTTP, no TLS). The admin root `/` returns 404 —
+      # probe `/config/`, which returns the live JSON config (always contains an
+      # "apps" block once the Caddyfile loads) and proves Caddy is up and running.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/config/ 2>/dev/null | grep -q apps"]
       interval: 15s
       timeout: 5s
       retries: 5
