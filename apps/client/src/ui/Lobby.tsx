@@ -1,14 +1,45 @@
 import { useEffect, useRef, useState } from 'react';
+import type { PlayerInfo } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
+import { getSocket } from '../net/socket.js';
 import Button from './Button.js';
 import { buildShareLink } from './shareLink.js';
-import { BRING_THEM_IN, SHARE_SUB, COPY_LINK, COPIED } from './copy.js';
+import {
+  BRING_THEM_IN,
+  SHARE_SUB,
+  COPY_LINK,
+  COPIED,
+  TEAM_ROSTER,
+  YOU_TAG,
+  ROLE_FACILITATOR,
+  ROLE_DEFUSER,
+  ROLE_EXPERT,
+  ROLE_SPECTATOR,
+} from './copy.js';
+
+const ROLE_LABELS: Record<PlayerInfo['role'], string> = {
+  facilitator: ROLE_FACILITATOR,
+  defuser: ROLE_DEFUSER,
+  expert: ROLE_EXPERT,
+  spectator: ROLE_SPECTATOR,
+};
+
+/** Facilitator first, then by name — a stable order across roster broadcasts. */
+function sortRoster(players: Record<string, PlayerInfo>): PlayerInfo[] {
+  return Object.values(players).sort((a, b) => {
+    if (a.role === 'facilitator' && b.role !== 'facilitator') return -1;
+    if (b.role === 'facilitator' && a.role !== 'facilitator') return 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+}
 
 /**
- * Lobby (operator world): the share panel — join code, shareable link,
- * "Bring them in" copy affordance. Renders purely from the last SESSION_STATE
- * snapshot in gameStore. Roster / ready state / team assignment are
- * Stories 2.3–2.5 and are intentionally absent.
+ * Lobby (operator world): roster (name + role + "You") and the share panel —
+ * join code, shareable link, "Bring them in" copy affordance. Renders purely
+ * from the last SESSION_STATE snapshot in gameStore; every join re-broadcasts
+ * it, so the roster updates in real time for free. Team assignment is
+ * Story 2.4; ready state, mic check, and the empty-state message are
+ * Story 2.5 — intentionally absent.
  */
 export default function Lobby() {
   const session = useGameStore((s) => s.session);
@@ -27,6 +58,8 @@ export default function Lobby() {
   if (session === null) return null;
 
   const link = buildShareLink(window.location.origin, session.joinCode);
+  const selfId = getSocket().id;
+  const roster = sortRoster(session.players);
 
   const copyLink = async () => {
     try {
@@ -42,8 +75,34 @@ export default function Lobby() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
-      <section className="w-full max-w-lg rounded-lg bg-surface-raised p-8">
+    <div className="flex flex-1 items-start justify-center gap-6 p-8">
+      <section className="w-full max-w-xl rounded-lg bg-surface-raised p-8">
+        <h2 className="mb-4 font-display text-lg font-semibold">{TEAM_ROSTER}</h2>
+        <ul className="flex flex-col gap-3" data-testid="roster">
+          {roster.map((player) => (
+            <li
+              key={player.playerId}
+              className="flex items-center justify-between gap-4 rounded-md bg-surface px-4 py-3"
+            >
+              <span className="flex items-center gap-2.5 font-semibold">
+                {player.displayName}
+                {player.playerId === selfId && (
+                  // speaker-self cool blue is reserved for "this is you" — identity,
+                  // exactly its sanctioned use (DESIGN.md color reservations).
+                  <span className="font-mono text-xs font-medium uppercase tracking-widest text-speaker-self">
+                    {YOU_TAG}
+                  </span>
+                )}
+              </span>
+              <span className="font-mono text-xs uppercase tracking-widest text-ink-muted">
+                {ROLE_LABELS[player.role]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="w-full max-w-md rounded-lg bg-surface-raised p-8">
         <h2 className="mb-1 font-display text-lg font-semibold">{BRING_THEM_IN}</h2>
         <p className="mb-6 text-sm text-ink-muted">{SHARE_SUB}</p>
 

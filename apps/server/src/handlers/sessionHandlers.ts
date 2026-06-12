@@ -5,11 +5,14 @@ import type {
   ServerToClientEvents,
   RoundConfig,
   DifficultyTier,
+  PlayerRole,
+  SessionState,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
 import { sessionKey, joinCodeKey } from '../state/keys.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
+import { addPlayerToSession } from '../session/joinSession.js';
 
 /** Typed server alias declared locally to avoid an import cycle with index.ts. */
 type SessionIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
@@ -114,6 +117,55 @@ export function parseSessionCreatePayload(payload: unknown): ParseResult {
   return { ok: true, config: out };
 }
 
+/** Session capacity cap (GDD: 2–16 players; the facilitator counts as a player). */
+export const MAX_PLAYERS = 16;
+
+/** Roles a joiner may claim. 'facilitator' is mint-only via SESSION_CREATE —
+ * accepting it here would let any joiner claim facilitator authority. */
+const JOINABLE_ROLES: readonly PlayerRole[] = ['defuser', 'expert', 'spectator'];
+
+type JoinParseResult =
+  | { ok: true; joinCode: string; displayName: string; role: PlayerRole }
+  | { ok: false; message: string };
+
+/**
+ * Boundary validation for the untrusted SESSION_JOIN payload. Normalizes the
+ * code (trim + uppercase) and the name (trim), whitelists the role, and
+ * rebuilds a fresh object — unknown extra keys are inert, never forwarded.
+ */
+export function parseSessionJoinPayload(payload: unknown): JoinParseResult {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'payload must be an object' };
+  }
+  const { joinCode, displayName, role } = payload as {
+    joinCode?: unknown;
+    displayName?: unknown;
+    role?: unknown;
+  };
+
+  if (typeof joinCode !== 'string') {
+    return { ok: false, message: 'joinCode must be a string' };
+  }
+  const code = joinCode.trim().toUpperCase();
+  if (!/^[A-Z0-9]{6}$/.test(code)) {
+    return { ok: false, message: 'joinCode must be 6 characters (letters and digits)' };
+  }
+
+  if (typeof displayName !== 'string') {
+    return { ok: false, message: 'displayName must be a string' };
+  }
+  const name = displayName.trim();
+  if (name.length < 1 || name.length > 24) {
+    return { ok: false, message: 'displayName must be 1–24 characters' };
+  }
+
+  if (typeof role !== 'string' || !JOINABLE_ROLES.includes(role as PlayerRole)) {
+    return { ok: false, message: 'role must be defuser, expert, or spectator' };
+  }
+
+  return { ok: true, joinCode: code, displayName: name, role: role as PlayerRole };
+}
+
 /** Retry cap for join-code collisions (36^6 codes — collisions are theoretical). */
 const MAX_CODE_ATTEMPTS = 5;
 
@@ -180,6 +232,90 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'SESSION_CREATE_FAILED',
           message: 'Could not create the session. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // No ack on this event (frozen contract): success is the SESSION_STATE
+    // broadcast the joiner receives once in the room; failure is a typed ERROR.
+    socket.on('SESSION_JOIN', async (payload) => {
+      const parsed = parseSessionJoinPayload(payload);
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      // AR15: never log the join code — valid or attempted.
+      const notFound = () =>
+        socket.emit('ERROR', {
+          code: 'SESSION_NOT_FOUND',
+          message: "That code doesn't match an open session.",
+          recoverable: true,
+        });
+
+      try {
+        const sessionId = await deps.redis.getJSON<string>(joinCodeKey(parsed.joinCode));
+        if (sessionId === null) {
+          notFound();
+          return;
+        }
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          // Dangling joincode key (e.g. partial cleanup) — indistinguishable
+          // from a bad code as far as the player should know.
+          notFound();
+          return;
+        }
+
+        // Already in the roster: converge idempotently — re-assert room
+        // membership, re-send the snapshot, change nothing, broadcast nothing.
+        if (state.players[socket.id] !== undefined) {
+          await socket.join(sessionRoom(sessionId));
+          socket.emit('SESSION_STATE', state);
+          return;
+        }
+
+        if (Object.keys(state.players).length >= MAX_PLAYERS) {
+          socket.emit('ERROR', {
+            code: 'SESSION_FULL',
+            message: 'That session is full — 16 is the limit.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Defensive join-window guard; Story 2.6 refines it (between-rounds admits).
+        if (state.status !== 'lobby') {
+          socket.emit('ERROR', {
+            code: 'SESSION_NOT_JOINABLE',
+            message: 'That session has already started.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = addPlayerToSession(state, {
+          playerId: socket.id,
+          displayName: parsed.displayName,
+          role: parsed.role,
+        });
+
+        // Persist then emit. Single-key write — nothing partial to roll back.
+        // Known accepted race (V1 single process): two concurrent joins can
+        // interleave load→modify→store and drop one player; human-speed lobby
+        // joins make this theoretical. No locks/WATCH for this.
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+
+        // Join the room BEFORE broadcasting so the joiner receives their own join.
+        await socket.join(sessionRoom(sessionId));
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info({ sessionId, playerId: socket.id, role: parsed.role }, 'player joined');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'SESSION_JOIN failed');
+        socket.emit('ERROR', {
+          code: 'SESSION_JOIN_FAILED',
+          message: 'Could not join the session. Try again.',
           recoverable: true,
         });
       }
