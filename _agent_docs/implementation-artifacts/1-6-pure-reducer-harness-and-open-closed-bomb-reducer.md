@@ -4,7 +4,7 @@ baseline_commit: e1a90e1
 
 # Story 1.6: Pure-Reducer Harness & Open/Closed Bomb Reducer
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -70,6 +70,17 @@ so that game logic is unit-testable and new modules are purely additive.
   - [x] Grep the new reducer files for `socket.io`, `ioredis`, `pg`, `fastify`, `react`, `Date.now`, `Math.random`, `setTimeout` — zero hits (proves AC1 mechanically).
   - [x] `packages/shared` test suite (`pnpm --filter @bomb-squad/shared test`) exits 0 — no regression from adding `actions.ts`.
   - [x] `apps/client` is untouched.
+
+## Review Findings
+
+_Code review 2026-06-12 (gds-code-review, 3-layer: Blind Hunter / Edge Case Hunter / Acceptance Auditor). All 4 ACs verified PASS; 28/28 server tests + tsc --noEmit reproduced clean by the Acceptance Auditor._
+
+- [x] [Review][Patch] (resolved from Decision) Make already-solved modules inert for `MODULE_ACTION` — short-circuit in `bombReducer`: if the target module's `status === 'solved'`, return state unchanged. This also closes the `solved` `true → false` regression path. (Edge Case Hunter — bombReducer.ts:22,30-37) — **FIXED**: solved-inert guard added; 2 tests (inert no-op + no-regression).
+- [x] [Review][Patch] (resolved from Decision) Add `MODULE_RESET` to `BombAction` + reducer handling + test, satisfying the project-context "6-case mandate" reset requirement. Reset delegates to the module reducer (bypassing the solved-inert guard) so the module restores its initial state. (Acceptance Auditor — actions.ts:8-9; project-context.md:164) — **FIXED**: `MODULE_RESET` variant + reducer case + 4 tests.
+- [x] [Review][Patch] Strike-increment arithmetic only tested at boundaries (0→1 and 3→3 cap); intermediate 1→2 / 2→3 increments are unexercised [apps/server/src/reducers/__tests__/bombReducer.test.ts:99-130] — **FIXED**: added 1→2 and 2→3 increment tests.
+
+_Patches applied 2026-06-12: 36/36 server tests pass (was 28), `pnpm -r exec tsc --noEmit` exit 0 across all three workspaces._
+- [x] [Review][Defer] No runtime guard on module-reducer output contract — a reducer may return an out-of-contract `status` (anything not `armed|solved|struck` is silently treated as not-solved/not-struck) or change `moduleId`, rebinding the slot. [apps/server/src/reducers/bombReducer.ts:9-14] — deferred: module reducers are first-party/typed; revisit when the Epic 5 module plugin contract is built.
 
 ## Dev Notes
 
