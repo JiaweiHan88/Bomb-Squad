@@ -1,4 +1,9 @@
-import type { ModuleState, Reducer } from '@bomb-squad/shared';
+import {
+  DEV_DEMO_MODULE_ID,
+  devDemoReducer,
+  type ModuleState,
+  type Reducer,
+} from '@bomb-squad/shared';
 
 export type ModuleReducer = Reducer<ModuleState<unknown>, unknown>;
 
@@ -7,5 +12,14 @@ export type ModuleReducer = Reducer<ModuleState<unknown>, unknown>;
  *
  * Add an entry here to register a module. Never edit bombReducer.ts to support a new module.
  * Modules from Epic 5+ register into this map additively; the bomb reducer delegates by moduleId.
+ *
+ * Entries are cast to ModuleReducer: each module's reducer is fully typed in
+ * packages/shared; the per-module state type is deliberately erased at this
+ * registry boundary (the bomb reducer dispatches by moduleId and treats data
+ * as opaque). Reducers themselves guard against malformed actions.
  */
-export const MODULE_REDUCERS: Record<string, ModuleReducer> = {};
+export const MODULE_REDUCERS: Record<string, ModuleReducer> = {
+  // dev-demo: Story 5.1 reference module. Harmless in production — no bomb
+  // generation emits 'dev-demo' until Story 8.2 defines the module pool.
+  [DEV_DEMO_MODULE_ID]: devDemoReducer as ModuleReducer,
+};
