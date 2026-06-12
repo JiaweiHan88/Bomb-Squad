@@ -5,13 +5,18 @@
  */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, type DefaultEventsMap } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents } from '@bomb-squad/shared';
 import type { RedisStore } from '../../state/redis.js';
-import type { SessionLog } from '../sessionHandlers.js';
+import type { SessionLog, SessionSocketData } from '../sessionHandlers.js';
 
-export type TestIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
+export type TestIOServer = SocketIOServer<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  DefaultEventsMap,
+  SessionSocketData
+>;
 export type TestClientSocket = ClientSocket<ServerToClientEvents, ClientToServerEvents>;
 
 export interface MemoryRedisStore extends RedisStore {

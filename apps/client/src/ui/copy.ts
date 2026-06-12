@@ -33,6 +33,11 @@ export const TEAM_ROSTER = 'Team roster';
 export const YOU_TAG = 'You';
 export const ROLE_FACILITATOR = 'Facilitator';
 
+// Team assignment (Story 2.4) — mockup "6. Facilitator Dashboard" team badges.
+export const TEAM_A = 'Team A';
+export const TEAM_B = 'Team B';
+export const UNASSIGNED = 'Unassigned';
+
 // Lobby share panel (Story 2.2) — EXPERIENCE.md: "Bring them in", never "Invite Players".
 export const BRING_THEM_IN = 'Bring them in';
 export const SHARE_SUB =

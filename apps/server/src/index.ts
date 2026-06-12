@@ -1,16 +1,21 @@
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { type TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, type DefaultEventsMap } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@bomb-squad/shared';
 import { config } from './config/index.js';
 import { healthRegistry } from './health/index.js';
 import { connectRedis } from './state/index.js';
 import { connectPostgres } from './persistence/index.js';
-import { registerSessionHandlers } from './handlers/sessionHandlers.js';
+import { registerSessionHandlers, type SessionSocketData } from './handlers/sessionHandlers.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
-export type AppIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
+export type AppIOServer = SocketIOServer<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  DefaultEventsMap,
+  SessionSocketData
+>;
 
 export interface BuiltServer {
   fastify: FastifyInstance;
@@ -35,10 +40,12 @@ export async function buildServer(): Promise<BuiltServer> {
 
   // Attach Socket.IO to Fastify's underlying Node HTTP server, BEFORE listen().
   // Generic order: Server<ClientToServerEvents, ServerToClientEvents> — the client swaps them.
-  const io: AppIOServer = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(
-    fastify.server,
-    { cors: { origin: true } },
-  );
+  const io: AppIOServer = new SocketIOServer<
+    ClientToServerEvents,
+    ServerToClientEvents,
+    DefaultEventsMap,
+    SessionSocketData
+  >(fastify.server, { cors: { origin: true } });
   io.on('connection', (socket) => {
     // No game handlers yet — those land in Story 1.6+. Just a liveness breadcrumb.
     fastify.log.debug({ socketId: socket.id }, 'socket connected');

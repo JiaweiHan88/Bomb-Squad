@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Server as SocketIOServer } from 'socket.io';
+import type { Server as SocketIOServer, DefaultEventsMap } from 'socket.io';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -7,15 +7,33 @@ import type {
   DifficultyTier,
   PlayerRole,
   SessionState,
+  TeamId,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
 import { sessionKey, joinCodeKey } from '../state/keys.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
 import { addPlayerToSession } from '../session/joinSession.js';
+import { assignPlayerToTeam } from '../session/assignTeam.js';
+
+/**
+ * Server-assigned per-socket bookkeeping (Socket.IO `socket.data`). A pointer
+ * only, never authority: it selects which session key to load; every authority
+ * decision is made against the freshly Redis-loaded state. Transient by design
+ * (Pattern 1) — it dies with the socket, same lifetime as the socket.id
+ * identity this codebase already accepts (deferred-work.md).
+ */
+export interface SessionSocketData {
+  sessionId?: string;
+}
 
 /** Typed server alias declared locally to avoid an import cycle with index.ts. */
-type SessionIOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
+type SessionIOServer = SocketIOServer<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  DefaultEventsMap,
+  SessionSocketData
+>;
 
 /**
  * Minimal structural logger (pino/Fastify-compatible). Kept narrow so tests can
@@ -166,6 +184,43 @@ export function parseSessionJoinPayload(payload: unknown): JoinParseResult {
   return { ok: true, joinCode: code, displayName: name, role: role as PlayerRole };
 }
 
+type TeamAssignParseResult =
+  | { ok: true; playerId: string; teamId: TeamId; role: PlayerRole }
+  | { ok: false; message: string };
+
+/**
+ * Boundary validation for the untrusted TEAM_ASSIGN payload. Whitelists the
+ * team and role (the facilitator seat stays mint-only — a facilitator must not
+ * be able to mint a second facilitator or demote themselves into an
+ * authority-less session), bounds the opaque playerId, and rebuilds a fresh
+ * object — unknown extra keys are inert, never forwarded.
+ */
+export function parseTeamAssignPayload(payload: unknown): TeamAssignParseResult {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'payload must be an object' };
+  }
+  const { playerId, teamId, role } = payload as {
+    playerId?: unknown;
+    teamId?: unknown;
+    role?: unknown;
+  };
+
+  // socket.ids are opaque (~20 chars); the bound is a sanity fence, not a format check.
+  if (typeof playerId !== 'string' || playerId.length < 1 || playerId.length > 128) {
+    return { ok: false, message: 'playerId must be a 1–128 character string' };
+  }
+
+  if (teamId !== 'A' && teamId !== 'B') {
+    return { ok: false, message: 'teamId must be A or B' };
+  }
+
+  if (typeof role !== 'string' || !JOINABLE_ROLES.includes(role as PlayerRole)) {
+    return { ok: false, message: 'role must be defuser, expert, or spectator' };
+  }
+
+  return { ok: true, playerId, teamId, role: role as PlayerRole };
+}
+
 /** Retry cap for join-code collisions (36^6 codes — collisions are theoretical). */
 const MAX_CODE_ATTEMPTS = 5;
 
@@ -214,6 +269,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         await deps.redis.setJSON(joinCodeKey(joinCode), sessionId);
 
         await socket.join(sessionRoom(sessionId));
+        socket.data.sessionId = sessionId;
         ack({ sessionId, joinCode });
         io.to(sessionRoom(sessionId)).emit('SESSION_STATE', state);
         // AR15: never log the joinCode — it is the session's only secret.
@@ -272,6 +328,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         // membership, re-send the snapshot, change nothing, broadcast nothing.
         if (state.players[socket.id] !== undefined) {
           await socket.join(sessionRoom(sessionId));
+          socket.data.sessionId = sessionId;
           socket.emit('SESSION_STATE', state);
           return;
         }
@@ -309,6 +366,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
 
         // Join the room BEFORE broadcasting so the joiner receives their own join.
         await socket.join(sessionRoom(sessionId));
+        socket.data.sessionId = sessionId;
         io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
         deps.log.info({ sessionId, playerId: socket.id, role: parsed.role }, 'player joined');
       } catch (err) {
@@ -316,6 +374,108 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'SESSION_JOIN_FAILED',
           message: 'Could not join the session. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // No ack on this event (frozen contract): success is the SESSION_STATE
+    // broadcast, failure a typed ERROR. First facilitator-authority gate in
+    // the codebase — the pattern every Epic-8 facilitator action copies.
+    socket.on('TEAM_ASSIGN', async (payload) => {
+      const parsed = parseTeamAssignPayload(payload);
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      // socket.data.sessionId is a server-assigned pointer to which session to
+      // load — never authority. Authority is the facilitator check against the
+      // freshly Redis-loaded state below.
+      const sessionId = socket.data.sessionId;
+      const notInSession = () =>
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: "You're not in a session.",
+          recoverable: true,
+        });
+      if (sessionId === undefined) {
+        notInSession();
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          // Stale pointer (session evicted) — same answer as never having one.
+          notInSession();
+          return;
+        }
+
+        // Authority gate FIRST: a non-facilitator probe must learn nothing
+        // about session contents (e.g. whether a playerId exists).
+        if (state.players[socket.id]?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator assigns teams.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const target = state.players[parsed.playerId];
+        if (target === undefined) {
+          socket.emit('ERROR', {
+            code: 'PLAYER_NOT_FOUND',
+            message: "That player isn't in this session.",
+            recoverable: true,
+          });
+          return;
+        }
+        if (target.role === 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'INVALID_ASSIGNMENT',
+            message: "The facilitator doesn't sit on a team.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Defensive phase guard; Epic 8 (between-rounds flow) widens it deliberately.
+        if (state.status !== 'lobby') {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_LOBBY',
+            message: 'Teams are locked once the round starts.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = assignPlayerToTeam(state, parsed);
+        // Idempotent no-op (same team + role re-asserted): the roster already
+        // shows the truth — no persist, no broadcast, no error.
+        if (next === state) return;
+
+        // Persist then emit. Single-key write — nothing partial to roll back.
+        // Same accepted load-modify-store race as SESSION_JOIN (V1 single
+        // process, human-speed lobby actions). No locks/WATCH for this.
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info(
+          {
+            sessionId,
+            playerId: parsed.playerId,
+            teamId: parsed.teamId,
+            role: parsed.role,
+            by: socket.id,
+          },
+          'player assigned',
+        );
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'TEAM_ASSIGN failed');
+        socket.emit('ERROR', {
+          code: 'TEAM_ASSIGN_FAILED',
+          message: 'Could not assign. Try again.',
           recoverable: true,
         });
       }

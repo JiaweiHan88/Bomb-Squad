@@ -59,7 +59,7 @@ development_status:
   2-1-design-tokens-ui-shell-and-state-patterns: done
   2-2-facilitator-hosts-a-session: done
   2-3-player-joins-via-code-and-picks-a-role: done
-  2-4-team-and-per-player-role-assignment: backlog
+  2-4-team-and-per-player-role-assignment: review
   2-5-lobby-roster-ready-state-and-mic-check: backlog
   2-6-capacity-and-join-window-guards: backlog
   2-7-lobby-resilience-and-facilitator-player-controls: backlog

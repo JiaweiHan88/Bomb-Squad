@@ -9,6 +9,7 @@ import {
   registerSessionHandlers,
   parseSessionCreatePayload,
   parseSessionJoinPayload,
+  parseTeamAssignPayload,
   MAX_PLAYERS,
 } from '../sessionHandlers.js';
 import { createSessionState } from '../../session/createSession.js';
@@ -504,5 +505,278 @@ describe('parseSessionCreatePayload (boundary validation)', () => {
         modifiers: { asymmetricExpertRoles: true },
       },
     });
+  });
+});
+
+describe('parseTeamAssignPayload (boundary validation)', () => {
+  const valid = { playerId: 'sock-maya', teamId: 'A', role: 'defuser' };
+
+  it('accepts a valid payload and rebuilds a sanitized object', () => {
+    expect(parseTeamAssignPayload(valid)).toEqual({
+      ok: true,
+      playerId: 'sock-maya',
+      teamId: 'A',
+      role: 'defuser',
+    });
+  });
+
+  it("rejects teamIds other than exactly 'A' or 'B'", () => {
+    expect(parseTeamAssignPayload({ ...valid, teamId: 'C' }).ok).toBe(false);
+    expect(parseTeamAssignPayload({ ...valid, teamId: 'a' }).ok).toBe(false);
+    expect(parseTeamAssignPayload({ ...valid, teamId: 1 }).ok).toBe(false);
+  });
+
+  it("rejects role 'facilitator' and unknown roles — the facilitator seat is mint-only", () => {
+    expect(parseTeamAssignPayload({ ...valid, role: 'facilitator' }).ok).toBe(false);
+    expect(parseTeamAssignPayload({ ...valid, role: 'admin' }).ok).toBe(false);
+  });
+
+  it('bounds the playerId to a 1–128 char string', () => {
+    expect(parseTeamAssignPayload({ ...valid, playerId: '' }).ok).toBe(false);
+    expect(parseTeamAssignPayload({ ...valid, playerId: 'x'.repeat(129) }).ok).toBe(false);
+    expect(parseTeamAssignPayload({ ...valid, playerId: 'x'.repeat(128) }).ok).toBe(true);
+    expect(parseTeamAssignPayload({ ...valid, playerId: 42 }).ok).toBe(false);
+  });
+
+  it('rejects non-object payloads and missing fields', () => {
+    expect(parseTeamAssignPayload(null).ok).toBe(false);
+    expect(parseTeamAssignPayload('A').ok).toBe(false);
+    expect(parseTeamAssignPayload([]).ok).toBe(false);
+    expect(parseTeamAssignPayload({}).ok).toBe(false);
+    expect(parseTeamAssignPayload({ playerId: 'x', teamId: 'A' }).ok).toBe(false);
+  });
+
+  it('ignores unknown extra keys (rebuilt object carries only the three fields)', () => {
+    const result = parseTeamAssignPayload({ ...valid, sneaky: 'extra' });
+    expect(result).toEqual({ ok: true, playerId: 'sock-maya', teamId: 'A', role: 'defuser' });
+  });
+});
+
+describe('TEAM_ASSIGN handler', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let joiner: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, { redis: store, log: noopLog }),
+    );
+    facilitator = await server.connectClient();
+    joiner = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** Join a socket into the session and resolve with that socket's broadcast snapshot. */
+  async function joinAs(
+    socket: TestClientSocket,
+    joinCode: string,
+    displayName: string,
+    role: 'defuser' | 'expert' | 'spectator',
+  ): Promise<SessionState> {
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role });
+    return statePromise;
+  }
+
+  /** The roster playerId of the (single) player with this display name. */
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  it('happy path: facilitator assigns a joiner; BOTH sockets receive the updated SESSION_STATE', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+
+    const [facState, joinerState] = await Promise.all([facStatePromise, joinerStatePromise]);
+    for (const state of [facState, joinerState]) {
+      expect(state.players[mayaId]).toMatchObject({ teamId: 'A', role: 'defuser' });
+      expect(state.teams.A).toEqual({
+        teamId: 'A',
+        relayOrder: [mayaId],
+        currentDefuserIndex: 0,
+        cumulativeTimeMs: 0,
+      });
+    }
+  });
+
+  it('persists the assignment to Redis (not just the broadcast)', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+
+    const statePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'B', role: 'spectator' });
+    await statePromise;
+
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.players[mayaId]).toMatchObject({ teamId: 'B', role: 'spectator' });
+    expect(stored.teams.B?.relayOrder).toEqual([mayaId]);
+  });
+
+  it('AC2: a non-facilitator socket → NOT_FACILITATOR, no broadcast, store byte-identical', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(error.recoverable).toBe(true);
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('a connected socket that never entered a session → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('TEAM_ASSIGN', { playerId: 'sock-x', teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_SESSION');
+  });
+
+  it('unknown target playerId → PLAYER_NOT_FOUND, no state change', async () => {
+    const ack = await createSession(facilitator);
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: 'sock-ghost', teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('PLAYER_NOT_FOUND');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+  });
+
+  it("targeting the facilitator → INVALID_ASSIGNMENT (they don't sit on a team)", async () => {
+    const ack = await createSession(facilitator);
+    const stateBefore = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    const facId = facilitatorIdOf(stateBefore);
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: facId, teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('INVALID_ASSIGNMENT');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(
+      JSON.stringify(stateBefore),
+    );
+  });
+
+  it('non-lobby session → NOT_IN_LOBBY', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_LOBBY');
+  });
+
+  it.each([
+    ['bad teamId', { playerId: 'sock-x', teamId: 'C', role: 'defuser' }],
+    ['facilitator role', { playerId: 'sock-x', teamId: 'A', role: 'facilitator' }],
+    ['non-object', 'A-defuser'],
+  ])('invalid payload (%s) → INVALID_PAYLOAD', async (_label, payload) => {
+    await createSession(facilitator);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', payload as never);
+    const error = await errorPromise;
+    expect(error.code).toBe('INVALID_PAYLOAD');
+  });
+
+  it('reassign A→B: relayOrder moves, the emptied team is deleted', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+
+    const first = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    await first;
+
+    const second = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'B', role: 'defuser' });
+    const state = await second;
+
+    expect(state.teams.A).toBeUndefined();
+    expect(state.teams.B?.relayOrder).toEqual([mayaId]);
+  });
+
+  it('idempotent repeat of the same assignment → no persist, no extra broadcast', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+
+    const first = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    await first;
+    const storedAfterFirst = store.data.get(sessionKey(ack.sessionId));
+
+    const joinerSpy = jest.fn();
+    joiner.on('SESSION_STATE', joinerSpy);
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    // Fence: an invalid emit produces an ERROR to the facilitator; per-socket
+    // ordering guarantees the idempotent assign above completed by then.
+    const fence = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { teamId: 'C' } as never);
+    await fence;
+
+    expect(joinerSpy).not.toHaveBeenCalled();
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedAfterFirst);
+  });
+
+  it('persist failure → TEAM_ASSIGN_FAILED to the facilitator, no broadcast', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined, 'Maya');
+
+    const realSet = store.setJSON.bind(store);
+    store.setJSON = async (key, value) => {
+      if (key === sessionKey(ack.sessionId)) throw new Error('redis down');
+      return realSet(key, value);
+    };
+
+    const joinerSpy = jest.fn();
+    joiner.on('SESSION_STATE', joinerSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('TEAM_ASSIGN_FAILED');
+    expect(joinerSpy).not.toHaveBeenCalled();
+  });
+
+  it('two joiners assigned to the same team land in relayOrder in assignment order', async () => {
+    const ack = await createSession(facilitator);
+    const second = await server.connectClient();
+    const joined1 = await joinAs(joiner, ack.joinCode, 'Maya', 'expert');
+    const mayaId = idOf(joined1, 'Maya');
+    const joined2 = await joinAs(second, ack.joinCode, 'Devon', 'expert');
+    const devonId = idOf(joined2, 'Devon');
+
+    const first = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    await first;
+    const secondState = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'A', role: 'expert' });
+    const state = await secondState;
+
+    expect(state.teams.A?.relayOrder).toEqual([mayaId, devonId]);
   });
 });
