@@ -1,6 +1,10 @@
+---
+baseline_commit: ea825dde87bf5f355a051c480bfa7bb1368387bf
+---
+
 # Story 8.3: Round Start, Defuser Assignment & Preparation Control
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -30,44 +34,44 @@ This story is being built **ahead of** several stories it touches edges with. Th
 
 ## Tasks / Subtasks
 
-- [ ] Task 1 — Shared contract: `PREPARATION_OPEN` event + `RoundState` type (AC: 1, 2)
-  - [ ] Add `PREPARATION_OPEN: () => void` to `ClientToServerEvents` (`packages/shared/src/events/client-to-server.ts`). Facilitator-only, no payload, no ack — success is the `SESSION_STATE` broadcast, failure a typed `ERROR` (the frozen-contract pattern `TEAM_ASSIGN` established).
-  - [ ] Add `RoundState` to `packages/shared/src/types/` (new file `round.ts`, export via `types/index.ts` + package root): `{ roundNumber: number; status: 'active'; defusers: Partial<Record<TeamId, string>>; retry: boolean }`. Architecture names this shape for `session:{id}:round:{n}` (status, active defuser per team, retry flag). `retry` is always `false` here (Story 8.8 owns it); `status` gains more values in 8.5.
-  - [ ] No `ServerToClientEvents` change — phase transitions ride the existing `SESSION_STATE` broadcast.
-- [ ] Task 2 — Pure session transitions in `apps/server/src/session/` (AC: 1, 2)
-  - [ ] `openPreparation.ts`: pure `(state: SessionState) => SessionState`. Sets `status: 'preparation'` and increments `roundNumber` (0→1 on first open — `roundNumber` is "the round being prepared/played"; 8.2's `templateSeed = hash(sessionId + ":" + roundNumber)` depends on this being settled **before** generation). Guard clauses (same-reference return, no throws): status not in `'lobby' | 'between-rounds'` → unchanged. (`'between-rounds'` is unreachable until 8.5/8.6 but costs nothing and is the documented contract.)
-  - [ ] `startRound.ts`: pure `(state: SessionState) => SessionState | { state: SessionState; round: RoundState }`-style result (pick one clean shape; the handler needs both the next SessionState and the RoundState to persist). Behaviour:
+- [x] Task 1 — Shared contract: `PREPARATION_OPEN` event + `RoundState` type (AC: 1, 2)
+  - [x] Add `PREPARATION_OPEN: () => void` to `ClientToServerEvents` (`packages/shared/src/events/client-to-server.ts`). Facilitator-only, no payload, no ack — success is the `SESSION_STATE` broadcast, failure a typed `ERROR` (the frozen-contract pattern `TEAM_ASSIGN` established).
+  - [x] Add `RoundState` to `packages/shared/src/types/` (new file `round.ts`, export via `types/index.ts` + package root): `{ roundNumber: number; status: 'active'; defusers: Partial<Record<TeamId, string>>; retry: boolean }`. Architecture names this shape for `session:{id}:round:{n}` (status, active defuser per team, retry flag). `retry` is always `false` here (Story 8.8 owns it); `status` gains more values in 8.5.
+  - [x] No `ServerToClientEvents` change — phase transitions ride the existing `SESSION_STATE` broadcast.
+- [x] Task 2 — Pure session transitions in `apps/server/src/session/` (AC: 1, 2)
+  - [x] `openPreparation.ts`: pure `(state: SessionState) => SessionState`. Sets `status: 'preparation'` and increments `roundNumber` (0→1 on first open — `roundNumber` is "the round being prepared/played"; 8.2's `templateSeed = hash(sessionId + ":" + roundNumber)` depends on this being settled **before** generation). Guard clauses (same-reference return, no throws): status not in `'lobby' | 'between-rounds'` → unchanged. (`'between-rounds'` is unreachable until 8.5/8.6 but costs nothing and is the documented contract.)
+  - [x] `startRound.ts`: pure `(state: SessionState) => SessionState | { state: SessionState; round: RoundState }`-style result (pick one clean shape; the handler needs both the next SessionState and the RoundState to persist). Behaviour:
     - Guard: `status !== 'preparation'` → unchanged/null result (handler emits `ERROR`).
     - Guard: no team with a non-empty `relayOrder` → unchanged/null (handler emits `ERROR` — "Assign at least one player to a team first.").
     - For **each existing team**: defuser = `relayOrder[currentDefuserIndex normalized]`. **Normalize defensively**: `relayOrder.length === 0` → skip team; index out of range → use `currentDefuserIndex % relayOrder.length`. This resolves the read-side of the deferred-work item "`currentDefuserIndex` not re-clamped when a player leaves relayOrder" (2.4 review deferral) — document with a comment citing it.
     - Role flips in `players`: the selected player's `role` becomes `'defuser'`; any **other** player on that same team currently holding `'defuser'` becomes `'expert'` (one defuser per team, invariant). Spectators and the facilitator are never touched.
     - Sets `status: 'active'`. Does NOT touch `cumulativeTimeMs`, `currentDefuserIndex`, `config`, or `roundNumber`.
-  - [ ] Both functions: spread-only immutability, no I/O / clock / randomness — identical discipline to `assignPlayerToTeam` (read it first: `apps/server/src/session/assignTeam.ts`).
-- [ ] Task 3 — `PREPARATION_OPEN` handler in `apps/server/src/handlers/sessionHandlers.ts` (AC: 1)
-  - [ ] Copy the `TEAM_ASSIGN` pipeline verbatim (it is the canonical facilitator-authority gate — its header comment says Epic-8 actions copy it): resolve `socket.data.sessionId` (`NOT_IN_SESSION`) → load from Redis → **authority gate first** (`NOT_FACILITATOR`, before any state inspection leaks) → phase guard (`status !== 'lobby'` → `NOT_IN_LOBBY`-style error; use code `CANNOT_OPEN_PREP`, message in operator voice) → pure `openPreparation` → idempotent same-reference return = silent no-op → persist `sessionKey` then broadcast `SESSION_STATE` to `sessionRoom` → try/catch → `PREPARATION_OPEN_FAILED`.
-  - [ ] Log `{ sessionId, roundNumber }` at info ("preparation opened"). **Never log the join code** (AR15).
-- [ ] Task 4 — `ROUND_START` handler (AC: 2)
-  - [ ] Same pipeline: pointer → load → facilitator gate → `startRound` → on guard failure emit typed `ERROR` (`CANNOT_START_ROUND` with a reason message; e.g. not in preparation, or no populated team).
-  - [ ] Persist **both** keys before any emit: `sessionKey(sessionId)` (new SessionState) and `roundKey(sessionId, roundNumber)` (new `RoundState`) — `roundKey` already exists in `apps/server/src/state/keys.ts`. Two `setJSON` calls are not atomic; on the second failing, best-effort rollback is NOT required (session re-broadcast self-heals; note the accepted non-atomicity in a comment, same posture as `SESSION_CREATE`'s two-key write).
-  - [ ] **Team-room routing:** after persist, fetch the session's sockets (`io.in(sessionRoom(sessionId)).fetchSockets()`) and join each socket whose `socket.id` appears in `players` with a `teamId` to `session:{sessionId}:team:{teamId}`. Facilitator/unassigned spectators join no team room. Export a `teamRoom(sessionId, teamId)` helper beside `sessionRoom`. Seam comment: Epic 3 re-mints voice tokens here on role change.
-  - [ ] Broadcast `SESSION_STATE` to the session room (it carries the role flips + status — clients route surfaces off it). Seam comments for 8.2 (generation + `BOMB_INIT`) and 8.4 (timer) in their flow positions.
-  - [ ] Log `{ sessionId, roundNumber, defusers }` at info.
-- [ ] Task 5 — Handler integration tests (`apps/server/src/handlers/__tests__/sessionHandlers.test.ts`, existing `TestSocketServer` harness) (AC: 1, 2)
-  - [ ] `PREPARATION_OPEN`: happy path (lobby → preparation, roundNumber 1, all sockets receive `SESSION_STATE`); non-facilitator → `NOT_FACILITATOR` + store byte-identical + no broadcast (300ms spy-window pattern from 2.4); already in preparation → silent idempotent no-op (no persist/broadcast/error); never-joined socket → `NOT_IN_SESSION`; injected `setJSON` failure → `PREPARATION_OPEN_FAILED`.
-  - [ ] `ROUND_START`: happy path (preparation → active; rotation pick = `relayOrder[0]` first round; previous defuser-role holder on the team flipped to expert; `RoundState` persisted at `roundKey`; both team's sockets joined to their team rooms — assert via `socket.rooms` / `fetchSockets`); facilitator-only rejection; `status === 'lobby'` → `CANNOT_START_ROUND`; no populated teams → `CANNOT_START_ROUND`; out-of-range `currentDefuserIndex` seeded → modulo pick, no throw; spectator on team keeps role.
-  - [ ] Pure-function unit tests (`apps/server/src/session/__tests__/`): both transitions — happy, each guard returns same reference, deep-frozen input does not throw (immutability test is **never** skipped, project rule), idempotency.
-- [ ] Task 6 — Client surface routing (AC: 1, 2)
-  - [ ] `App.tsx`: replace the `session === null ? <Landing/> : <Lobby/>` branch with status-routed surfaces from the server snapshot (no router, no URL state — comment already says "Surface derives from the server snapshot"): `lobby` → `Lobby`, `preparation` → new `Preparation`, `active` → new `ActiveRound`, others → fall back to `Lobby` for now (8.5/8.6 own them).
-  - [ ] `ui/Preparation.tsx` — role-gated single component (role = `session.players[getSocket().id]?.role`):
+  - [x] Both functions: spread-only immutability, no I/O / clock / randomness — identical discipline to `assignPlayerToTeam` (read it first: `apps/server/src/session/assignTeam.ts`).
+- [x] Task 3 — `PREPARATION_OPEN` handler in `apps/server/src/handlers/sessionHandlers.ts` (AC: 1)
+  - [x] Copy the `TEAM_ASSIGN` pipeline verbatim (it is the canonical facilitator-authority gate — its header comment says Epic-8 actions copy it): resolve `socket.data.sessionId` (`NOT_IN_SESSION`) → load from Redis → **authority gate first** (`NOT_FACILITATOR`, before any state inspection leaks) → phase guard (`status !== 'lobby'` → `NOT_IN_LOBBY`-style error; use code `CANNOT_OPEN_PREP`, message in operator voice) → pure `openPreparation` → idempotent same-reference return = silent no-op → persist `sessionKey` then broadcast `SESSION_STATE` to `sessionRoom` → try/catch → `PREPARATION_OPEN_FAILED`.
+  - [x] Log `{ sessionId, roundNumber }` at info ("preparation opened"). **Never log the join code** (AR15).
+- [x] Task 4 — `ROUND_START` handler (AC: 2)
+  - [x] Same pipeline: pointer → load → facilitator gate → `startRound` → on guard failure emit typed `ERROR` (`CANNOT_START_ROUND` with a reason message; e.g. not in preparation, or no populated team).
+  - [x] Persist **both** keys before any emit: `sessionKey(sessionId)` (new SessionState) and `roundKey(sessionId, roundNumber)` (new `RoundState`) — `roundKey` already exists in `apps/server/src/state/keys.ts`. Two `setJSON` calls are not atomic; on the second failing, best-effort rollback is NOT required (session re-broadcast self-heals; note the accepted non-atomicity in a comment, same posture as `SESSION_CREATE`'s two-key write).
+  - [x] **Team-room routing:** after persist, fetch the session's sockets (`io.in(sessionRoom(sessionId)).fetchSockets()`) and join each socket whose `socket.id` appears in `players` with a `teamId` to `session:{sessionId}:team:{teamId}`. Facilitator/unassigned spectators join no team room. Export a `teamRoom(sessionId, teamId)` helper beside `sessionRoom`. Seam comment: Epic 3 re-mints voice tokens here on role change.
+  - [x] Broadcast `SESSION_STATE` to the session room (it carries the role flips + status — clients route surfaces off it). Seam comments for 8.2 (generation + `BOMB_INIT`) and 8.4 (timer) in their flow positions.
+  - [x] Log `{ sessionId, roundNumber, defusers }` at info.
+- [x] Task 5 — Handler integration tests (`apps/server/src/handlers/__tests__/sessionHandlers.test.ts`, existing `TestSocketServer` harness) (AC: 1, 2)
+  - [x] `PREPARATION_OPEN`: happy path (lobby → preparation, roundNumber 1, all sockets receive `SESSION_STATE`); non-facilitator → `NOT_FACILITATOR` + store byte-identical + no broadcast (300ms spy-window pattern from 2.4); already in preparation → silent idempotent no-op (no persist/broadcast/error); never-joined socket → `NOT_IN_SESSION`; injected `setJSON` failure → `PREPARATION_OPEN_FAILED`.
+  - [x] `ROUND_START`: happy path (preparation → active; rotation pick = `relayOrder[0]` first round; previous defuser-role holder on the team flipped to expert; `RoundState` persisted at `roundKey`; both team's sockets joined to their team rooms — assert via `socket.rooms` / `fetchSockets`); facilitator-only rejection; `status === 'lobby'` → `CANNOT_START_ROUND`; no populated teams → `CANNOT_START_ROUND`; out-of-range `currentDefuserIndex` seeded → modulo pick, no throw; spectator on team keeps role.
+  - [x] Pure-function unit tests (`apps/server/src/session/__tests__/`): both transitions — happy, each guard returns same reference, deep-frozen input does not throw (immutability test is **never** skipped, project rule), idempotency.
+- [x] Task 6 — Client surface routing (AC: 1, 2)
+  - [x] `App.tsx`: replace the `session === null ? <Landing/> : <Lobby/>` branch with status-routed surfaces from the server snapshot (no router, no URL state — comment already says "Surface derives from the server snapshot"): `lobby` → `Lobby`, `preparation` → new `Preparation`, `active` → new `ActiveRound`, others → fall back to `Lobby` for now (8.5/8.6 own them).
+  - [x] `ui/Preparation.tsx` — role-gated single component (role = `session.players[getSocket().id]?.role`):
     - **Facilitator:** prep heading + guidance line ("Walk them through the manual — two to five minutes is the sweet spot." — operator voice, new `copy.ts` strings), the **upcoming Defuser per team** (derive client-side exactly as the server does: `relayOrder[currentDefuserIndex % relayOrder.length]`, display name from `players`), and a "Start the round" `ConfirmButton` (existing component — destructive/major actions use two-step confirm) that emits `ROUND_START`. Listen for `ERROR` → inline `role="alert"` line, `text-led-red`, cleared on the facilitator's own next emit (the 2.4 review patch pattern — do NOT clear on every `SESSION_STATE`).
     - **Defuser-to-be:** role line ("You're defusing this round.") + placeholder panel where 4.6's placeholder bomb will mount — clearly-marked seam, minimal markup.
     - **Experts / Spectators:** role line ("You're on the manual.") + the real `ManualViewer` mounted with `buildChapters(SANDBOX_MODULES.flatMap((m) => m.getManualPages()))` (EXPERIENCE.md: during prep, Experts and Spectators browse the full manual). Build the chapter list once (memo/module-scope) — `getManualPages()` is pure.
-  - [ ] `ui/Lobby.tsx`: add the Facilitator-only "Open preparation" `ConfirmButton` that emits `PREPARATION_OPEN` (this is the AC-1 entry point). Reuse the existing lobby error-line pattern.
-  - [ ] `ui/ActiveRound.tsx` — role-routed: **Defuser** mounts the existing `BombScene` (it tolerates `bomb === null` via `DEV_PLACEHOLDER_MODULES` until 8.2 lands — leave a comment); **Expert** mounts `ManualViewer` (same chapters wiring as prep — EXPERIENCE.md IA: active-round Expert surface IS the manual); **Spectator / Facilitator** get minimal labeled placeholder panels (8.5+/Epic 9 surfaces). No HUD work (4.4/4.5 own timer/strike HUD).
-  - [ ] All new strings in `ui/copy.ts` (dry, deadpan, operator voice — see existing file). No fast-blinking elements, no nested modals (UX-DR on facilitator dashboard under social pressure).
-- [ ] Task 7 — Gates & verification (AC: all)
-  - [ ] `pnpm -r exec tsc --noEmit` → 0 errors, no `@ts-ignore`. `pnpm -r test` all green. `pnpm --filter @bomb-squad/client build` green.
-  - [ ] Headless live smoke (pattern from 2.4 Debug Log): boot server via `tsx` against throwaway redis/postgres containers; facilitator + 2 joiners; assign both to Team A; `PREPARATION_OPEN` → all sockets see `status: 'preparation'`; `ROUND_START` → `status: 'active'`, first relayOrder player has `role: 'defuser'`, `RoundState` present in Redis, sockets in team room; non-facilitator `PREPARATION_OPEN` rejected with no broadcast.
+  - [x] `ui/Lobby.tsx`: add the Facilitator-only "Open preparation" `ConfirmButton` that emits `PREPARATION_OPEN` (this is the AC-1 entry point). Reuse the existing lobby error-line pattern.
+  - [x] `ui/ActiveRound.tsx` — role-routed: **Defuser** mounts the existing `BombScene` (it tolerates `bomb === null` via `DEV_PLACEHOLDER_MODULES` until 8.2 lands — leave a comment); **Expert** mounts `ManualViewer` (same chapters wiring as prep — EXPERIENCE.md IA: active-round Expert surface IS the manual); **Spectator / Facilitator** get minimal labeled placeholder panels (8.5+/Epic 9 surfaces). No HUD work (4.4/4.5 own timer/strike HUD).
+  - [x] All new strings in `ui/copy.ts` (dry, deadpan, operator voice — see existing file). No fast-blinking elements, no nested modals (UX-DR on facilitator dashboard under social pressure).
+- [x] Task 7 — Gates & verification (AC: all)
+  - [x] `pnpm -r exec tsc --noEmit` → 0 errors, no `@ts-ignore`. `pnpm -r test` all green. `pnpm --filter @bomb-squad/client build` green.
+  - [x] Headless live smoke (pattern from 2.4 Debug Log): boot server via `tsx` against throwaway redis/postgres containers; facilitator + 2 joiners; assign both to Team A; `PREPARATION_OPEN` → all sockets see `status: 'preparation'`; `ROUND_START` → `status: 'active'`, first relayOrder player has `role: 'defuser'`, `RoundState` present in Redis, sockets in team room; non-facilitator `PREPARATION_OPEN` rejected with no broadcast.
   - [ ] **Jay verifies interactively** (two browser windows, `pnpm dev`): host opens prep from the lobby, joiner sees the prep surface for their role, host starts the round, joiner routed to their active surface, defuser sees the bomb scene. Record his observed result in Completion Notes — story is not done without it (project verification rule).
 
 ## Dev Notes
@@ -164,8 +168,48 @@ No new libraries. Socket.IO v4.8.x (already pinned): `io.in(room).fetchSockets()
 
 ### Agent Model Used
 
+claude-fable-5
+
 ### Debug Log References
+
+- `pnpm -r exec tsc --noEmit` → 0 errors across all three workspaces, no `@ts-ignore`.
+- `pnpm -r test` → shared 53 ✓ (untouched), client **147 ✓** (was 143 — +4 `rotation.test.ts`), server **203 ✓** (was 169 — +7 openPreparation, +14 startRound pure-fn, +13 handler integration: 6 PREPARATION_OPEN + 7 ROUND_START).
+- `pnpm --filter @bomb-squad/client build` → success (chunk-size warning pre-existing from 4.x three.js).
+- **Live end-to-end smoke (headless, 2026-06-13):** booted the worktree server via `tsx` on :3299 against throwaway `redis:7-alpine`/`postgres:16-alpine` containers (`/health` → ok both probes). Three real `socket.io-client`s: facilitator hosted; Maya + Devon joined as experts, both assigned Team A. Non-facilitator `PREPARATION_OPEN` → `NOT_FACILITATOR` with **no broadcast leaked** (300 ms spy window). Facilitator `PREPARATION_OPEN` → all 3 sockets received `status:'preparation'`, `roundNumber:1`. `ROUND_START` → all 3 received `status:'active'` with Maya (relayOrder[0]) flipped to `defuser`, Devon untouched as `expert`. Duplicate `ROUND_START` → `CANNOT_START_ROUND`. Redis `session:{id}:round:1` = `{"roundNumber":1,"status":"active","defusers":{"A":"<mayaSocketId>"},"retry":false}` ✓. `grep -c <joinCode> server.log` → **0** (AR15 verified live); info lines carry `{sessionId, roundNumber, defusers}` only. Server process + containers removed after. (Port note: :3199 was occupied by a stale prior-session smoke process — used :3299 rather than killing it.)
 
 ### Completion Notes List
 
+- **Task 1 — shared contract:** `PREPARATION_OPEN: () => void` added to `ClientToServerEvents` (doc comment states facilitator-only + no-ack contract). New `packages/shared/src/types/round.ts` with `RoundState { roundNumber, status:'active', defusers: Partial<Record<TeamId,string>>, retry }`, exported via `types/index.ts` → package root. No `ServerToClientEvents` change — phase flips ride `SESSION_STATE`.
+- **Task 2 — pure transitions:** `openPreparation.ts` (lobby|between-rounds → preparation, `roundNumber+1`; any other status → same reference) and `startRound.ts` (`StartRoundResult` discriminated union; preparation → active; per-team rotation pick with **non-negative modulo** normalization — the documented read-side resolution of the 2.4 `currentDefuserIndex` deferral; role commits: pick → `'defuser'`, displaced same-team `'defuser'` → `'expert'`, facilitator/off-team never touched; relayOrder entries missing from `players` skip the team, all-skipped → `NO_POPULATED_TEAM`). Both spread-only, zero infra imports, no clock/randomness. 21 unit tests incl. deep-frozen-input immutability for both.
+- **Task 3 — PREPARATION_OPEN handler:** TEAM_ASSIGN pipeline copied: pointer → load → **authority gate first** → phase guard (`active`/`ended` → `CANNOT_OPEN_PREP`; duplicate-open falls through to the pure fn's same-reference return = silent no-op) → persist-then-broadcast → `PREPARATION_OPEN_FAILED` catch. Info log `{sessionId, roundNumber}`, never the join code.
+- **Task 4 — ROUND_START handler:** same pipeline; `startRound` refusals map to `CANNOT_START_ROUND` with reason-specific operator-voice messages. Persists **both** `sessionKey` and `roundKey` before any emit (non-atomic two-key write commented, same posture as SESSION_CREATE). Team-room routing via `io.in(sessionRoom).fetchSockets()` → `member.join(teamRoom(sessionId, teamId))` for every rostered socket with a team; new exported `teamRoom()` helper beside `sessionRoom()`. Seam comments in flow position for 8.2 (generation + BOMB_INIT) and 8.4 (TimerState); Epic 3 voice-token note on the routing loop.
+- **Task 5 — tests:** 13 handler integration tests in the existing `TestSocketServer` harness (happy paths incl. team-room membership asserted via `io.in(...).fetchSockets()`, NOT_FACILITATOR with broadcast-spy + store-byte-identical, silent idempotent duplicate-open with ERROR-fence, CANNOT_OPEN_PREP, CANNOT_START_ROUND ×2, out-of-range index modulo pick, NOT_IN_SESSION ×2, injected `setJSON` failures → `*_FAILED` with no broadcast). One test-only flake fixed during red→green: `setupPrepared` now awaits each broadcast on **all** sockets so stale snapshots can't race later listeners.
+- **Task 6 — client surfaces:** `App.tsx` routes by `session.status` (`preparation` → `Preparation`, `active` → `ActiveRound`, else `Lobby`; all three dev routes preserved). `ui/Preparation.tsx`: facilitator panel (guidance copy, per-team "On the bomb next" derived via shared expression, two-step `ConfirmButton` "Start the round", code-filtered ERROR banner cleared on own next emit per the 2.4 review patch); upcoming-defuser panel (4.6 seam comment + placeholder copy); Experts/Spectators get the **real `ManualViewer`** fed by `buildChapters(SANDBOX_MODULES.flatMap(getManualPages))` — the 5.2 wiring seam, built once via `useMemo`. `ui/ActiveRound.tsx`: defuser → `BombStage`+`BombScene` (tolerates `bomb===null` until 8.2), expert → `ManualViewer`, spectator/facilitator → labeled placeholders. `ui/rotation.ts` `upcomingDefuserId()` mirrors `startRound`'s pick expression (4 unit tests, incl. modulo + negative-index). Lobby: facilitator-only "Open preparation" `ConfirmButton`; `CANNOT_OPEN_PREP`/`PREPARATION_OPEN_FAILED` added to the lobby's owned error codes; clear-on-own-emit preserved. New strings in `copy.ts` (operator voice; no blinking, no modals).
+- **Task 7 — gates:** typecheck/tests/build all green (Debug Log); live three-client headless smoke executed end-to-end incl. AR15 and the no-broadcast-on-rejection check.
+- **⚠️ OUTSTANDING — Jay's interactive verification (Task 7 final subtask, unchecked):** two browser windows (`pnpm dev` + server): host opens prep from the lobby → joiner sees role-gated prep surface → host starts round → joiner routes to their active surface; defuser sees the bomb scene. Per the project verification rule, the observed result goes here before the story can be marked done.
+- **Deviation (none material):** prep-phase role gating for the manual uses the *derived* upcoming defuser (not committed roles) so the player about to defuse sees their orientation panel during prep — committed roles don't exist until ROUND_START by design (story decision 2).
+
 ### File List
+
+- packages/shared/src/types/round.ts (created — RoundState)
+- packages/shared/src/types/index.ts (modified — RoundState export)
+- packages/shared/src/events/client-to-server.ts (modified — PREPARATION_OPEN)
+- apps/server/src/session/openPreparation.ts (created — pure transition)
+- apps/server/src/session/startRound.ts (created — pure transition + StartRoundResult)
+- apps/server/src/session/__tests__/openPreparation.test.ts (created — 7 tests)
+- apps/server/src/session/__tests__/startRound.test.ts (created — 14 tests)
+- apps/server/src/handlers/sessionHandlers.ts (modified — roundKey/openPreparation/startRound imports, `teamRoom` export, PREPARATION_OPEN + ROUND_START handlers)
+- apps/server/src/handlers/__tests__/sessionHandlers.test.ts (modified — +13 integration tests, imports)
+- apps/client/src/ui/rotation.ts (created — upcomingDefuserId, mirrors server pick)
+- apps/client/src/ui/__tests__/rotation.test.ts (created — 4 tests)
+- apps/client/src/ui/Preparation.tsx (created — role-gated prep surface)
+- apps/client/src/ui/ActiveRound.tsx (created — role-routed active surface)
+- apps/client/src/ui/Lobby.tsx (modified — Open preparation ConfirmButton, error codes)
+- apps/client/src/ui/copy.ts (modified — prep/active strings)
+- apps/client/src/ui/index.ts (modified — Preparation/ActiveRound exports)
+- apps/client/src/App.tsx (modified — status-routed surfaces)
+- _agent_docs/implementation-artifacts/sprint-status.yaml (modified — story status tracking)
+
+## Change Log
+
+- 2026-06-13: Story 8.3 implemented — the game loop's first phase transitions. Shared: `PREPARATION_OPEN` event + `RoundState` type. Server: pure `openPreparation` (roundNumber increments at prep-open, fixing the seed-chain ordering for 8.2) and `startRound` (rotation pick with modulo normalization resolving the 2.4 index deferral, one-defuser-per-team role commits), both handlers on the TEAM_ASSIGN authority-gate pipeline, `RoundState` persisted at `roundKey`, sockets routed into `session:{id}:team:{teamId}` rooms for 8.4+ broadcasts. Client: status-routed surfaces (Lobby → Preparation → ActiveRound), facilitator prep controls with two-step confirm, real ManualViewer for Experts/Spectators in prep and active, BombScene for the active defuser. All gates green (tsc 0; 403 tests incl. 38 new; build); live three-client headless smoke verified end-to-end incl. AR15. Awaiting Jay's interactive two-browser verification before done.

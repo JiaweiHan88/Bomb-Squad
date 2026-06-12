@@ -11,6 +11,7 @@ export type {
   TeamState,
   SessionState,
 } from './session.js';
+export type { RoundState } from './round.js';
 export type {
   ManualTable,
   ManualSection,

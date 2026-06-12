@@ -10,11 +10,13 @@ import type {
   TeamId,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
-import { sessionKey, joinCodeKey } from '../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey } from '../state/keys.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
 import { addPlayerToSession } from '../session/joinSession.js';
 import { assignPlayerToTeam } from '../session/assignTeam.js';
+import { openPreparation } from '../session/openPreparation.js';
+import { startRound } from '../session/startRound.js';
 
 /**
  * Server-assigned per-socket bookkeeping (Socket.IO `socket.data`). A pointer
@@ -51,6 +53,11 @@ export interface SessionHandlerDeps {
 
 /** Socket.IO room for all participants of a session (architecture Pattern 1). */
 export const sessionRoom = (sessionId: string): string => `session:${sessionId}`;
+
+/** Socket.IO room for one team's sockets (architecture Pattern 1) — the
+ * broadcast target Epic 8.4+ team-scoped bomb/timer events depend on. */
+export const teamRoom = (sessionId: string, teamId: TeamId): string =>
+  `session:${sessionId}:team:${teamId}`;
 
 const DIFFICULTIES: readonly DifficultyTier[] = ['easy', 'medium', 'hard'];
 
@@ -476,6 +483,158 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'TEAM_ASSIGN_FAILED',
           message: 'Could not assign. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Facilitator opens the Preparation phase (Story 8.3, FR8). Payload-less;
+    // no ack (frozen contract): success is the SESSION_STATE broadcast,
+    // failure a typed ERROR. Same pipeline as TEAM_ASSIGN.
+    socket.on('PREPARATION_OPEN', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: "You're not in a session.",
+          recoverable: true,
+        });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_SESSION',
+            message: "You're not in a session.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Authority gate FIRST (a non-facilitator probe learns nothing).
+        if (state.players[socket.id]?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator opens preparation.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Phase guard: mid-round / ended sessions refuse loudly. A duplicate
+        // open while already in preparation falls through to the pure
+        // function's same-reference return — a silent idempotent no-op.
+        if (state.status === 'active' || state.status === 'ended') {
+          socket.emit('ERROR', {
+            code: 'CANNOT_OPEN_PREP',
+            message: 'Preparation only opens between rounds.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = openPreparation(state);
+        if (next === state) return;
+
+        // Persist then emit. Single-key write — nothing partial to roll back.
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info({ sessionId, roundNumber: next.roundNumber }, 'preparation opened');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'PREPARATION_OPEN failed');
+        socket.emit('ERROR', {
+          code: 'PREPARATION_OPEN_FAILED',
+          message: 'Could not open preparation. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Facilitator starts the round (Story 8.3, FR11): commits the rotation
+    // pick per team, activates the session, persists the RoundState, and
+    // routes sockets into their team rooms. Payload-less; no ack.
+    socket.on('ROUND_START', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: "You're not in a session.",
+          recoverable: true,
+        });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_SESSION',
+            message: "You're not in a session.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Authority gate FIRST.
+        if (state.players[socket.id]?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator starts the round.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const result = startRound(state);
+        if (!result.ok) {
+          socket.emit('ERROR', {
+            code: 'CANNOT_START_ROUND',
+            message:
+              result.reason === 'NOT_IN_PREPARATION'
+                ? 'Open preparation before starting the round.'
+                : 'Assign at least one player to a team first.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Story 8.2: per-team bomb generation slots in here — seeds derive
+        // from (sessionId, roundNumber, teamId); BOMB_INIT broadcasts to the
+        // team rooms joined below.
+
+        // Persist BOTH keys before any emit. The two writes are not atomic;
+        // accepted (same posture as SESSION_CREATE's two-key write) — a
+        // failure between them is healed by the next ROUND_START attempt
+        // overwriting both, and nothing was broadcast.
+        await deps.redis.setJSON(sessionKey(sessionId), result.state);
+        await deps.redis.setJSON(roundKey(sessionId, result.round.roundNumber), result.round);
+
+        // Route every roster socket into its team room (architecture
+        // Pattern 1) so 8.4+ team-scoped broadcasts have a target.
+        // Epic 3: voice tokens are re-minted here on role change.
+        const sockets = await io.in(sessionRoom(sessionId)).fetchSockets();
+        for (const member of sockets) {
+          const teamId = result.state.players[member.id]?.teamId;
+          if (teamId !== undefined) member.join(teamRoom(sessionId, teamId));
+        }
+
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+        // Story 8.4: TimerState is minted and broadcast here.
+        deps.log.info(
+          {
+            sessionId,
+            roundNumber: result.round.roundNumber,
+            defusers: result.round.defusers,
+          },
+          'round started',
+        );
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'ROUND_START failed');
+        socket.emit('ERROR', {
+          code: 'ROUND_START_FAILED',
+          message: 'Could not start the round. Try again.',
           recoverable: true,
         });
       }

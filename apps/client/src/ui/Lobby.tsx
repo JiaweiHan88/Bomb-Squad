@@ -3,8 +3,10 @@ import type { ErrorPayload, PlayerInfo, PlayerRole, TeamId } from '@bomb-squad/s
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import Button from './Button.js';
+import ConfirmButton from './ConfirmButton.js';
 import { buildShareLink } from './shareLink.js';
 import {
+  OPEN_PREPARATION,
   BRING_THEM_IN,
   SHARE_SUB,
   COPY_LINK,
@@ -47,6 +49,10 @@ const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
   'INVALID_ASSIGNMENT',
   'NOT_IN_LOBBY',
   'TEAM_ASSIGN_FAILED',
+  // PREPARATION_OPEN rejections (Story 8.3) — emitted from this surface, so
+  // its error banner owns them too.
+  'CANNOT_OPEN_PREP',
+  'PREPARATION_OPEN_FAILED',
 ]);
 
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
@@ -114,6 +120,14 @@ export default function Lobby() {
   const assign = (playerId: string, teamId: TeamId, role: PlayerRole) => {
     setAssignError(null);
     getSocket().emit('TEAM_ASSIGN', { playerId, teamId, role });
+  };
+
+  // Story 8.3: the facilitator ends the lobby by opening preparation. Server
+  // truth drives the surface change — the SESSION_STATE broadcast flips
+  // status to 'preparation' and App.tsx swaps Lobby out; no optimistic flip.
+  const openPreparation = () => {
+    setAssignError(null);
+    getSocket().emit('PREPARATION_OPEN');
   };
 
   const copyLink = async () => {
@@ -231,6 +245,14 @@ export default function Lobby() {
           </span>
           <Button onClick={() => void copyLink()}>{copied ? COPIED : COPY_LINK}</Button>
         </div>
+
+        {isFacilitator && (
+          // Two-step confirm: opening prep moves every player off the lobby —
+          // major phase change, same affordance grammar as other commits.
+          <div className="mt-6 flex justify-end">
+            <ConfirmButton label={OPEN_PREPARATION} onConfirm={openPreparation} />
+          </div>
+        )}
       </section>
     </div>
   );

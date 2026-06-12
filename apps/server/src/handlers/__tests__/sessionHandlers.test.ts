@@ -4,16 +4,18 @@ import type {
   SessionCreatePayload,
   SessionCreatedPayload,
   ErrorPayload,
+  RoundState,
 } from '@bomb-squad/shared';
 import {
   registerSessionHandlers,
   parseSessionCreatePayload,
   parseSessionJoinPayload,
   parseTeamAssignPayload,
+  teamRoom,
   MAX_PLAYERS,
 } from '../sessionHandlers.js';
 import { createSessionState } from '../../session/createSession.js';
-import { sessionKey, joinCodeKey } from '../../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
@@ -778,5 +780,305 @@ describe('TEAM_ASSIGN handler', () => {
     const state = await secondState;
 
     expect(state.teams.A?.relayOrder).toEqual([mayaId, devonId]);
+  });
+});
+
+describe('PREPARATION_OPEN handler', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let joiner: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, { redis: store, log: noopLog }),
+    );
+    facilitator = await server.connectClient();
+    joiner = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** Join a socket into the session and resolve with that socket's broadcast snapshot. */
+  async function joinAs(
+    socket: TestClientSocket,
+    joinCode: string,
+    displayName: string,
+  ): Promise<SessionState> {
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
+    return statePromise;
+  }
+
+  it('happy path: lobby → preparation, roundNumber 1, ALL sockets receive SESSION_STATE', async () => {
+    const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya');
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+
+    const [facState, joinerState] = await Promise.all([facStatePromise, joinerStatePromise]);
+    for (const state of [facState, joinerState]) {
+      expect(state.status).toBe('preparation');
+      expect(state.roundNumber).toBe(1);
+    }
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.status).toBe('preparation');
+    expect(stored.roundNumber).toBe(1);
+  });
+
+  it('non-facilitator → NOT_FACILITATOR, no broadcast, store byte-identical', async () => {
+    const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya');
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(error.recoverable).toBe(true);
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('already in preparation → silent idempotent no-op (no persist, no broadcast, no error)', async () => {
+    const ack = await createSession(facilitator);
+    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    await opened;
+    const storedAfterFirst = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorSpy = jest.fn();
+    facilitator.on('ERROR', errorSpy);
+    facilitator.emit('PREPARATION_OPEN');
+    // Fence: an invalid TEAM_ASSIGN produces an ERROR; per-socket ordering
+    // guarantees the duplicate open above completed by then.
+    const fence = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { teamId: 'C' } as never);
+    await fence;
+
+    expect(facSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1); // the fence only
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedAfterFirst);
+  });
+
+  it('active session → CANNOT_OPEN_PREP', async () => {
+    const ack = await createSession(facilitator);
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+    expect(error.code).toBe('CANNOT_OPEN_PREP');
+  });
+
+  it('a connected socket that never entered a session → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_SESSION');
+  });
+
+  it('persist failure → PREPARATION_OPEN_FAILED, no broadcast', async () => {
+    const ack = await createSession(facilitator);
+    const realSet = store.setJSON.bind(store);
+    store.setJSON = async (key, value) => {
+      if (key === sessionKey(ack.sessionId)) throw new Error('redis down');
+      return realSet(key, value);
+    };
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('PREPARATION_OPEN_FAILED');
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('ROUND_START handler', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let maya: TestClientSocket;
+  let devon: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, { redis: store, log: noopLog }),
+    );
+    facilitator = await server.connectClient();
+    maya = await server.connectClient();
+    devon = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  async function joinAs(
+    socket: TestClientSocket,
+    joinCode: string,
+    displayName: string,
+  ): Promise<SessionState> {
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
+    return statePromise;
+  }
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  /** Create session, join Maya (Team A) + Devon (Team B), open preparation. */
+  async function setupPrepared(): Promise<{
+    sessionId: string;
+    mayaId: string;
+    devonId: string;
+  }> {
+    const ack = await createSession(facilitator);
+    const j1 = await joinAs(maya, ack.joinCode, 'Maya');
+    const mayaId = idOf(j1, 'Maya');
+    const j2 = await joinAs(devon, ack.joinCode, 'Devon');
+    const devonId = idOf(j2, 'Devon');
+
+    // Await each broadcast on ALL sockets so no stale snapshot is still in
+    // flight when a test registers its own nextEvent listeners.
+    const everyone = () =>
+      Promise.all(
+        [facilitator, maya, devon].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')),
+      );
+    let done = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'expert' });
+    await done;
+    done = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'B', role: 'expert' });
+    await done;
+    done = everyone();
+    facilitator.emit('PREPARATION_OPEN');
+    await done;
+    return { sessionId: ack.sessionId, mayaId, devonId };
+  }
+
+  it('happy path: activates the round, commits rotation picks, persists RoundState, joins team rooms', async () => {
+    const { sessionId, mayaId, devonId } = await setupPrepared();
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const mayaStatePromise = nextEvent<SessionState>(maya, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    const [facState, mayaState] = await Promise.all([facStatePromise, mayaStatePromise]);
+
+    for (const state of [facState, mayaState]) {
+      expect(state.status).toBe('active');
+      expect(state.players[mayaId]).toMatchObject({ role: 'defuser', teamId: 'A' });
+      expect(state.players[devonId]).toMatchObject({ role: 'defuser', teamId: 'B' });
+      expect(Object.values(state.players).find((p) => p.role === 'facilitator')).toBeDefined();
+    }
+
+    const round = JSON.parse(store.data.get(roundKey(sessionId, 1))!) as RoundState;
+    expect(round).toEqual({
+      roundNumber: 1,
+      status: 'active',
+      defusers: { A: mayaId, B: devonId },
+      retry: false,
+    });
+
+    const teamA = await server.io.in(teamRoom(sessionId, 'A')).fetchSockets();
+    const teamB = await server.io.in(teamRoom(sessionId, 'B')).fetchSockets();
+    expect(teamA.map((s) => s.id)).toEqual([mayaId]);
+    expect(teamB.map((s) => s.id)).toEqual([devonId]);
+  });
+
+  it('non-facilitator → NOT_FACILITATOR, no broadcast, no round key', async () => {
+    const { sessionId } = await setupPrepared();
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('ROUND_START');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(store.data.get(roundKey(sessionId, 1))).toBeUndefined();
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('still in lobby → CANNOT_START_ROUND', async () => {
+    await createSession(facilitator);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_START');
+    const error = await errorPromise;
+    expect(error.code).toBe('CANNOT_START_ROUND');
+  });
+
+  it('preparation with no populated team → CANNOT_START_ROUND, state unchanged', async () => {
+    const ack = await createSession(facilitator);
+    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    await opened;
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_START');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('CANNOT_START_ROUND');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+  });
+
+  it('out-of-range currentDefuserIndex seeded in the store → modulo pick, no throw', async () => {
+    const { sessionId, mayaId } = await setupPrepared();
+    const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(sessionId), {
+      ...stored,
+      teams: { ...stored.teams, A: { ...stored.teams.A!, currentDefuserIndex: 7 } },
+    });
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    const state = await statePromise;
+
+    // Team A relayOrder = [maya] → 7 % 1 = 0 → Maya still picked.
+    expect(state.players[mayaId]).toMatchObject({ role: 'defuser' });
+  });
+
+  it('a never-joined socket → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('ROUND_START');
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_SESSION');
+  });
+
+  it('persist failure → ROUND_START_FAILED, no broadcast', async () => {
+    const { sessionId } = await setupPrepared();
+    const realSet = store.setJSON.bind(store);
+    store.setJSON = async (key, value) => {
+      if (key === sessionKey(sessionId)) throw new Error('redis down');
+      return realSet(key, value);
+    };
+
+    const mayaSpy = jest.fn();
+    maya.on('SESSION_STATE', mayaSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_START');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('ROUND_START_FAILED');
+    expect(mayaSpy).not.toHaveBeenCalled();
   });
 });
