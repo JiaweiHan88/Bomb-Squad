@@ -1,23 +1,22 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
-import { Canvas, type ThreeEvent } from '@react-three/fiber';
+import { useEffect, useMemo, useRef } from 'react';
+import { Canvas } from '@react-three/fiber';
 import { CameraControls } from '@react-three/drei';
 import CameraControlsImpl from 'camera-controls';
 import { useGameStore } from '../store/gameStore.js';
 import { useUiStore } from '../store/uiStore.js';
-import {
-  CHASSIS_SIZE,
-  DEFAULT_PLACEHOLDER_COUNT,
-  computeModuleLayout,
-  type ModuleSlot,
-} from './layout.js';
+import { CHASSIS_SIZE, computeModuleLayout, type ModuleSlot } from './layout.js';
 import { ChassisFeatures } from './ChassisFeatures.js';
+import { ModuleBay } from './ModuleBay.js';
 import { DEV_BOMB_CONTEXT } from './devBombContext.js';
+import { DEV_PLACEHOLDER_MODULES } from './devBombState.js';
+import { isTextEntryTarget, prefersReducedMotion } from './dom.js';
 
 /**
  * Bomb scene: bakelite chassis with diegetic BombContext metadata (Story 4.2)
- * + clickable module faceplates + the orbit/zoom/focus camera rig (Story 4.1).
+ * + registry-driven module bays with solve LEDs (Story 4.3)
+ * + the orbit/zoom/focus camera rig (Story 4.1).
  * Rendering only — zero game logic (R3F components are dumb renderers).
- * Registry-driven module layout + solve LEDs land in 4.3.
+ * Timer LCD lands in 4.4; strike HUD + team strike roll-up in 4.5.
  */
 
 /** Brass corner screws on the front/back faces (mockup .screw, Flow 1 "brass
@@ -50,20 +49,6 @@ const FOCUS_DISTANCE = 1.6;
 /** Zoom clamps: can't enter the chassis, can't lose it to a speck. */
 const MIN_DISTANCE = 1.2;
 const MAX_DISTANCE = 10;
-/** Clicks that travelled further than this (px) are drag-orbits, not clicks. */
-const CLICK_DRAG_TOLERANCE_PX = 4;
-
-/** Accessibility Floor: reduced-motion users get instant camera transitions. */
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-const isTextEntryTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-  );
-};
-
 function CameraRig({ slots }: { slots: ModuleSlot[] }) {
   const controlsRef = useRef<CameraControlsImpl | null>(null);
   // Reactive subscription is correct here: focus changes are click-rate, not
@@ -124,34 +109,14 @@ function CameraRig({ slots }: { slots: ModuleSlot[] }) {
   return <CameraControls ref={controlsRef} minDistance={MIN_DISTANCE} maxDistance={MAX_DISTANCE} />;
 }
 
-/** Memoized: module slots re-render on every store broadcast otherwise. */
-const ModulePlaceholder = memo(function ModulePlaceholder({ slot }: { slot: ModuleSlot }) {
-  const onClick = (event: ThreeEvent<MouseEvent>) => {
-    if (event.button !== 0) return; // AC1: right/middle-click reserved
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return; // drag-orbit release ≠ click
-    event.stopPropagation();
-    useUiStore.getState().setActiveModuleIndex(slot.moduleIndex);
-  };
-  const [x, y, z] = slot.position;
-  const nz = slot.normal[2];
-  return (
-    // Faceplate sits proud of the chassis face by half its thickness.
-    <mesh position={[x, y, z + nz * 0.04]} onClick={onClick}>
-      <boxGeometry args={[0.8, 0.55, 0.08]} />
-      {/* --color-graphite #1A1A1F (DESIGN.md) — modules read as dark bays against
-          the bakelite chassis (raw hex; CSS vars can't reach WebGL materials).
-          Bay framing/screws/solve LEDs are Story 4.3. */}
-      <meshStandardMaterial color="#1A1A1F" />
-    </mesh>
-  );
-});
-
 export default function BombScene() {
   // Reactive (non-per-frame) reads: layout and metadata follow the bomb
-  // snapshot when one exists, else the dev-harness placeholders.
-  const moduleCount = useGameStore((s) => s.bomb?.modules.length ?? DEFAULT_PLACEHOLDER_COUNT);
+  // snapshot when one exists, else the dev-harness placeholders. The modules
+  // array (not a bare count) is the source of truth since 4.3 — each slot
+  // renders its module's data (id → registry, status → solve LED).
+  const modules = useGameStore((s) => s.bomb?.modules) ?? DEV_PLACEHOLDER_MODULES;
   const context = useGameStore((s) => s.bomb?.context) ?? DEV_BOMB_CONTEXT;
-  const slots = useMemo(() => computeModuleLayout(moduleCount), [moduleCount]);
+  const slots = useMemo(() => computeModuleLayout(modules.length), [modules.length]);
 
   return (
     <Canvas camera={{ position: OVERVIEW_POSITION, fov: 45 }}>
@@ -187,7 +152,11 @@ export default function BombScene() {
       <ChassisFeatures context={context} />
 
       {slots.map((slot) => (
-        <ModulePlaceholder key={slot.moduleIndex} slot={slot} />
+        <ModuleBay
+          key={slot.moduleIndex}
+          slot={slot}
+          moduleId={modules[slot.moduleIndex]?.moduleId ?? 'placeholder'}
+        />
       ))}
 
       <CameraRig slots={slots} />

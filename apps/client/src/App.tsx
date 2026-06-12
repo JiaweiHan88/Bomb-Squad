@@ -4,8 +4,7 @@ import { bindServerEvents } from './net/bindServerEvents.js';
 import { useGameStore } from './store/gameStore.js';
 import { AppShell, LoadingScreen, PlatformGate } from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
-import BombStage from './scenes/BombStage.js';
-import BombScene from './scenes/BombScene.js';
+import DevBombHarness from './scenes/DevBombHarness.js';
 
 // Production builds are served through Caddy, which proxies /socket.io/* to
 // the game server — same-origin works on any domain without baking a URL into
@@ -44,9 +43,7 @@ export default function App() {
   return (
     <PlatformGate>
       {isBombDevRoute ? (
-        <BombStage>
-          <BombScene />
-        </BombStage>
+        <DevBombHarness />
       ) : connection !== 'connected' ? (
         <LoadingScreen status={CONNECTING} />
       ) : (

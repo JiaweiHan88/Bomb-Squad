@@ -1,9 +1,10 @@
 /**
- * Pure placeholder-module layout for the bomb scene (no React, no three.js).
+ * Pure module-slot layout for the bomb scene (no React, no three.js).
  *
  * Project rule: module geometry/layout is data-driven, never hardcoded JSX
- * repetition. This is the deliberately crude Story 4.1 stand-in — Story 4.3
- * replaces it with registry-driven layout. Keep it small and replaceable.
+ * repetition. Since Story 4.3 the slot list is driven by BombState.modules
+ * (each slot renders its module's data — id → renderer registry lookup,
+ * status → solve LED); this file owns only the position math.
  *
  * Slots fill a 3-wide grid on the chassis front face, then continue onto the
  * back face (mirroring the KTANE two-faced bomb). The grid grows downward in
@@ -30,8 +31,10 @@ export const CHASSIS_SIZE: [number, number, number] = [3, 1.5, 1.05];
 const STEP_X = 0.95;
 const STEP_Y = 0.7;
 
-/** Dev-harness slot count when no bomb snapshot exists yet. */
-export const DEFAULT_PLACEHOLDER_COUNT = 6;
+/** 1-based, zero-padded bay micro-label (mockup .bay-tag): 0 → "MOD-01". */
+export function formatBayTag(moduleIndex: number): string {
+  return `MOD-${String(moduleIndex + 1).padStart(2, '0')}`;
+}
 
 export function computeModuleLayout(count: number): ModuleSlot[] {
   if (!Number.isFinite(count) || count <= 0) return [];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeModuleLayout, DEFAULT_PLACEHOLDER_COUNT } from '../layout.js';
+import { computeModuleLayout, formatBayTag } from '../layout.js';
 
 describe('computeModuleLayout', () => {
   it('returns one slot per module', () => {
@@ -47,7 +47,19 @@ describe('computeModuleLayout', () => {
     }
   });
 
-  it('exposes the dev-harness default of 6 slots', () => {
-    expect(DEFAULT_PLACEHOLDER_COUNT).toBe(6);
+});
+
+describe('formatBayTag', () => {
+  it('formats 1-based, zero-padded MOD-NN tags (mockup .bay-tag)', () => {
+    expect(formatBayTag(0)).toBe('MOD-01');
+    expect(formatBayTag(5)).toBe('MOD-06');
+    expect(formatBayTag(9)).toBe('MOD-10');
+    expect(formatBayTag(10)).toBe('MOD-11');
+  });
+
+  it('is stable across the full GDD count domain (3–11) and beyond', () => {
+    for (let i = 0; i < 13; i++) {
+      expect(formatBayTag(i)).toMatch(/^MOD-\d{2}$/);
+    }
   });
 });

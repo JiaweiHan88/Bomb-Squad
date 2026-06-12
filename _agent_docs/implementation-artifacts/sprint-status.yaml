@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # story 4-2 reviewed → done
+last_updated: 2026-06-12  # story 4-3 implemented → review
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -78,7 +78,7 @@ development_status:
   epic-4: in-progress
   4-1-3d-bomb-scene-and-camera-rig: done
   4-2-chassis-and-bomb-metadata-rendering: done
-  4-3-module-slots-and-solve-leds: backlog
+  4-3-module-slots-and-solve-leds: review
   4-4-diegetic-timer-lcd-with-client-extrapolation: backlog
   4-5-strike-indicator-and-strike-roll-up: backlog
   4-6-preparation-placeholder-bomb-view: backlog
