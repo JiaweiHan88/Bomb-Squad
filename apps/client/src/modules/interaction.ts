@@ -66,7 +66,13 @@ export function moduleClickHandlers(onActivate: () => void): {
  * The release is delivered even after a drag (no drag-tolerance check on
  * pointerup): swallowing releases risks a stuck "held" state, and a hold's
  * correctness is judged by the reducer anyway. The pointer is captured on
- * press so a release outside the mesh still arrives.
+ * press so a release outside the mesh still arrives. A pointercancel (gesture
+ * stolen by the browser / context lost) is treated as a release for the same
+ * reason — a captured hold must never strand the module in `held: true`.
+ *
+ * stopPropagation runs before the button guard (like moduleClickHandlers):
+ * the module surface owns ALL its pointer events, so a reserved-button press
+ * must not bubble to ModuleBay's click-to-focus either.
  */
 export function modulePressHoldHandlers(
   onPress: () => void,
@@ -74,11 +80,19 @@ export function modulePressHoldHandlers(
 ): {
   onPointerDown: (event: ModulePointerEvent) => void;
   onPointerUp: (event: ModulePointerEvent) => void;
+  onPointerCancel: (event: ModulePointerEvent) => void;
 } {
+  const release = (event: ModulePointerEvent) => {
+    event.stopPropagation();
+    if (event.pointerId !== undefined) {
+      (event.target as PointerCaptureTarget | undefined)?.releasePointerCapture?.(event.pointerId);
+    }
+    onRelease();
+  };
   return {
     onPointerDown: (event) => {
-      if (event.button !== 0) return;
       event.stopPropagation();
+      if (event.button !== 0) return;
       if (event.pointerId !== undefined) {
         (event.target as PointerCaptureTarget | undefined)?.setPointerCapture?.(event.pointerId);
       }
@@ -86,13 +100,10 @@ export function modulePressHoldHandlers(
     },
     onPointerUp: (event) => {
       if (event.button !== 0) return;
-      event.stopPropagation();
-      if (event.pointerId !== undefined) {
-        (event.target as PointerCaptureTarget | undefined)?.releasePointerCapture?.(
-          event.pointerId,
-        );
-      }
-      onRelease();
+      release(event);
     },
+    // Cancelled gesture (touch interrupted, browser intervention): release
+    // regardless of which button — capture must be freed and the hold ended.
+    onPointerCancel: release,
   };
 }

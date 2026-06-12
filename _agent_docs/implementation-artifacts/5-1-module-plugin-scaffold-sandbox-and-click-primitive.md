@@ -4,7 +4,7 @@ baseline_commit: 412696044d0efc2bf3e4c9c878b95c937193826a
 
 # Story 5.1: Module Plugin Scaffold, Sandbox & Click Primitive
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -65,7 +65,23 @@ So that modules can be built and tested in isolation and added additively.
 
 ## Review Findings
 
-<!-- populated by code-review -->
+_Code review 2026-06-12 (Blind Hunter · Edge Case Hunter · Acceptance Auditor, all Opus). Auditor re-ran gates: tsc 0 errors, shared 53 / client 121 / server 155 green; all 4 ACs PASS; cut-then-press deviation judged sound; 1.6 output guard genuinely closed. 1 patch, 0 decisions, 0 defers, 14 dismissed as noise._
+
+- [x] [Review][Patch] Press/hold handlers: stopPropagation runs after the button guard (reserved-button events leak to ModuleBay) and there is no onPointerCancel (a cancelled hold never releases pointer capture or fires the release action → stuck `held: true` until reset) — this is the template every later module copies [apps/client/src/modules/interaction.ts:79-97] — FIXED: stopPropagation hoisted above the button guard in both handlers; `onPointerCancel` added (mirrors release path, spread into DefuserView via `{...pressHold}`). tsc 0 errors, client 121 tests green.
+
+### Dismissed as noise (recorded for traceability)
+
+- Blind: stuck-held on a non-primary `pointerup` — not reachable in standard pointer semantics (the real left-up always reports `button === 0`); the genuine stuck path is `pointercancel`, folded into the patch above.
+- Blind: idempotent `CUT` no-op gives no feedback after a wrong cut on a press-solution — intended (severed wire is permanent until reset; repeat-cut is deliberately idempotent, not a strike).
+- Blind/Edge: dev-dispatch `bomb.solved`/strike roll-up is a separate hand-mirror of `applyModuleResult` that could drift; the multi-module solved-lag is not reachable (sandbox is single-module at index 0). Dev-only path.
+- Blind: `Math.min(strikes+1, 3) as StrikeCount` magic `3` — clamp is correct; cosmetic.
+- Blind: `generate.ts` assumes `serialNumber` ends in a digit — cosmetic only (label digit unused by `solution`); `BombContext` invariant holds.
+- Blind/Edge: `solutionForLabel` `<= 'I'` string compare assumes uppercase A–Z — defensive-only; `generate` always emits A–Z.
+- Blind: DefuserView selector factory allocates a fresh closure per render — harmless under zustand value-equality.
+- Edge: release-without-press / double-release — guarded and tested in the reducer (idempotent fall-through).
+- Edge: non-integer/NaN `moduleIndex`, double dispatch-backend install, reset-before-generate, store-cleared-mid-loop — all guarded (`if (!mod) return`, overwrite warn, warn-and-drop) or only theoretical in a dev tool.
+- Edge: sandbox picker doesn't regenerate on select (stale inspector until Generate) — the Generate button is the intended explicit commit action; UX choice, not a defect.
+- Auditor advisory: `MODULE_RESET` returns a fresh object even when already armed (not referentially idempotent) — no contract requires it; harmless.
 
 ## Dev Notes
 
@@ -198,6 +214,7 @@ claude-fable-5
 - **Task 6 — /dev/sandbox:** App.tsx branch mirrors /dev/bomb exactly (same DEV/connected guard, same `vite preview` SPA-fallback deferral); `sandbox/SandboxHarness.tsx` (decision: `src/sandbox/` dir — sandbox is neither a scene nor a module) overlays operator-world chrome (module picker from SANDBOX_MODULES, seed input with validation, Generate/Reset, live inspector: seed/status/strikes/bomb.solved/data JSON) on BombStage + a minimal Canvas mounting the registry-resolved DefuserView at moduleIndex 0. State flows through the real gameStore (`setBomb(buildSandboxBomb(...))`). `modules/index.ts` registration barrel imported once by main.tsx. `sandbox/sandbox.ts` pure helpers (parseSeed, buildSandboxBomb).
 - **Task 7 — gates & smoke:** all green (see Debug Log). Headless smoke 14/14 PASS: (a) auto-generate on load, (b) same-seed reproduction byte-identical + different-seed differs, (c) cut solves / press solves / wrong-cut strikes+re-arms+severs, (d) cut-press two-step incl. progress-without-strike, (d3) held=true sustained mid-hold with sunk-button screenshot, (e) reset restores + still solvable, (f) keyboard does nothing to the module, (g) drag across the wire ≠ click, (h) right-click reserved.
 - **Type-erasure pattern settled for registries:** module reducers are fully typed in shared; at registry boundaries (`MODULE_REDUCERS`, `SandboxModule`) the per-module state type is erased via a single documented cast (`devDemoReducer as ModuleReducer`, `DEV_DEMO_MODULE as SandboxModule`). Reducer variance makes this unavoidable; the bombReducer output guard is the runtime backstop. 5.3+ copies this pattern.
+- **Human verification (Jay, 2026-06-12):** interactively exercised `/dev/sandbox` and confirmed the module behaves correctly — human-verification gate satisfied. Code review (2026-06-12) applied one patch (press/hold handler stopPropagation ordering + `onPointerCancel` to prevent stuck-held); gates re-run green (tsc 0, client 121). Status → done.
 - **For Story 5.3 (Wires):** copy `apps/client/src/modules/dev-demo/` + `packages/shared/src/modules/dev-demo/` structure verbatim; add one MODULE_REDUCERS entry + one SANDBOX_MODULES entry + one barrel import; swap the dispatch backend to the MODULE_INTERACT emit via `setModuleActionDispatch` (or install it as the default backend in net/). Focus-gating of module interaction was deliberately NOT implemented (clicks interact from any camera pose; stopPropagation keeps focus behavior intact) — revisit with real Wires playtest.
 
 ### File List
