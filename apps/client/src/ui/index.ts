@@ -1,6 +1,8 @@
 export { default as AppShell } from './AppShell.js';
 export { default as Button, type ButtonVariant } from './Button.js';
 export { default as ConfirmButton } from './ConfirmButton.js';
+export { default as Landing } from './Landing.js';
+export { default as Lobby } from './Lobby.js';
 export { default as LoadingScreen } from './LoadingScreen.js';
 export { default as PlatformGate } from './PlatformGate.js';
 export { useViewportGate } from './useViewportGate.js';

@@ -536,6 +536,34 @@ So that sessions stay within 2–16 players and no one joins mid-round.
 **When** the Facilitator adds a player before advancing
 **Then** the player is admitted, but is flagged as ineligible to defuse if relay slots are already assigned.
 
+### Story 2.7: Lobby Resilience & Facilitator Player Controls
+
+As a Facilitator and players,
+I want misjoined players removable, refreshed players cleanly handled, and share links that actually let you join,
+So that the lobby stays accurate and nobody gets stranded by a refresh or a prefilled link.
+
+**Acceptance Criteria:**
+
+**Given** the lobby roster
+**When** the Facilitator chooses Remove on a player row and passes the secondary confirm
+**Then** a `PLAYER_REMOVE` is accepted only from the Facilitator, the player disappears from the roster for all participants, capacity is freed, and the removed client is returned to the landing screen with a human-readable notice.
+
+**Given** a non-Facilitator socket (or the Facilitator targeting themselves)
+**When** it attempts `PLAYER_REMOVE`
+**Then** the server rejects it with a typed authority/validation error and no state changes.
+
+**Given** a joined player in the lobby phase
+**When** their socket disconnects (refresh, tab close, network drop)
+**Then** their roster entry is removed and broadcast, so ghost entries never persist nor count toward capacity. (Lobby phase only — mid-round disconnect handling remains Epic 8 / FR13.)
+
+**Given** a player who refreshed during the lobby
+**When** they rejoin via the share link
+**Then** they re-enter the lobby without duplicate roster entries or capacity errors caused by their own stale entry.
+
+**Given** a join link with `?join=` prefilling a complete code
+**When** the code cells are full but no submitting keystroke occurred
+**Then** a visible "Join" button is shown that submits once display name and role are set — typing the 6th character continues to auto-submit as before.
+
 ---
 
 ## Epic 3: Voice Communication

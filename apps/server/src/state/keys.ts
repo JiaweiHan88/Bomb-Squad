@@ -17,3 +17,7 @@ export const rolesKey = (sessionId: string): string =>
 
 export const lifelinesKey = (sessionId: string): string =>
   `session:${sessionId}:lifelines`;
+
+/** Join-code → sessionId lookup (value: the sessionId string, stored as JSON). */
+export const joinCodeKey = (joinCode: string): string =>
+  `joincode:${joinCode}`;

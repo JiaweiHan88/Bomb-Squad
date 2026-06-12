@@ -26,7 +26,7 @@ DESIGN.md is the visual identity peer. Visual specs (colors, type, component app
 Top-level surfaces, in player-encounter order:
 
 1. **Landing / Join** — enter join code (Defuser/Expert/Spectator) *or* "Host a session" (Facilitator).
-2. **Lobby** — show team roster, role pickers, join-code share, "Ready" state, voice mic-check.
+2. **Lobby** — show team roster, role pickers, join-code share, "Ready" state, voice mic-check; Facilitator-only per-row Remove control (destructive → secondary confirm).
 3. **Preparation phase** — all players in same view, but role-gated content: Defuser sees module *types only* on a placeholder bomb; Experts and Spectators browse the full manual.
 4. **Active round (role-dependent):**
    - **Defuser:** Bomb View.
@@ -61,6 +61,7 @@ Microcopy is **dry, deadpan, period-appropriate**. The bomb is serious; the fram
 - Lifeline arrival: "Spectator [name] sent a tip: [tip]."
 - Join code share: "Bring them in" (not "Invite Players").
 - Facilitator pause: "Holding the clock."
+- Player removal notice: "The Facilitator removed you from this session."
 
 Brand voice direction lives in `DESIGN.md > Brand & Style`; this section governs only the words.
 
@@ -69,7 +70,7 @@ Brand voice direction lives in `DESIGN.md > Brand & Style`; this section governs
 Visual specs in DESIGN.md. Behavior here:
 
 - **Primary button** — tactile press (translateY 2px). All destructive/irreversible actions get a secondary confirm step (e.g., "End session?"). No primary button is ever a destructive action.
-- **Join-code input** — 6 character cells, mono type. Auto-uppercases. Pastes split per-cell. Submits on 6th char without explicit button press.
+- **Join-code input** — 6 character cells, mono type. Auto-uppercases. Pastes split per-cell. Submits on 6th char without explicit button press. If the code is complete without a submitting keystroke (e.g. a `?join=` prefilled link), a visible Join button appears and submits once name and role are set.
 - **Module solve LED** — green-glow on solve is the *only* solved confirmation the Defuser gets visually. Pair with an audio solve chime so it lands without staring.
 - **Speaker indicator** — pulses while the participant transmits, with a 150ms grace to suppress flicker on stop. Names always shown; never icon-only (colorblind floor + identity clarity).
 - **Toast** — non-blocking, stacks vertically top-right, max 3 visible. Lifeline toast persists 8s; standard toast 5s. Never animates the bomb scene's layout.

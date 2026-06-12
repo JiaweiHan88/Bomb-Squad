@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-12  # story 1-7 → done (code review + 9 patches applied, gates re-run)
+last_updated: 2026-06-12  # merge worktree-story-2-2: stories 2-2/2-3/2-4 → done
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -57,11 +57,12 @@ development_status:
   # ---- Epic 2: Lobby & Session Setup ----
   epic-2: in-progress
   2-1-design-tokens-ui-shell-and-state-patterns: done
-  2-2-facilitator-hosts-a-session: backlog
-  2-3-player-joins-via-code-and-picks-a-role: backlog
-  2-4-team-and-per-player-role-assignment: backlog
+  2-2-facilitator-hosts-a-session: done
+  2-3-player-joins-via-code-and-picks-a-role: done
+  2-4-team-and-per-player-role-assignment: done
   2-5-lobby-roster-ready-state-and-mic-check: backlog
   2-6-capacity-and-join-window-guards: backlog
+  2-7-lobby-resilience-and-facilitator-player-controls: backlog
   epic-2-retrospective: optional
 
   # ---- Epic 3: Voice Communication ----
