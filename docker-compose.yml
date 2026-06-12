@@ -178,7 +178,9 @@ services:
       # Caddy admin API at :2019 (HTTP, no TLS). The admin root `/` returns 404 —
       # probe `/config/`, which returns the live JSON config (always contains an
       # "apps" block once the Caddyfile loads) and proves Caddy is up and running.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/config/ 2>/dev/null | grep -q apps"]
+      # Use 127.0.0.1, not localhost: `admin localhost:2019` binds IPv4 only, but
+      # BusyBox wget resolves `localhost` to [::1] first → connection refused.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ 2>/dev/null | grep -q apps"]
       interval: 15s
       timeout: 5s
       retries: 5

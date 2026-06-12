@@ -16,7 +16,14 @@
 }
 
 :443 {
-  tls internal
+  # A bare ":443" block has no hostname, so plain "tls internal" provisions no
+  # certificate and every TLS handshake fails. on_demand issues an internal-CA
+  # cert for whatever SNI the client sends (localhost, an IP, a LAN name) at
+  # handshake time — correct for a catch-all local-dev block. Production
+  # replaces ":443" with a real domain and drops this whole tls directive.
+  tls internal {
+    on_demand
+  }
 
   # ── Socket.IO — Caddy handles the WebSocket upgrade natively ────────────────
   @socketio {
