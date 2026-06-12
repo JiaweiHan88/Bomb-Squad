@@ -4,7 +4,7 @@ baseline_commit: eed0eb8161590054d4ca2b0d3393f2c5377a84a0
 
 # Story 5.2: Expert Manual Viewer
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -196,3 +196,10 @@ claude-fable-5
 ## Change Log
 
 - 2026-06-12: Story 5.2 implemented — Expert manual viewer: paper-styled two-column viewer (`apps/client/src/manual/`) rendering structured `ManualPage` data with serif-on-cream sheet (grain, −0.8° rotation, paper shadow), single scrolling region with per-chapter scroll memory, keyboard navigation (arrows/PageUp-Down) and `/` chapter search; observable position in `uiStore` emitted as new typed `MANUAL_NAVIGATE` event, validated/persisted server-side and rebroadcast as `EXPERT_MANUAL_POSITION` to the session room (locked-mirror feed for Story 9.4). Dev fixtures + `/dev/manual` harness. All gates green (tsc 0, build, shared 24 / client 116 / server 161); headless smoke 25/25 with screenshot inspection. Awaiting Jay's interactive verification (AC6).
+
+## Review Findings
+
+Code review 2026-06-12 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All 5 ACs PASS; every binding constraint (manual location, structured-data-only, server-side validation, Redis O(1), no reducer, room scoping, tokens, ≤1° rotation, single scroll region, colorblind floor, `isTextEntryTarget` reuse, App.tsx confined to dev-route, no `registry.ts` touch, SCREAMING_SNAKE_CASE, shared purity, no `@ts-ignore`/`Math.random`) verified satisfied. AC6 human verification recorded.
+
+- [x] [Review][Patch] Global keydown effect has no dependency array — re-subscribes the `window` `keydown` listener on every render (incl. every search keystroke); add `[chapters, current]` deps so it re-binds only on chapter/manual change [apps/client/src/manual/ManualViewer.tsx:72-101] — FIXED 2026-06-12 (tsc clean, 22/22 manual tests pass)
+- [x] [Review][Defer] MANUAL_NAVIGATE expert authority check keys on transient `socket.id` — an Expert who reconnects with a new socket id is silently treated as non-expert; matches the existing `sessionHandlers.ts:417` facilitator convention, so this is a codebase-wide reconnection concern, not introduced here [apps/server/src/handlers/manualHandlers.ts:90] — deferred, pre-existing

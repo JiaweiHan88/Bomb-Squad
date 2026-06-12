@@ -97,8 +97,11 @@ export default function ManualViewer({ chapters }: ManualViewerProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-    // selectChapter is stable per render and reads only refs + props.
-  });
+    // Re-bind only when the manual or active chapter changes — not on every
+    // render (e.g. search keystrokes). `selectChapter` is recreated each render
+    // but reads only refs + props, so the closure captured here stays correct
+    // as long as `current`/`chapters` are in the dep set.
+  }, [chapters, current]);
 
   // Focus the search input the moment it opens (keyboard-first flow).
   useEffect(() => {
