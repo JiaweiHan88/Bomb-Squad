@@ -1,6 +1,25 @@
 import type { BombAction, BombState, ModuleState, Reducer, StrikeCount } from '@bomb-squad/shared';
 import { MODULE_REDUCERS, type ModuleReducer } from './MODULE_REDUCERS.js';
 
+/**
+ * Defensive guard on module-reducer output (closes the 1.6-deferred item):
+ * the registry erases per-module types, so a buggy reducer could return a
+ * rebound moduleId (permanently re-routing the slot to another reducer) or an
+ * out-of-contract status. Out-of-contract output is dropped — the action
+ * becomes a no-op rather than corrupting bomb state.
+ */
+function isContractResult(
+  prev: ModuleState<unknown>,
+  next: ModuleState<unknown> | null | undefined,
+): next is ModuleState<unknown> {
+  return (
+    typeof next === 'object' &&
+    next !== null &&
+    next.moduleId === prev.moduleId &&
+    (next.status === 'armed' || next.status === 'solved' || next.status === 'struck')
+  );
+}
+
 function applyModuleResult(
   state: BombState,
   moduleIndex: number,
@@ -38,7 +57,9 @@ export function createBombReducer(
         if (mod.status === 'solved') return state;
         const reduce = registry[mod.moduleId];
         if (!reduce) return state; // guard: unregistered module → no-op
-        return applyModuleResult(state, action.moduleIndex, reduce(mod, action.payload));
+        const next = reduce(mod, action.payload);
+        if (!isContractResult(mod, next)) return state; // guard: out-of-contract output → no-op
+        return applyModuleResult(state, action.moduleIndex, next);
       }
       case 'MODULE_RESET': {
         const mod = state.modules[action.moduleIndex];
@@ -48,7 +69,9 @@ export function createBombReducer(
         // Reset deliberately bypasses the solved-inert guard above: the module
         // reducer restores its initial state, so a solved module returns to 'armed'.
         // The full action is passed so the module reducer can discriminate on `type`.
-        return applyModuleResult(state, action.moduleIndex, reduce(mod, action));
+        const next = reduce(mod, action);
+        if (!isContractResult(mod, next)) return state; // guard: out-of-contract output → no-op
+        return applyModuleResult(state, action.moduleIndex, next);
       }
       default:
         // Unknown action types fall through — never throw.

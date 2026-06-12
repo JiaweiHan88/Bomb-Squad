@@ -5,6 +5,7 @@ import type { MeshStandardMaterial } from 'three';
 import { useGameStore } from '../store/gameStore.js';
 import { useUiStore } from '../store/uiStore.js';
 import { getModuleRenderer } from '../modules/registry.js';
+import { isPrimaryActivation } from '../modules/interaction.js';
 import { formatBayTag, type ModuleSlot } from './layout.js';
 import { prefersReducedMotion } from './dom.js';
 import { SOLVE_LED_FLASH_MS, solveLedVisual, type ModuleStatus } from './moduleLed.js';
@@ -16,9 +17,6 @@ import { DEV_PLACEHOLDER_MODULES } from './devBombState.js';
  * the renderer registry (AC1: data-driven, no per-module conditionals here).
  * Rendering only — the LED renders server truth; green iff status==='solved'.
  */
-
-/** Clicks that travelled further than this (px) are drag-orbits, not clicks. */
-const CLICK_DRAG_TOLERANCE_PX = 4;
 
 /** Faceplate dimensions (Story 4.1's plate, now framed as a bay). */
 const PLATE_SIZE: [number, number, number] = [0.8, 0.55, 0.08];
@@ -101,8 +99,9 @@ export const ModuleBay = memo(function ModuleBay({
   });
 
   const onClick = (event: ThreeEvent<MouseEvent>) => {
-    if (event.button !== 0) return; // AC1 (4.1): right/middle-click reserved
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return; // drag-orbit release ≠ click
+    // Shared with the module interaction helpers (5.1) so click-to-focus and
+    // module clicks use the same button/drag-tolerance contract.
+    if (!isPrimaryActivation(event.button, event.delta)) return;
     event.stopPropagation();
     useUiStore.getState().setActiveModuleIndex(slot.moduleIndex);
   };
