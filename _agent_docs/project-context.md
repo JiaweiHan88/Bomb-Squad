@@ -184,7 +184,7 @@ your-module-name/
 **WebRTC / Voice Requirements:**
 - HTTPS required for WebRTC in all non-localhost environments — enforce in Docker Compose via Caddy/Nginx TLS termination
 - coturn TURN credentials must be time-limited (HMAC-SHA1, TTL ≤ 86400s)
-- LiveKit requires ports 7880 (HTTP/WS) and 7881 (TCP) and 50000-60000 (UDP/RTP) — document in Docker Compose and deployment README
+- LiveKit requires ports 7880 (HTTP/WS), 7881 (TCP), and a single UDP RTP/ICE mux port 7882 (`rtc.udp_port` — an SFU muxes all participants over one port) — document in Docker Compose and deployment README
 - Test voice behind a simulated corporate firewall (symmetric NAT) before any team building demo — this is where it will break first
 
 **Build Configuration:**
@@ -200,7 +200,7 @@ your-module-name/
 
 **Deployment:**
 - Minimum server: 2 vCPUs, 4 GB RAM, 100 Mbps symmetric, 10 GB storage
-- Ports required: 443 (HTTPS), 7880 (LiveKit), 3478 (TURN), 50000-60000 UDP (RTP)
+- Ports required: 443 (HTTPS), 7880/7881 (LiveKit), 7882/udp (LiveKit RTP/ICE mux), 3478 (TURN), 40000-40031/udp (coturn TURN relay)
 
 ### Critical Don't-Miss Rules
 
