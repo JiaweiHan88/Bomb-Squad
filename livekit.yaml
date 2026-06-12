@@ -1,0 +1,16 @@
+# LiveKit server configuration for Bomb Squad (dev defaults).
+# API keys are injected via LIVEKIT_KEYS env var in docker-compose.yml
+# so the real keys never live in this file.
+port: 7880
+rtc:
+  tcp_port: 7881
+  # RTP/ICE UDP range. Kept disjoint from coturn's TURN relay range
+  # (40000-40199) and must match the published range in docker-compose.yml.
+  port_range_start: 50000
+  port_range_end: 50199
+  # Set use_external_ip: true on a public server so SDP offers contain the
+  # public IP rather than the container-internal address.
+  use_external_ip: false
+logging:
+  json: false
+  level: info
