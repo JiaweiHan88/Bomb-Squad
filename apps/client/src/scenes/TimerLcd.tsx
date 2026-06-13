@@ -73,6 +73,11 @@ export const TimerLcd = memo(function TimerLcd() {
   const glowMatRef = useRef<MeshBasicMaterial>(null);
   const lastDisplayRef = useRef('');
   const reducedRef = useRef(false);
+  // Story 8.5 / 4.7 follow-up: once a round resolves the LCD must STOP
+  // extrapolating and hold the displayed time at the moment of resolution
+  // (otherwise it keeps counting down behind the result banner). Holds the live
+  // remaining captured on the first resolved frame; cleared when resolution does.
+  const frozenRemainingRef = useRef<number | null>(null);
 
   // Per-frame driver: tick-rate reads via getState() (never reactive hooks
   // here); troika .text/.sync() only when the formatted string changes
@@ -83,11 +88,24 @@ export const TimerLcd = memo(function TimerLcd() {
     const glowMat = glowMatRef.current;
     if (!live || !glowMat) return;
 
-    const timer = useGameStore.getState().timer;
+    const state = useGameStore.getState();
+    const timer = state.timer;
+    const resolution = state.resolution;
+    // Reset the freeze when a new round clears the resolution (BOMB_INIT).
+    if (resolution === null) frozenRemainingRef.current = null;
+
     let glow = LCD_GLOW_BASE; // idle (no TimerState yet): dark ghost only
     let display = '';
     if (timer !== null) {
-      const remaining = timerRemainingMs(timer, serverNow());
+      // While resolved, hold the value captured on the first resolved frame
+      // instead of advancing it via serverNow() (LCD freezes on the result).
+      let remaining: number;
+      if (resolution !== null) {
+        frozenRemainingRef.current ??= timerRemainingMs(timer, serverNow());
+        remaining = frozenRemainingRef.current;
+      } else {
+        remaining = timerRemainingMs(timer, serverNow());
+      }
       display = formatTimerDisplay(remaining);
       glow = lcdGlowIntensity(remaining, strikesRef.current, reducedRef.current);
     }

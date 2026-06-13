@@ -180,8 +180,8 @@ claude-opus-4-8 (gds-dev-story workflow, implemented directly on master per user
   - **FPS overlay (verification aid).** Opt-in `?stats` drei `<Stats/>` panel in `BombScene` for AC-3 measurement; never shown in normal play.
 - **STRIKE INDICATOR — 2-dot design confirmed (not a bug).** The chassis shows only 2 strike dots by DESIGN (`strikeIndicator.ts`: "the third strike IS the explosion; at strikes===3 both dots stay lit as a display floor"). No 3rd dot exists.
 - **DEFECTS DISCOVERED, DEFERRED TO STORY 8.5 (Jay's call — outside 4.7 ACs; 4.7's interactive path merely exposed them):**
-  1. **Timer LCD keeps counting after a round resolves** — the client never freezes the LCD on `BOMB_DEFUSED`/`BOMB_EXPLODED`; it should stop extrapolating while `resolution !== null`.
-  2. **ResolutionBanner dim overlay flickers on browser scroll** — the semi-transparent banner compositing over the WebGL canvas repaints on scroll (layout/compositing). Logged as 8.5 follow-ups.
+  1. **Timer LCD keeps counting after a round resolves** — the client never freezes the LCD on `BOMB_DEFUSED`/`BOMB_EXPLODED`; it should stop extrapolating while `resolution !== null`. — **ADDRESSED in Story 8.5 (2026-06-13):** `TimerLcd` now reads `resolution` in its `useFrame` driver and holds the remaining captured on the first resolved frame instead of advancing via `serverNow()`; the freeze clears when `BOMB_INIT` clears `resolution`.
+  2. **ResolutionBanner dim overlay flickers on browser scroll** — the semi-transparent banner compositing over the WebGL canvas repaints on scroll (layout/compositing). — **ADDRESSED in Story 8.5 (2026-06-13):** both overlay layers promoted to their own GPU compositor layer (`transform-gpu will-change-transform`) so the translucent overlay no longer repaints over the canvas on scroll.
 
 ### File List
 

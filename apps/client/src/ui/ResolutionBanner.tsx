@@ -56,7 +56,7 @@ export default function ResolutionBanner() {
   // between-rounds + scoreboard-preview screen). No scoreboard here (AC-3).
   if (held) {
     return (
-      <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
+      <div className="absolute inset-0 z-50 flex transform-gpu items-center justify-center bg-black/90 will-change-transform">
         <p className="font-mono text-sm uppercase tracking-widest text-ink-muted">
           {BETWEEN_ROUNDS_PLACEHOLDER}
         </p>
@@ -74,7 +74,10 @@ export default function ResolutionBanner() {
   return (
     <div
       data-testid="resolution-banner"
-      className={`absolute inset-0 z-50 flex items-center justify-center ${
+      // transform-gpu + will-change promote the semi-transparent overlay to its
+      // own compositor layer so it doesn't repaint/flicker over the WebGL canvas
+      // on browser scroll (Story 8.5 / 4.7 follow-up).
+      className={`absolute inset-0 z-50 flex transform-gpu items-center justify-center will-change-transform ${
         defused ? 'bg-black/70' : 'bg-red-900/60'
       }`}
     >
