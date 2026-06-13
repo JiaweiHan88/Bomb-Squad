@@ -280,6 +280,24 @@ describe('MODULE_INTERACT handler (Story 4.7)', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it('interacting with an already-detonated bomb (3 strikes) → ERROR, no stray broadcast', async () => {
+    // resolveRound deletes the timer key but NOT the bombKey, and an exploded
+    // bomb keeps its modules 'armed' — a late/queued cut must not reduce/broadcast
+    // into an already-resolved round.
+    await activeRound(wiresBomb(1, 3));
+
+    const updateSpy = jest.fn();
+    maya.on('MODULE_UPDATE', updateSpy);
+    const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('MODULE_INTERACT', { teamId: 'A', moduleIndex: 0, action: { type: 'CUT', wireIndex: 0 } });
+
+    const error = await errorPromise;
+    expect(error.code).toBe('NO_ACTIVE_BOMB');
+    expect(error.recoverable).toBe(true);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
   it('a never-joined socket → NOT_IN_SESSION', async () => {
     const outsider = await server.connectClient();
     const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');

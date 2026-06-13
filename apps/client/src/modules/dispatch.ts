@@ -14,7 +14,14 @@
  *   installs it here). Until then, dispatch outside the sandbox warns and
  *   drops, which surfaces mis-wiring instead of hiding it.
  */
-export type ModuleActionDispatch = (moduleIndex: number, action: unknown) => void;
+/**
+ * Returns `true` if the action was actually handled (emitted to the server, or
+ * applied by the sandbox's local backend), `false` if it was dropped (no backend
+ * installed, or no team for self yet). Callers use this to gate optimistic UI: a
+ * dropped action gets no confirming snapshot, so an optimistic pre-flash must not
+ * be shown for it (it would linger until its rollback timeout — a phantom).
+ */
+export type ModuleActionDispatch = (moduleIndex: number, action: unknown) => boolean;
 
 let backend: ModuleActionDispatch | null = null;
 
@@ -22,13 +29,13 @@ export function setModuleActionDispatch(dispatch: ModuleActionDispatch | null): 
   backend = dispatch;
 }
 
-export function dispatchModuleAction(moduleIndex: number, action: unknown): void {
+export function dispatchModuleAction(moduleIndex: number, action: unknown): boolean {
   if (!backend) {
     console.warn('[modules] action dropped: no dispatch backend installed', {
       moduleIndex,
       action,
     });
-    return;
+    return false;
   }
-  backend(moduleIndex, action);
+  return backend(moduleIndex, action);
 }

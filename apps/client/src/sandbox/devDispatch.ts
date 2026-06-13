@@ -52,20 +52,21 @@ export function createDevModuleDispatch(modules: readonly SandboxModule[]): Modu
   return (moduleIndex, action) => {
     const store = useGameStore.getState();
     const mod = store.bomb?.modules[moduleIndex];
-    if (!mod) return; // out-of-range index → no-op (mirrors server guard)
+    if (!mod) return false; // out-of-range index → no-op (mirrors server guard)
     const binding = byId.get(mod.moduleId);
-    if (!binding) return; // unregistered module → no-op
+    if (!binding) return false; // unregistered module → no-op
 
     const { updates, struck } = reduceDevModuleAction(mod, binding.reduce, action);
     for (const state of updates) store.applyModuleUpdate({ moduleIndex, state });
 
     // Bomb-level roll-up (strikes / solved) — server parity for display.
     const after = useGameStore.getState().bomb;
-    if (!after) return;
+    if (!after) return true;
     const strikes = struck ? (Math.min(after.strikes + 1, 3) as StrikeCount) : after.strikes;
     const solved = after.modules.length > 0 && after.modules.every((m) => m.status === 'solved');
     if (strikes !== after.strikes || solved !== after.solved) {
       store.setBomb({ ...after, strikes, solved });
     }
+    return true;
   };
 }

@@ -75,10 +75,15 @@ export function useOptimisticPreFlash(
     [clear, rollbackMs],
   );
 
-  // Reconcile against the authoritative snapshot on every render. setState bails
-  // out (same ref) when nothing is confirmed, so this converges and never loops.
-  // Also drop the rollback timer for any key the reconcile cleared.
+  // Reconcile against the authoritative snapshot. The component re-renders when
+  // that snapshot changes (its reactive selector), so reconciling each render
+  // catches confirmations; but there is nothing to reconcile unless a marker is
+  // pending, so skip the setState churn entirely in the (overwhelmingly common)
+  // no-pending state. When markers exist, setState still bails out by ref when
+  // nothing is confirmed, so this converges and never loops. Also drop the
+  // rollback timer for any key the reconcile cleared.
   useEffect(() => {
+    if (state.active.size === 0) return;
     setState((prev) => {
       const next = reconcilePreFlash(prev, isConfirmed);
       if (next !== prev) {

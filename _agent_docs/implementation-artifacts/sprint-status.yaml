@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 8.5 → done (human verification passed; 4.7 follow-ups fixed + verified)
+last_updated: 2026-06-13  # story 4.7 code-reviewed (7 patches applied + tested; 2 deferred to 8-7/follow-up, 1 dismissed); stays done
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system

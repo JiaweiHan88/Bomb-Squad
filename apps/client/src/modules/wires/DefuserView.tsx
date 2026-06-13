@@ -61,7 +61,12 @@ export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
   const isConfirmed = useCallback(
     (wireIndex: number) => {
       const mod = useGameStore.getState().bomb?.modules[moduleIndex];
-      if (mod?.moduleId !== WIRES_MODULE_ID) return true; // module gone → stop tracking
+      // Module/bomb momentarily gone or replaced (e.g. a re-sync, a round
+      // transition) is NOT a confirmation — there's no evidence the cut landed.
+      // Return false so the marker keeps tracking and rolls back via its timeout,
+      // rather than being silently dropped as a phantom "confirmed" (the visual is
+      // gated on `data` anyway, so an un-confirmed marker renders nothing here).
+      if (mod?.moduleId !== WIRES_MODULE_ID) return false;
       return (mod.data as WiresState).wires[wireIndex]?.cut === true;
     },
     [moduleIndex],
@@ -87,14 +92,25 @@ export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
         // Mark the pre-flash SYNCHRONOUSLY before the emit so the sever renders
         // this frame (≤100ms perceived budget, independent of the round-trip).
         const cut = moduleClickHandlers(() => {
-          // Only pre-flash a click that can actually change state: an already-cut
-          // wire or a solved (inert) module would just sever optimistically and
-          // linger until the rollback timeout, since the server no-ops it and
-          // sends no confirming snapshot. Still dispatch — the server is the
-          // authority and treats the inert case as a clean no-op.
-          const status = useGameStore.getState().bomb?.modules[moduleIndex]?.status;
-          if (status !== 'solved' && !wire.cut) preFlash.mark(wireIndex);
-          dispatchModuleAction(moduleIndex, { type: 'CUT', wireIndex });
+          // Read the LIVE authoritative module/wire (not the `wire` render
+          // closure, which can be stale on a rapid re-click or when a snapshot
+          // landed between paint and click) to decide whether this click can
+          // actually change state. An already-cut wire or a solved (inert) module
+          // is a server no-op with no confirming snapshot.
+          const mod = useGameStore.getState().bomb?.modules[moduleIndex];
+          const liveWire =
+            mod?.moduleId === WIRES_MODULE_ID
+              ? (mod.data as WiresState).wires[wireIndex]
+              : undefined;
+          const canChange = mod?.status !== 'solved' && liveWire?.cut === false;
+          // Dispatch first (the server is authority and treats an inert click as a
+          // clean no-op). Only pre-flash if the action actually went out AND can
+          // change state — otherwise there is no confirming snapshot to reconcile
+          // against and the marker would linger until the rollback timeout (a
+          // phantom sever). The emit is synchronous, so the mark still happens on
+          // the click's own frame (≤100ms perceived budget, independent of RTT).
+          const dispatched = dispatchModuleAction(moduleIndex, { type: 'CUT', wireIndex });
+          if (dispatched && canChange) preFlash.mark(wireIndex);
         });
         return (
           <group key={wireIndex} position={[0, y, 0.02]}>

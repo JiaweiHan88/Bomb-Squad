@@ -683,14 +683,35 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Persist BOTH keys before any emit. The two writes are not atomic;
-        // accepted (same posture as SESSION_CREATE's two-key write). If the
-        // first write succeeds and the second fails, the catch emits
-        // ROUND_START_FAILED — but the session is already 'active' in Redis
-        // and cannot be retried (ROUND_START requires 'preparation';
-        // PREPARATION_OPEN refuses 'active'). Redis failure here is
-        // considered catastrophic and extremely unlikely; no recovery path
-        // is wired. Nothing is broadcast on failure.
+        // The populated teams (those with a committed defuser) — the single set
+        // the bomb generation and timer mint below both iterate.
+        const teamIds = Object.keys(result.round.defusers) as TeamId[];
+
+        // Story 4.7 (closes the 8.2 seam): generate + persist every team's bomb
+        // FIRST — before the session/round persist and before ANY broadcast.
+        // Generation runs in one synchronous pass inside initializeRoundBombs and
+        // validates the whole module pool up front, throwing on a bad config
+        // (unregistered/empty pool, out-of-range moduleCount) BEFORE any write.
+        // Doing it here means a bad round rejects into the catch below while the
+        // session is still 'preparation' (and therefore retryable) and NO client
+        // is ever flipped to an active round it has no bomb for. The bomb is
+        // team-private; it is broadcast (BOMB_INIT) only after the timer is armed,
+        // below. Same accepted non-atomic multi-key posture (single-process V1).
+        const bombs = await initializeRoundBombs(
+          deps.redis,
+          sessionId,
+          result.round.roundNumber,
+          result.state.config,
+          teamIds,
+        );
+
+        // Persist session + round. The writes are not atomic; accepted (same
+        // posture as SESSION_CREATE's two-key write). Bomb generation already
+        // succeeded above, so the failures left here are catastrophic Redis errors;
+        // the catch cancels any armed timers and emits ROUND_START_FAILED. (Note:
+        // once the session write lands the session is 'active' and ROUND_START is
+        // no longer retryable — but generation, the one input-driven failure, has
+        // already passed by this point.)
         await deps.redis.setJSON(sessionKey(sessionId), result.state);
         await deps.redis.setJSON(roundKey(sessionId, result.round.roundNumber), result.round);
 
@@ -705,35 +726,12 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
 
         io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
 
-        // The populated teams (those with a committed defuser) — the single set
-        // the bomb generation and timer mint below both iterate.
-        const teamIds = Object.keys(result.round.defusers) as TeamId[];
-
-        // Story 4.7 (closes the 8.2 seam): generate + persist every team's bomb,
-        // then broadcast each team's PRIVATE snapshot to its room. Generation
-        // runs in one synchronous pass inside initializeRoundBombs BEFORE any
-        // bomb write or emit, so a bad config throws into the catch below before
-        // a single BOMB_INIT goes out — a bad round never half-broadcasts. The
-        // bomb is team-private: BOMB_INIT goes to teamRoom only, never sessionRoom.
-        // Team rooms are already joined above, so the team-scoped emit reaches
-        // its sockets. Same accepted non-atomic multi-key posture as the writes
-        // above (single-process V1; no locks/WATCH).
-        const bombs = await initializeRoundBombs(
-          deps.redis,
-          sessionId,
-          result.round.roundNumber,
-          result.state.config,
-          teamIds,
-        );
-        for (const teamId of teamIds) {
-          io.to(teamRoom(sessionId, teamId)).emit('BOMB_INIT', bombs[teamId]);
-        }
-
-        // Story 8.4: mint a server-authoritative timer per populated team. One
-        // `now` for the whole round so every team's segment shares a startedAt.
-        // Each timerKey write is part of the same accepted non-atomic multi-key
-        // posture as the session/round/bomb writes above. Team rooms are already
-        // joined above, so the team-scoped TIMER_UPDATE reaches its sockets.
+        // Story 8.4: mint + ARM a server-authoritative timer per populated team
+        // BEFORE broadcasting BOMB_INIT. A defuser acts on the bomb snapshot, and
+        // a strike (including the terminal 3rd) reads the live timer key — so the
+        // key must already exist by the time the client can interact. One `now` for
+        // the whole round so every team's segment shares a startedAt. Same accepted
+        // non-atomic multi-key posture as the writes above.
         const now = deps.timer.now();
         for (const teamId of teamIds) {
           const timer = startSegment(result.state.config.timerMs, now);
@@ -744,6 +742,13 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
             { sessionId, roundNumber: result.round.roundNumber, teamId, timerMs: result.state.config.timerMs },
             'timer started',
           );
+        }
+
+        // Now broadcast each team's PRIVATE bomb snapshot — after its timer is
+        // armed (above) and the team rooms are joined, so the snapshot and its
+        // clock are both ready when the client renders the bomb.
+        for (const teamId of teamIds) {
+          io.to(teamRoom(sessionId, teamId)).emit('BOMB_INIT', bombs[teamId]);
         }
 
         deps.log.info(

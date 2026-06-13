@@ -28,8 +28,9 @@ export function createProductionModuleDispatch(): ModuleActionDispatch {
         : undefined;
     if (teamId === undefined) {
       console.warn('[modules] MODULE_INTERACT dropped: no team for self', { moduleIndex });
-      return;
+      return false;
     }
     socket.emit('MODULE_INTERACT', { teamId, moduleIndex, action });
+    return true;
   };
 }

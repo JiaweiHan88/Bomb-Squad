@@ -140,6 +140,20 @@ export function registerModuleHandlers(io: SessionIOServer, deps: SessionHandler
           });
           return;
         }
+        // Round already detonated → reject. resolveRound deletes only the timer
+        // key, not the bombKey, and a 3rd-strike (exploded) bomb keeps its modules
+        // 'armed', so without this gate a late/queued cut would reduce, persist,
+        // and broadcast a stray MODULE_UPDATE into an already-resolved round. (A
+        // DEFUSED bomb needs no gate here: solved modules are inert in bombReducer,
+        // so the no-op detection below already drops further interaction silently.)
+        if (bomb.strikes >= 3) {
+          socket.emit('ERROR', {
+            code: 'NO_ACTIVE_BOMB',
+            message: 'No bomb is active for your team.',
+            recoverable: true,
+          });
+          return;
+        }
 
         const next = bombReducer(bomb, { type: 'MODULE_ACTION', moduleIndex, payload: action });
         // No-op detection by the targeted module's referential identity. A guard
