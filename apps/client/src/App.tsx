@@ -2,7 +2,15 @@ import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
 import { useGameStore } from './store/gameStore.js';
-import { AppShell, Landing, Lobby, LoadingScreen, PlatformGate } from './ui/index.js';
+import {
+  ActiveRound,
+  AppShell,
+  Landing,
+  Lobby,
+  LoadingScreen,
+  PlatformGate,
+  Preparation,
+} from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
 import DevBombHarness from './scenes/DevBombHarness.js';
 import SandboxHarness from './sandbox/SandboxHarness.js';
@@ -71,8 +79,17 @@ export default function App() {
         <LoadingScreen status={CONNECTING} />
       ) : (
         <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>
-          {/* Surface derives from the server snapshot — no router, no URL state. */}
-          {session === null ? <Landing /> : <Lobby />}
+          {/* Surface derives from the server snapshot — no router, no URL state.
+              between-rounds / ended fall back to Lobby until 8.5/8.6 own them. */}
+          {session === null ? (
+            <Landing />
+          ) : session.status === 'preparation' ? (
+            <Preparation />
+          ) : session.status === 'active' ? (
+            <ActiveRound />
+          ) : (
+            <Lobby />
+          )}
         </AppShell>
       )}
     </PlatformGate>

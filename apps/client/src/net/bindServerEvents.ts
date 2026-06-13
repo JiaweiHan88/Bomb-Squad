@@ -3,11 +3,12 @@ import type {
   ScoreboardPayload,
   LifelineToastPayload,
   PauseResumePayload,
+  StrikePayload,
   ErrorPayload,
 } from '@bomb-squad/shared';
 import type { TimerState } from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
-import { noteTimerBroadcast } from './serverClock.js';
+import { noteTimerBroadcast, resetClockOffset } from './serverClock.js';
 import { useGameStore } from '../store/gameStore.js';
 
 /**
@@ -40,6 +41,14 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     noteTimerBroadcast(timer);
     setTimer(timer);
   };
+  // A strike-driven rebase rides inside STRIKE (no separate TIMER_UPDATE), so the
+  // freshly server-stamped `startedAt` it carries is the only offset refresh on a
+  // strike-heavy round — feed it to the estimator (no-op when paused) before
+  // storing, same posture as onTimerUpdate, or serverNow() drifts (decision 9).
+  const onStrike = (payload: StrikePayload) => {
+    noteTimerBroadcast(payload.timer);
+    setStrike(payload);
+  };
   const onResumed = (payload: PauseResumePayload) => {
     console.info('[socket] RESUMED', payload);
   };
@@ -48,7 +57,12 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   };
 
   const onConnect = () => setConnection('connected');
-  const onDisconnect = () => setConnection('disconnected');
+  // Drop the server-clock offset on disconnect so a reconnect can't carry a
+  // stale (possibly ahead-of-server) estimate (Story 8.4).
+  const onDisconnect = () => {
+    resetClockOffset();
+    setConnection('disconnected');
+  };
   const onConnectError = () => setConnection('disconnected');
   // Manager-level event: fires on every auto-reconnect attempt, so the UI
   // shows "connecting" during the retry window instead of "disconnected".
@@ -58,7 +72,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   socket.on('BOMB_INIT', setBomb);
   socket.on('MODULE_UPDATE', applyModuleUpdate);
   socket.on('TIMER_UPDATE', onTimerUpdate);
-  socket.on('STRIKE', setStrike);
+  socket.on('STRIKE', onStrike);
 
   socket.on('BOMB_DEFUSED', onBombDefused);
   socket.on('BOMB_EXPLODED', onBombExploded);
@@ -78,7 +92,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     socket.off('BOMB_INIT', setBomb);
     socket.off('MODULE_UPDATE', applyModuleUpdate);
     socket.off('TIMER_UPDATE', onTimerUpdate);
-    socket.off('STRIKE', setStrike);
+    socket.off('STRIKE', onStrike);
     socket.off('BOMB_DEFUSED', onBombDefused);
     socket.off('BOMB_EXPLODED', onBombExploded);
     socket.off('SCOREBOARD', onScoreboard);

@@ -30,6 +30,13 @@ export interface ClientToServerEvents {
   SESSION_JOIN: (payload: SessionJoinPayload) => void;
   TEAM_ASSIGN: (payload: TeamAssignPayload) => void;
   ROUND_CONFIGURE: (payload: RoundConfigurePayload) => void;
+  /** Facilitator-only. Opens the Preparation phase for the next round (Story 8.3).
+   * No ack: success is the SESSION_STATE broadcast, failure a typed ERROR. */
+  PREPARATION_OPEN: () => void;
+  /** Facilitator-only. Returns Preparation to the lobby for the same round
+   * (Story 8.3) — the inverse of PREPARATION_OPEN. No ack: success is the
+   * SESSION_STATE broadcast, failure a typed ERROR. */
+  PREPARATION_CANCEL: () => void;
   ROUND_START: () => void;
   MODULE_INTERACT: (payload: ModuleInteractPayload) => void;
   MANUAL_NAVIGATE: (payload: ManualPositionPayload) => void;

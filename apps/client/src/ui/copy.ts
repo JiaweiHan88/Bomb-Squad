@@ -44,3 +44,22 @@ export const SHARE_SUB =
   "Share the join code or link. Players land here as they enter — assign roles once everyone's in.";
 export const COPY_LINK = 'Copy link';
 export const COPIED = 'Copied';
+
+// Preparation phase (Story 8.3) — prep has no countdown; the facilitator ends
+// it by starting the round (GDD A9: 2–5 min is guidance, not enforcement).
+export const OPEN_PREPARATION = 'Open preparation';
+export const PREP_NEEDS_TEAM = 'Assign at least one player to a team first.';
+export const BACK_TO_LOBBY = 'Back to lobby';
+export const PREP_HEADING = 'Preparation';
+export const PREP_GUIDANCE =
+  'Walk them through the manual — two to five minutes is the sweet spot. Start when they stop arguing.';
+export const ON_THE_BOMB_NEXT = 'On the bomb next';
+export const START_THE_ROUND = 'Start the round';
+export const PREP_DEFUSER_LINE = "You're defusing this round.";
+export const PREP_MANUAL_LINE = "You're on the manual. Read fast.";
+export const PREP_DEFUSER_PLACEHOLDER =
+  'Your bomb is on the bench. Module types appear here once the armourer is done.';
+
+// Active round (Story 8.3) — interim non-defuser surfaces; 8.5+/Epic 9 own the real ones.
+export const ROUND_IN_PROGRESS = 'Round in progress.';
+export const WATCHING_THE_BOMB_ROOM = 'Watching the bomb room. Keep it down.';
