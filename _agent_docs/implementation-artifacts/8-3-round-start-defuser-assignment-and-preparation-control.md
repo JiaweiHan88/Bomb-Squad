@@ -4,7 +4,7 @@ baseline_commit: ea825dde87bf5f355a051c480bfa7bb1368387bf
 
 # Story 8.3: Round Start, Defuser Assignment & Preparation Control
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -229,6 +229,12 @@ Post-verification fixes (commit `e921310`):
 - apps/client/src/ui/Preparation.tsx (modified — Back-to-lobby control + PREPARATION_CANCEL emit + cancel error codes)
 - apps/client/src/ui/copy.ts (modified — PREP_NEEDS_TEAM, BACK_TO_LOBBY)
 - _agent_docs/implementation-artifacts/deferred-work.md (modified — role-pick → 8.6; cancel-return-phase revisit)
+
+### Review Findings
+
+- [x] [Review][Patch] Incorrect comment about ROUND_START recovery from partial write failure [apps/server/src/handlers/sessionHandlers.ts] — The comment "a failure between them is healed by the next ROUND_START attempt overwriting both" is wrong: if `setJSON(sessionKey)` succeeds but `setJSON(roundKey)` fails, the session is persisted as `status:'active'`; a subsequent ROUND_START call then returns `NOT_IN_PREPARATION`, and `PREPARATION_OPEN` is blocked for active sessions — the session cannot recover. The accepted two-key non-atomic posture is fine; the recovery claim must be corrected. Fixed 2026-06-13.
+- [x] [Review][Patch] Missing `?? '—'` fallback for stale playerId in Preparation.tsx [apps/client/src/ui/Preparation.tsx] — `session.players[playerId]?.displayName` evaluates to `undefined` (rendered as nothing) when `upcomingDefuserId` returns a non-null ID that is absent from `session.players` (the known relayOrder↔players divergence). Fix: `session.players[playerId]?.displayName ?? '—'`. Fixed 2026-06-13.
+- [x] [Review][Defer] Stale `defuser` role on skipped teams after ROUND_START [apps/server/src/session/startRound.ts] — deferred, pre-existing: the role-flip loop only iterates over the `defusers` map keys; players on a team skipped due to relayOrder↔players divergence retain their prior `defuser` role in the emitted SESSION_STATE. Pre-existing deferred item (relayOrder integrity, deferred-work.md).
 
 ## Change Log
 

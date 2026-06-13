@@ -680,9 +680,13 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         // team rooms joined below.
 
         // Persist BOTH keys before any emit. The two writes are not atomic;
-        // accepted (same posture as SESSION_CREATE's two-key write) — a
-        // failure between them is healed by the next ROUND_START attempt
-        // overwriting both, and nothing was broadcast.
+        // accepted (same posture as SESSION_CREATE's two-key write). If the
+        // first write succeeds and the second fails, the catch emits
+        // ROUND_START_FAILED — but the session is already 'active' in Redis
+        // and cannot be retried (ROUND_START requires 'preparation';
+        // PREPARATION_OPEN refuses 'active'). Redis failure here is
+        // considered catastrophic and extremely unlikely; no recovery path
+        // is wired. Nothing is broadcast on failure.
         await deps.redis.setJSON(sessionKey(sessionId), result.state);
         await deps.redis.setJSON(roundKey(sessionId, result.round.roundNumber), result.round);
 

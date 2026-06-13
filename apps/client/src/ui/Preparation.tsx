@@ -112,7 +112,7 @@ export default function Preparation() {
                   {TEAM_LABELS[teamId]}
                 </span>
                 <span className="font-semibold">
-                  {playerId !== null ? session.players[playerId]?.displayName : '—'}
+                  {playerId !== null ? (session.players[playerId]?.displayName ?? '—') : '—'}
                 </span>
               </li>
             ))}
