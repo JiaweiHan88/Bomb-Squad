@@ -57,6 +57,9 @@ export function generateRoundBombs(
   config: RoundConfig,
   teamIds: readonly TeamId[],
 ): Record<TeamId, BombState> {
+  if (teamIds.length === 0) {
+    throw new RangeError('teamIds must be non-empty');
+  }
   const pool = config.modulePool ?? TIER_POOLS[config.difficulty];
   const templateSeed = deriveTemplateSeed(sessionId, roundNumber);
   const layout = generateLayout(templateSeed, config.moduleCount, pool);

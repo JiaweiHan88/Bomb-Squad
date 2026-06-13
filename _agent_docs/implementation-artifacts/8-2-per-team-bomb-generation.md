@@ -4,7 +4,7 @@ baseline_commit: 8eb17a5
 
 # Story 8.2: Per-Team Bomb Generation
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -225,6 +225,12 @@ Claude Opus 4.8 (`claude-opus-4-8`), gds-dev-story workflow, in worktree `worktr
 - `packages/shared/src/index.ts` (one additive export line)
 - `_agent_docs/implementation-artifacts/deferred-work.md` (4.2 / 4.4 / 4.5 envelope items addressed-by-8.2)
 - `_agent_docs/implementation-artifacts/sprint-status.yaml` (8-2 → in-progress)
+
+### Review Findings
+
+- [x] [Review][Patch] `generateRoundBombs` accepts empty `teamIds` and silently returns `{}` — add a `RangeError` guard consistent with the fail-loud style used everywhere else (moduleCount, empty pool, etc.) [`packages/shared/src/generation/assembleBomb.ts`]
+- [x] [Review][Defer] `initializeRoundBombs` partial-write on Redis IO failure — if `setJSON` succeeds for team A and throws for team B, team A's bomb is persisted with no cleanup. Spec's "no partial writes" clause covers generation failures only (the test uses bad pool); IO atomicity is a 8.4+ infrastructure concern. [`apps/server/src/round/initializeRoundBombs.ts`] — deferred, pre-existing
+- [x] [Review][Defer] `pickDistinct` last-element order bias when `count === pool.length` — when iterating to `i = pool.length - 1`, `j` is always `i`, so the last element is never randomly re-positioned (partial Fisher-Yates). Only affects port array ORDER when all 6 ports are drawn; no KTANE rule cares about port order (all check presence), so no gameplay impact. [`packages/shared/src/generation/bombContext.ts`] — deferred, pre-existing
 
 ## Change Log
 

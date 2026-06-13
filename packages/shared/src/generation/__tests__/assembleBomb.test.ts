@@ -106,4 +106,8 @@ describe('generateRoundBombs — fail-loud config guards (no partial writes)', (
       /unregistered id/,
     );
   });
+
+  it('rejects an empty teamIds array', () => {
+    expect(() => generateRoundBombs('s', 1, config(), [])).toThrow(RangeError);
+  });
 });
