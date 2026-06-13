@@ -10,7 +10,9 @@ import type {
   TeamId,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
-import { sessionKey, joinCodeKey, roundKey } from '../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey, timerKey } from '../state/keys.js';
+import { startSegment } from '../timer/timerCore.js';
+import type { TimerScheduler } from '../timer/timerScheduler.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
 import { addPlayerToSession } from '../session/joinSession.js';
@@ -30,8 +32,10 @@ export interface SessionSocketData {
   sessionId?: string;
 }
 
-/** Typed server alias declared locally to avoid an import cycle with index.ts. */
-type SessionIOServer = SocketIOServer<
+/** Typed server alias declared locally to avoid an import cycle with index.ts.
+ * Exported (type-only consumers) so the timer effect modules can type their
+ * `io` parameter without re-deriving the 4-generic form. */
+export type SessionIOServer = SocketIOServer<
   ClientToServerEvents,
   ServerToClientEvents,
   DefaultEventsMap,
@@ -50,6 +54,9 @@ export interface SessionLog {
 export interface SessionHandlerDeps {
   redis: RedisStore;
   log: SessionLog;
+  /** Server-authoritative expiry scheduler (Story 8.4). Owns the wall clock the
+   * handlers stamp timers with, and the setTimeout-backed expiry wakes. */
+  timer: TimerScheduler;
 }
 
 /** Socket.IO room for all participants of a session (architecture Pattern 1). */
@@ -700,7 +707,26 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         }
 
         io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
-        // Story 8.4: TimerState is minted and broadcast here.
+
+        // Story 8.4: mint a server-authoritative timer per populated team
+        // (those with a committed defuser). One `now` for the whole round so
+        // every team's segment shares a startedAt. Each timerKey write is part
+        // of the same accepted non-atomic multi-key posture as the session/round
+        // writes above (single-process V1; no locks/WATCH). Team rooms are
+        // already joined above, so the team-scoped TIMER_UPDATE reaches its
+        // sockets. The timer runs independently of any bomb (Story 8.2 backlog).
+        const now = deps.timer.now();
+        for (const teamId of Object.keys(result.round.defusers) as TeamId[]) {
+          const timer = startSegment(result.state.config.timerMs, now);
+          await deps.redis.setJSON(timerKey(sessionId, teamId), timer);
+          deps.timer.arm(sessionId, teamId, timer);
+          io.to(teamRoom(sessionId, teamId)).emit('TIMER_UPDATE', timer);
+          deps.log.info(
+            { sessionId, roundNumber: result.round.roundNumber, teamId, timerMs: result.state.config.timerMs },
+            'timer started',
+          );
+        }
+
         deps.log.info(
           {
             sessionId,

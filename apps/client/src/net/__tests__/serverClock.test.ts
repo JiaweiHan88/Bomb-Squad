@@ -3,6 +3,7 @@ import type { TimerState } from '@bomb-squad/shared';
 import {
   estimateClockOffset,
   noteTimerBroadcast,
+  resetClockOffset,
   resetClockOffsetForTest,
   serverNow,
 } from '../serverClock.js';
@@ -51,5 +52,12 @@ describe('serverClock module state', () => {
     noteTimerBroadcast(running(), 3_000); // offset +2000
     noteTimerBroadcast(running({ startedAt: 70_000 }), 69_500); // offset +500
     expect(serverNow(10_000)).toBe(10_500);
+  });
+
+  it('resetClockOffset() drops a stale offset back to 0 (Story 8.4 disconnect reset)', () => {
+    noteTimerBroadcast(running(), 3_000); // offset +2000
+    expect(serverNow(10_000)).toBe(12_000);
+    resetClockOffset();
+    expect(serverNow(10_000)).toBe(10_000);
   });
 });

@@ -7,9 +7,15 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Server as SocketIOServer, type DefaultEventsMap } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
-import type { ClientToServerEvents, ServerToClientEvents } from '@bomb-squad/shared';
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  TeamId,
+  TimerState,
+} from '@bomb-squad/shared';
 import type { RedisStore } from '../../state/redis.js';
 import type { SessionLog, SessionSocketData } from '../sessionHandlers.js';
+import { createTimerScheduler, type TimerScheduler } from '../../timer/timerScheduler.js';
 
 export type TestIOServer = SocketIOServer<
   ClientToServerEvents,
@@ -54,6 +60,45 @@ export const noopLog: SessionLog = {
   info: () => {},
   error: () => {},
 };
+
+/**
+ * A {@link TimerScheduler} for handler tests: an injected mutable clock and a
+ * NO-OP `setTimer` (no real OS timeout ever fires, so nothing leaks between
+ * tests). Drive expiry deterministically with `setNow(...)` + `fireNow(...)`.
+ * Records `arm()` calls for assertions.
+ */
+export interface TestScheduler extends TimerScheduler {
+  readonly armCalls: ReadonlyArray<{ sessionId: string; teamId: TeamId; timer: TimerState }>;
+  setNow(nowMs: number): void;
+}
+
+export function createTestScheduler(deps: {
+  redis: RedisStore;
+  io: TestIOServer;
+  log: SessionLog;
+}): TestScheduler {
+  let nowMs = 0;
+  const armCalls: Array<{ sessionId: string; teamId: TeamId; timer: TimerState }> = [];
+  const base = createTimerScheduler({
+    redis: deps.redis,
+    io: deps.io,
+    log: deps.log,
+    clock: () => nowMs,
+    setTimer: () => 0, // never auto-fires; tests call fireNow() explicitly
+    clearTimer: () => {},
+  });
+  return {
+    ...base,
+    arm(sessionId, teamId, timer) {
+      armCalls.push({ sessionId, teamId, timer });
+      base.arm(sessionId, teamId, timer);
+    },
+    armCalls,
+    setNow(n: number): void {
+      nowMs = n;
+    },
+  };
+}
 
 export interface TestSocketServer {
   url: string;

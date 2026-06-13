@@ -9,6 +9,7 @@ import { manualPositionKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
+  createTestScheduler,
   noopLog,
   type TestSocketServer,
   type TestClientSocket,
@@ -84,7 +85,11 @@ describe('MANUAL_NAVIGATE handler', () => {
   beforeEach(async () => {
     store = createMemoryRedisStore();
     server = await startTestSocketServer((io) => {
-      registerSessionHandlers(io, { redis: store, log: noopLog });
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+      });
       registerManualHandlers(io, { redis: store, log: noopLog });
     });
     facilitator = await server.connectClient();
@@ -183,7 +188,11 @@ describe('MANUAL_NAVIGATE handler', () => {
       await baseSet(key, value);
     };
     const failServer = await startTestSocketServer((io) => {
-      registerSessionHandlers(io, { redis: failing, log: noopLog });
+      registerSessionHandlers(io, {
+        redis: failing,
+        log: noopLog,
+        timer: createTestScheduler({ redis: failing, io, log: noopLog }),
+      });
       registerManualHandlers(io, { redis: failing, log: noopLog });
     });
     try {

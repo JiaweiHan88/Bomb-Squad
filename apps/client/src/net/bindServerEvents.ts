@@ -7,7 +7,7 @@ import type {
 } from '@bomb-squad/shared';
 import type { TimerState } from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
-import { noteTimerBroadcast } from './serverClock.js';
+import { noteTimerBroadcast, resetClockOffset } from './serverClock.js';
 import { useGameStore } from '../store/gameStore.js';
 
 /**
@@ -48,7 +48,12 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   };
 
   const onConnect = () => setConnection('connected');
-  const onDisconnect = () => setConnection('disconnected');
+  // Drop the server-clock offset on disconnect so a reconnect can't carry a
+  // stale (possibly ahead-of-server) estimate (Story 8.4).
+  const onDisconnect = () => {
+    resetClockOffset();
+    setConnection('disconnected');
+  };
   const onConnectError = () => setConnection('disconnected');
   // Manager-level event: fires on every auto-reconnect attempt, so the UI
   // shows "connecting" during the retry window instead of "disconnected".

@@ -9,6 +9,7 @@ import { connectRedis } from './state/index.js';
 import { connectPostgres } from './persistence/index.js';
 import { registerSessionHandlers, type SessionSocketData } from './handlers/sessionHandlers.js';
 import { registerManualHandlers } from './handlers/manualHandlers.js';
+import { createTimerScheduler } from './timer/index.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
 export type AppIOServer = SocketIOServer<
@@ -82,9 +83,14 @@ async function start(): Promise<void> {
     return { ok, ...(ok ? {} : { detail: 'postgres SELECT 1 failed' }) };
   });
 
+  // Server-authoritative timer scheduler (Story 8.4) — owns the wall clock and
+  // the setTimeout-backed expiry wakes. Constructed here (needs the connected
+  // store + the live io) and disposed in shutdown() before io.close().
+  const timerScheduler = createTimerScheduler({ redis: redisStore, io, log: fastify.log });
+
   // Game socket handlers. Registered here (not in buildServer) so buildServer
   // stays pure construction — handlers need the connected Redis store.
-  registerSessionHandlers(io, { redis: redisStore, log: fastify.log });
+  registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
   registerManualHandlers(io, { redis: redisStore, log: fastify.log });
 
   // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
@@ -110,6 +116,9 @@ async function start(): Promise<void> {
     shuttingDown = true;
     fastify.log.info({ signal }, 'shutting down');
     try {
+      // Clear all pending expiry wakes BEFORE io.close() so no scheduled
+      // timer can fire `io.to(...).emit` into a closing server (Story 8.4).
+      timerScheduler.dispose();
       // `io.close()` disconnects clients AND closes the underlying HTTP server
       // (Socket.IO was attached to `fastify.server`). Await it and surface any
       // error it reports rather than discarding the callback argument.
