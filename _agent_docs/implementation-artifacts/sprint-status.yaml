@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 5-3 implemented → review (awaiting code review + Jay interactive verification)
+last_updated: 2026-06-13  # story 5-3 reviewed (clean) → done; 1 patch applied, solutionIndex strip deferred to BOMB_INIT broadcast seam
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -90,7 +90,7 @@ development_status:
   epic-5: in-progress
   5-1-module-plugin-scaffold-sandbox-and-click-primitive: done
   5-2-expert-manual-viewer: done
-  5-3-wires-module-walking-skeleton: review
+  5-3-wires-module-walking-skeleton: done
   5-4-the-button-module: backlog
   5-5-passwords-module: backlog
   epic-5-retrospective: optional

@@ -4,7 +4,7 @@ baseline_commit: ab52d52
 
 # Story 5.3: Wires Module (Walking Skeleton)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -195,6 +195,13 @@ Modified:
 - apps/client/src/sandbox/SandboxHarness.tsx (footer comment: dispatch resolution → Epic 8)
 - _agent_docs/implementation-artifacts/deferred-work.md (solve-chime → 10.1; MODULE_INTERACT → Epic 8)
 - _agent_docs/implementation-artifacts/sprint-status.yaml (story status tracking)
+
+### Review Findings
+
+_Code review 2026-06-13 (gds-code-review, 3 adversarial layers: Blind Hunter / Edge Case Hunter / Acceptance Auditor). Edge Hunter: zero defects. Auditor: all 6 ACs PASS, no GDD rule-table divergence. 7 Blind-Hunter findings dismissed as noise (transient-struck contract, mulberry32 [0,1) range, Number.isInteger guard, CUT-only idempotency, BombContext digit guarantee, idiomatic re-export, satisfied table count)._
+
+- [x] [Review][Defer] `solutionIndex` baked into transmitted module state — `WiresState.solutionIndex` is computed at generate time (`packages/shared/src/modules/wires/{generate,types}.ts`); it must be stripped before bomb state crosses to clients (anti-cheat in an information-asymmetry game). Verified absent from all in-flight Epic 8 worktrees (8-2, 8-3-8-4) — none broadcasts bomb state yet (8.3 leaves the `BOMB_INIT` emit as an unfilled seam at `sessionHandlers.ts:678-680`). **Deferred — owner: whoever fills the `BOMB_INIT` broadcast seam (8.2↔8.3 merge wiring) must add a solution-stripping client-safe projection; the future `MODULE_UPDATE` handler reuses it.** Recorded in `deferred-work.md` under "code review of story 5-3".
+- [x] [Review][Patch] DefuserView selector factory allocates a new closure per render [apps/client/src/modules/wires/DefuserView.tsx] — **FIXED 2026-06-13:** selector now memoized via `useMemo(() => selectWiresData(moduleIndex), [moduleIndex])`, so the reference is stable across renders and zustand only re-subscribes when `moduleIndex` changes; comment aligned. `tsc --noEmit` clean.
 
 ## Change Log
 

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Text } from '@react-three/drei';
 import { useGameStore } from '../../store/gameStore.js';
 import type { ModuleDefuserViewProps } from '../registry.js';
@@ -44,8 +45,11 @@ function selectWiresData(moduleIndex: number) {
 }
 
 export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
-  // Snapshot-rate reactive selector (stable `data` ref) — nothing per-frame here.
-  const data = useGameStore(selectWiresData(moduleIndex));
+  // Snapshot-rate reactive selector — memoized on moduleIndex so the selector
+  // reference is stable across renders (no per-render closure); zustand only
+  // re-subscribes when moduleIndex changes. Nothing per-frame here.
+  const selector = useMemo(() => selectWiresData(moduleIndex), [moduleIndex]);
+  const data = useGameStore(selector);
   if (!data) return null;
 
   const rows = data.wires.length;
