@@ -9,6 +9,8 @@
  * re-exports it (game-architecture.md Pattern 3: "or re-export from shared").
  */
 
+import type { BombContext } from '../../types/index.js';
+
 /** Module identifier — kebab-case (project naming convention). */
 export const WIRES_MODULE_ID = 'wires';
 
@@ -40,13 +42,14 @@ export interface WiresWire {
 export interface WiresState {
   readonly wires: ReadonlyArray<WiresWire>;
   /**
-   * 0-based index of the one correct wire, baked in by generate() via
-   * solveWires() — the dev-demo precedent of deriving the authoritative
-   * answer from the same rule data the Expert's manual renders, so solver
-   * and manual cannot diverge. Not a secret: the manual rules are public,
-   * so the answer is always derivable from the visible colours + serial.
+   * The public bomb context (serial / batteries / ports / indicators) — all
+   * visible on the bomb face, NOT secret. The reducer recomputes the correct
+   * wire via solveWires(colours, ctx) at cut-time, so the pre-computed answer
+   * is never stored in module data and never crosses to the client. (The old
+   * baked `solutionIndex` was a literal cheat value once bomb state broadcasts;
+   * Sprint 2 retro AI1 — recompute at interaction time, nothing to strip.)
    */
-  readonly solutionIndex: number;
+  readonly ctx: BombContext;
 }
 
 /** Defuser action — wire cut = single click (the sole interaction primitive). */

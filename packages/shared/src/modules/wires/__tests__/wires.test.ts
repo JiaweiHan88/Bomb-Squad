@@ -30,7 +30,7 @@ const wiresOf = (colors: readonly WireColor[], cutAt: readonly number[] = []): W
 /** Deep-frozen armed envelope around an explicit config (immutability gate). */
 const armed = (colors: readonly WireColor[], ctx: BombContext): ModuleState<WiresState> => {
   const wires = wiresOf(colors);
-  const data: WiresState = { wires, solutionIndex: solveWires(colors, ctx) };
+  const data: WiresState = { wires, ctx };
   wires.forEach((w) => Object.freeze(w));
   Object.freeze(wires);
   Object.freeze(data);
@@ -84,29 +84,41 @@ describe('generateWires', () => {
     expect([...counts].sort()).toEqual([3, 4, 5, 6]);
   });
 
-  it('bakes solutionIndex = solveWires(colours, ctx), pointing at a real wire (seeds incl. 0 and large)', () => {
+  it('stores the public ctx (not a pre-computed answer) and stays solvable (seeds incl. 0 and large)', () => {
     for (const ctx of [ODD_CTX, EVEN_CTX]) {
       for (const seed of [0, 1, 2, 17, 99, 2 ** 31 - 1]) {
-        const { wires, solutionIndex } = generateWires(seed, ctx);
-        expect(solutionIndex).toBe(solveWires(wires.map((w) => w.color), ctx));
+        const state = generateWires(seed, ctx);
+        // No answer is stored anywhere in module data — only wires + public ctx.
+        expect(Object.keys(state).sort()).toEqual(['ctx', 'wires']);
+        expect(state).not.toHaveProperty('solutionIndex');
+        expect(state.ctx).toBe(ctx);
+        // The layout is still solvable (every table ends in Otherwise).
+        const solutionIndex = solveWires(state.wires.map((w) => w.color), state.ctx);
         expect(solutionIndex).toBeGreaterThanOrEqual(0);
-        expect(solutionIndex).toBeLessThan(wires.length);
+        expect(solutionIndex).toBeLessThan(state.wires.length);
       }
     }
   });
 
-  it('the solution can depend on the serial parity (same seed, different ctx)', () => {
-    // Find a seed where parity changes the answer — proves ctx threads through.
+  it('the stored ctx drives the answer: same wires, opposite serial parity → reducer solves a different wire', () => {
+    // Find a seed where parity flips the answer — proves the ctx carried in
+    // state (not a baked solutionIndex) is what the reducer recomputes against.
     let found = false;
     for (let seed = 0; seed < 500 && !found; seed++) {
       const odd = generateWires(seed, ODD_CTX);
       const even = generateWires(seed, EVEN_CTX);
-      if (
-        JSON.stringify(odd.wires) === JSON.stringify(even.wires) &&
-        odd.solutionIndex !== even.solutionIndex
-      ) {
-        found = true;
-      }
+      if (JSON.stringify(odd.wires) !== JSON.stringify(even.wires)) continue;
+      const colors = odd.wires.map((w) => w.color);
+      const oddAns = solveWires(colors, ODD_CTX);
+      const evenAns = solveWires(colors, EVEN_CTX);
+      if (oddAns === evenAns) continue;
+      found = true;
+      // Cutting the ODD answer solves the odd-ctx module but STRIKES the
+      // even-ctx module — the recompute is governed by the stored ctx alone.
+      const armOdd = Object.freeze({ moduleId: WIRES_MODULE_ID, status: 'armed' as const, data: odd });
+      const armEven = Object.freeze({ moduleId: WIRES_MODULE_ID, status: 'armed' as const, data: even });
+      expect(wiresReducer(armOdd, cut(oddAns)).status).toBe('solved');
+      expect(wiresReducer(armEven, cut(oddAns)).status).toBe('struck');
     }
     expect(found).toBe(true);
   });
@@ -258,7 +270,9 @@ describe('wiresReducer — contract obligations (frozen inputs throughout)', () 
       const reset = wiresReducer(dirty, { type: 'MODULE_RESET' });
       expect(reset.status).toBe('armed');
       expect(reset.data.wires.every((w) => !w.cut)).toBe(true);
-      expect(reset.data.solutionIndex).toBe(SOLUTION); // layout/solution survive reset
+      expect(reset.data.ctx).toBe(ODD_CTX); // layout + public ctx survive reset
+      // still solvable after reset: cutting the (recomputed) answer solves.
+      expect(wiresReducer(Object.freeze(reset), cut(SOLUTION)).status).toBe('solved');
     }
   });
 });

@@ -1,5 +1,6 @@
 import type { ModuleState, Reducer } from '../../types/index.js';
 import { isWiresAction, type WiresState } from './types.js';
+import { solveWires } from './solve.js';
 
 /**
  * Pure reducer for the wires module.
@@ -40,9 +41,17 @@ export const wiresReducer: Reducer<ModuleState<WiresState>, unknown> = (state, a
   }
   if (state.data.wires[wireIndex].cut) return state; // idempotent: severed stays severed
 
+  // Recompute the answer at cut-time from the colour layout (cut-invariant) +
+  // the public ctx in state — never a pre-computed solution in module data
+  // (Sprint 2 retro AI1). solveWires is pure and cheap (≤6 wires, ≤5 rules).
+  const solutionIndex = solveWires(
+    state.data.wires.map((wire) => wire.color),
+    state.data.ctx,
+  );
+
   return {
     ...state,
-    status: wireIndex === state.data.solutionIndex ? 'solved' : 'struck',
+    status: wireIndex === solutionIndex ? 'solved' : 'struck',
     data: {
       ...state.data,
       wires: state.data.wires.map((wire, i) => (i === wireIndex ? { ...wire, cut: true } : wire)),
