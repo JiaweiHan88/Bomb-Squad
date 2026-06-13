@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 8.2 code-reviewed (empty teamIds guard) → done; 8.3+8.4 done
+last_updated: 2026-06-13  # stories 8.5 + 4.7 contexted → ready-for-dev (Wave 3, on master)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   4-4-diegetic-timer-lcd-with-client-extrapolation: done
   4-5-strike-indicator-and-strike-roll-up: done
   4-6-preparation-placeholder-bomb-view: backlog
-  4-7-snapshot-sync-and-optimistic-render-at-60fps: backlog
+  4-7-snapshot-sync-and-optimistic-render-at-60fps: ready-for-dev
   epic-4-retrospective: optional
 
   # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----
@@ -117,7 +117,7 @@ development_status:
   8-2-per-team-bomb-generation: done
   8-3-round-start-defuser-assignment-and-preparation-control: done
   8-4-server-authoritative-timer-and-strike-escalation: done
-  8-5-round-resolution: backlog
+  8-5-round-resolution: ready-for-dev
   8-6-between-round-flow-and-scoreboard-preview: backlog
   8-7-pause-facilitator-and-disconnect: backlog
   8-8-retry-a-failed-round: backlog
