@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
+import { createProductionModuleDispatch } from './net/productionDispatch.js';
+import { setModuleActionDispatch } from './modules/dispatch.js';
 import { useGameStore } from './store/gameStore.js';
 import {
   ActiveRound,
@@ -37,10 +39,19 @@ export default function App() {
     const unbind = bindServerEvents(socket);
     socket.connect();
 
+    // Production module-action backend (Story 4.7): DefuserView dispatches become
+    // MODULE_INTERACT emits the server reduces/broadcasts. NEVER on /dev/sandbox —
+    // that route installs its own LOCAL reducer backend (SandboxHarness) and must
+    // not be overwritten. Resets to null on teardown (symmetry with unbind) so a
+    // stale socket can't be emitted into after disconnect.
+    const onSandboxRoute = window.location.pathname === '/dev/sandbox';
+    if (!onSandboxRoute) setModuleActionDispatch(createProductionModuleDispatch());
+
     return () => {
       // unbind() removes the 'disconnect' listener before disconnect() fires it,
       // so reflect the teardown in the store explicitly.
       unbind();
+      if (!onSandboxRoute) setModuleActionDispatch(null);
       socket.disconnect();
       useGameStore.getState().setConnection('disconnected');
     };

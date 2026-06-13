@@ -9,6 +9,7 @@ import { connectRedis } from './state/index.js';
 import { connectPostgres } from './persistence/index.js';
 import { registerSessionHandlers, type SessionSocketData } from './handlers/sessionHandlers.js';
 import { registerManualHandlers } from './handlers/manualHandlers.js';
+import { registerModuleHandlers } from './handlers/moduleHandlers.js';
 import { createTimerScheduler } from './timer/index.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
@@ -92,6 +93,7 @@ async function start(): Promise<void> {
   // stays pure construction — handlers need the connected Redis store.
   registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
   registerManualHandlers(io, { redis: redisStore, log: fastify.log });
+  registerModuleHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
 
   // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
   // Per-connection runAll() is acceptable in V1 (infrequent handshakes).

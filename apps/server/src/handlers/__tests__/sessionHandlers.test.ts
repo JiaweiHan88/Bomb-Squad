@@ -6,6 +6,7 @@ import type {
   ErrorPayload,
   RoundState,
   TimerState,
+  BombState,
 } from '@bomb-squad/shared';
 import {
   registerSessionHandlers,
@@ -16,7 +17,7 @@ import {
   MAX_PLAYERS,
 } from '../sessionHandlers.js';
 import { createSessionState } from '../../session/createSession.js';
-import { sessionKey, joinCodeKey, roundKey, timerKey } from '../../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
@@ -1164,6 +1165,33 @@ describe('ROUND_START handler', () => {
     const teamB = await server.io.in(teamRoom(sessionId, 'B')).fetchSockets();
     expect(teamA.map((s) => s.id)).toEqual([mayaId]);
     expect(teamB.map((s) => s.id)).toEqual([devonId]);
+  });
+
+  it('generates + persists a bomb per populated team and broadcasts BOMB_INIT to each team room (Story 4.7)', async () => {
+    const { sessionId } = await setupPrepared();
+
+    const mayaBomb = new Promise<BombState>((res) => maya.once('BOMB_INIT', (b) => res(b as BombState)));
+    const devonBomb = new Promise<BombState>((res) => devon.once('BOMB_INIT', (b) => res(b as BombState)));
+    // The bomb is team-private: Maya (Team A) must receive exactly one BOMB_INIT
+    // (hers), never Team B's.
+    const mayaBombSpy = jest.fn();
+    maya.on('BOMB_INIT', mayaBombSpy);
+
+    facilitator.emit('ROUND_START');
+    const [a, b] = await Promise.all([mayaBomb, devonBomb]);
+
+    // Same shared layout (template seed), distinct team seeds.
+    expect(a.modules.length).toBeGreaterThan(0);
+    expect(b.modules.length).toBe(a.modules.length);
+
+    // Persisted under each team's private bomb key, matching the broadcast.
+    expect(store.data.has(bombKey(sessionId, 'A'))).toBe(true);
+    expect(store.data.has(bombKey(sessionId, 'B'))).toBe(true);
+    const persistedA = JSON.parse(store.data.get(bombKey(sessionId, 'A'))!) as BombState;
+    expect(persistedA).toEqual(a);
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(mayaBombSpy).toHaveBeenCalledTimes(1);
   });
 
   it('non-facilitator → NOT_FACILITATOR, no broadcast, no round key', async () => {

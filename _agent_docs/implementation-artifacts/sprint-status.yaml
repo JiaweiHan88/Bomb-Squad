@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 8.5 → in-progress (code review: 2 patches applied, human verification pending)
+last_updated: 2026-06-13  # story 4.7 → done (verified); 2 follow-ups logged against 8.5 (timer freeze, banner flicker)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   4-4-diegetic-timer-lcd-with-client-extrapolation: done
   4-5-strike-indicator-and-strike-roll-up: done
   4-6-preparation-placeholder-bomb-view: backlog
-  4-7-snapshot-sync-and-optimistic-render-at-60fps: ready-for-dev
+  4-7-snapshot-sync-and-optimistic-render-at-60fps: done
   epic-4-retrospective: optional
 
   # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----

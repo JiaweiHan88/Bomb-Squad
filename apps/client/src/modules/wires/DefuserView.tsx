@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Text } from '@react-three/drei';
 import { useGameStore } from '../../store/gameStore.js';
 import type { ModuleDefuserViewProps } from '../registry.js';
 import { dispatchModuleAction } from '../dispatch.js';
 import { moduleClickHandlers } from '../interaction.js';
+import { useOptimisticPreFlash } from '../useOptimisticPreFlash.js';
 import { WIRES_MODULE_ID, WIRE_COLOR_LABELS, type WireColor, type WiresState } from './types.js';
 
 /**
@@ -50,6 +51,23 @@ export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
   // re-subscribes when moduleIndex changes. Nothing per-frame here.
   const selector = useMemo(() => selectWiresData(moduleIndex), [moduleIndex]);
   const data = useGameStore(selector);
+
+  // Optimistic pre-flash (AC-2): a cut wire shows severed on the click's own
+  // frame, before the server confirms. `isConfirmed` reads the LATEST
+  // authoritative snapshot (not the render closure) so reconcile drops the
+  // marker the instant the server's MODULE_UPDATE reflects the cut; if no
+  // confirmation lands it rolls back. This NEVER touches module status / the
+  // solve LED — only the server snapshot flips `solved`.
+  const isConfirmed = useCallback(
+    (wireIndex: number) => {
+      const mod = useGameStore.getState().bomb?.modules[moduleIndex];
+      if (mod?.moduleId !== WIRES_MODULE_ID) return true; // module gone → stop tracking
+      return (mod.data as WiresState).wires[wireIndex]?.cut === true;
+    },
+    [moduleIndex],
+  );
+  const preFlash = useOptimisticPreFlash(isConfirmed);
+
   if (!data) return null;
 
   const rows = data.wires.length;
@@ -61,11 +79,23 @@ export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
       {data.wires.map((wire, wireIndex) => {
         const y = topY - wireIndex * spacing;
         const tint = WIRE_TINTS[wire.color];
+        // Severed visual = authoritative cut OR an unconfirmed optimistic cut
+        // (the pre-flash). Both render identically, so confirmation is seamless.
+        const severed = wire.cut || preFlash.active.has(wireIndex);
         // Click anywhere on the row's wire group = cut THIS wire (idempotent
         // on a severed wire — the reducer judges, the view only dispatches).
-        const cut = moduleClickHandlers(() =>
-          dispatchModuleAction(moduleIndex, { type: 'CUT', wireIndex }),
-        );
+        // Mark the pre-flash SYNCHRONOUSLY before the emit so the sever renders
+        // this frame (≤100ms perceived budget, independent of the round-trip).
+        const cut = moduleClickHandlers(() => {
+          // Only pre-flash a click that can actually change state: an already-cut
+          // wire or a solved (inert) module would just sever optimistically and
+          // linger until the rollback timeout, since the server no-ops it and
+          // sends no confirming snapshot. Still dispatch — the server is the
+          // authority and treats the inert case as a clean no-op.
+          const status = useGameStore.getState().bomb?.modules[moduleIndex]?.status;
+          if (status !== 'solved' && !wire.cut) preFlash.mark(wireIndex);
+          dispatchModuleAction(moduleIndex, { type: 'CUT', wireIndex });
+        });
         return (
           <group key={wireIndex} position={[0, y, 0.02]}>
             {/* Letter label — pattern/label redundancy (never colour alone). */}
@@ -81,7 +111,7 @@ export function WiresDefuserView({ moduleIndex }: ModuleDefuserViewProps) {
             </Text>
 
             <group position={[WIRE_X, 0, 0]} {...cut}>
-              {wire.cut ? (
+              {severed ? (
                 <>
                   {/* Severed: two drooping stubs with a visible gap (cylinder
                       axis is Y, so horizontal = π/2 base rotation ± droop). */}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { CameraControls } from '@react-three/drei';
+import { CameraControls, Stats } from '@react-three/drei';
 import CameraControlsImpl from 'camera-controls';
 import { useGameStore } from '../store/gameStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -113,6 +113,12 @@ function CameraRig({ slots }: { slots: ModuleSlot[] }) {
   return <CameraControls ref={controlsRef} minDistance={MIN_DISTANCE} maxDistance={MAX_DISTANCE} />;
 }
 
+/** Opt-in FPS/ms overlay (stats.js via drei) for AC-3 verification. Off unless
+ *  the URL carries `?stats` — never shown in normal play. Read once at module
+ *  load; the round URL has no query string during play so this is stable. */
+const SHOW_STATS =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('stats');
+
 export default function BombScene() {
   // Reactive (non-per-frame) reads: layout and metadata follow the bomb
   // snapshot when one exists, else the dev-harness placeholders. The modules
@@ -170,6 +176,9 @@ export default function BombScene() {
       ))}
 
       <CameraRig slots={slots} />
+
+      {/* AC-3 verification aid: live FPS/ms panel, opt-in via ?stats (dev only). */}
+      {SHOW_STATS && <Stats />}
     </Canvas>
   );
 }

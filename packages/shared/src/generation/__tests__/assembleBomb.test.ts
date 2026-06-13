@@ -87,7 +87,8 @@ describe('generateRoundBombs — AC2 frozen context flows through module generat
 
 describe('generateRoundBombs — fail-loud config guards (no partial writes)', () => {
   it('rejects an unregistered pool id before producing any bomb', () => {
-    expect(() => generateRoundBombs('s', 1, config({ modulePool: ['wires'] }), TEAMS)).toThrow(
+    // 'the-button' (Story 5.4) has no registered generator yet.
+    expect(() => generateRoundBombs('s', 1, config({ modulePool: ['the-button'] }), TEAMS)).toThrow(
       /unregistered id/,
     );
   });
@@ -101,10 +102,11 @@ describe('generateRoundBombs — fail-loud config guards (no partial writes)', (
   });
 
   it('falls back to the difficulty tier pool when modulePool is undefined', () => {
-    // easy tier = wires/the-button/passwords — none registered yet → fail loud.
-    expect(() => generateRoundBombs('s', 1, config({ modulePool: undefined }), TEAMS)).toThrow(
-      /unregistered id/,
-    );
+    // Interim tier pools are all ['wires'] (Story 4.7), so a no-override round
+    // generates a real wires bomb rather than failing loud.
+    const bombs = generateRoundBombs('s', 1, config({ modulePool: undefined }), TEAMS);
+    expect(bombs.A.modules).toHaveLength(4);
+    for (const m of bombs.A.modules) expect(m.moduleId).toBe('wires');
   });
 
   it('rejects an empty teamIds array', () => {
