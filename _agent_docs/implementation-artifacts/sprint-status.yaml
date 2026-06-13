@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # stories 8.5 + 4.7 contexted → ready-for-dev (Wave 3, on master)
+last_updated: 2026-06-13  # story 8.5 → in-progress (code review: 2 patches applied, human verification pending)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -117,7 +117,7 @@ development_status:
   8-2-per-team-bomb-generation: done
   8-3-round-start-defuser-assignment-and-preparation-control: done
   8-4-server-authoritative-timer-and-strike-escalation: done
-  8-5-round-resolution: ready-for-dev
+  8-5-round-resolution: in-progress
   8-6-between-round-flow-and-scoreboard-preview: backlog
   8-7-pause-facilitator-and-disconnect: backlog
   8-8-retry-a-failed-round: backlog

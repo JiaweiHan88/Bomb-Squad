@@ -17,15 +17,25 @@ import { useGameStore } from '../store/gameStore.js';
  * here — never listeners owned by other modules or socket.io internals.
  */
 export function bindServerEvents(socket: AppClientSocket): () => void {
-  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setConnection } =
+  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setConnection } =
     useGameStore.getState();
 
   const onBombDefused = (payload: RoundEndPayload) => {
-    console.info('[socket] BOMB_DEFUSED', payload);
+    setResolution({ outcome: 'defused', elapsedMs: payload.elapsedMs });
   };
+  // BOMB_EXPLODED covers both failure outcomes. DETONATED (3rd strike) vs TIME
+  // EXPIRED (clock hit 0) is a client-side label — derived from the strike count
+  // in the non-authoritative bomb snapshot, the simplest correct mapping with the
+  // data on hand (no third event; Task 1). LIMITATION: this depends on the client
+  // having received the terminal strike count; until Story 4.7's interaction
+  // handler broadcasts the strike-3 bomb state, a 3rd-strike loss may fall back to
+  // the TIME EXPIRED label. Acceptable for V1.
   const onBombExploded = (payload: RoundEndPayload) => {
-    console.info('[socket] BOMB_EXPLODED', payload);
+    const strikes = useGameStore.getState().bomb?.strikes ?? 0;
+    const outcome = strikes >= 3 ? 'exploded' : 'time-expired';
+    setResolution({ outcome, elapsedMs: payload.elapsedMs });
   };
+  // Story 8.6 owns the scoreboard — left a stub here (never rendered mid-round, AC-3).
   const onScoreboard = (payload: ScoreboardPayload) => {
     console.info('[socket] SCOREBOARD', payload);
   };

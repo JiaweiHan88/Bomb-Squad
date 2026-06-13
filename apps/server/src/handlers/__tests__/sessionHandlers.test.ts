@@ -1360,7 +1360,7 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
     expect(mayaSawB).not.toHaveBeenCalled();
   });
 
-  it('authoritative expiry: scheduler fire → BOMB_EXPLODED, timerKey cleared, status stays active (8.5 fence)', async () => {
+  it('authoritative expiry: scheduler fire → BOMB_EXPLODED, timerKey cleared, time recorded + status flipped (8.5 ceremony)', async () => {
     const { sessionId } = await prep();
 
     const started = onceEvent<TimerState>(maya, 'TIMER_UPDATE');
@@ -1374,9 +1374,12 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
 
     expect(exploded).toEqual({ teamId: 'A', elapsedMs: TIMER_MS });
     expect(store.data.has(timerKey(sessionId, 'A'))).toBe(false);
-    // 8.5 fence: 8.4 declares the timeout but does NOT flip session status.
+    // Story 8.5: the timeout path now runs the full resolution ceremony — it
+    // records displayed elapsed into cumulativeTimeMs and flips the session
+    // toward between-rounds (the active→between-rounds flip 8.4 deferred to 8.5).
     const session = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    expect(session.status).toBe('active');
+    expect(session.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect(session.status).toBe('between-rounds');
   });
 });
 

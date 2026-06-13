@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import BombStage from '../scenes/BombStage.js';
@@ -6,6 +6,7 @@ import BombScene from '../scenes/BombScene.js';
 import ManualViewer from '../manual/ManualViewer.js';
 import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
+import ResolutionBanner from './ResolutionBanner.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
 
 /**
@@ -33,23 +34,31 @@ export default function ActiveRound() {
   const selfId = getSocket().id;
   const role = selfId !== undefined ? session.players[selfId]?.role : undefined;
 
+  let surface: ReactNode;
   if (role === 'defuser') {
-    return (
+    surface = (
       <BombStage>
         <BombScene />
       </BombStage>
     );
+  } else if (role === 'expert') {
+    surface = <ManualViewer chapters={chapters} />;
+  } else {
+    surface = (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <p className="font-mono text-sm uppercase tracking-widest text-ink-muted">
+          {role === 'spectator' ? WATCHING_THE_BOMB_ROOM : ROUND_IN_PROGRESS}
+        </p>
+      </div>
+    );
   }
 
-  if (role === 'expert') {
-    return <ManualViewer chapters={chapters} />;
-  }
-
+  // The result banner overlays whatever role surface is showing (Story 8.5). It
+  // self-hides while `resolution` is null, so this wrapper is inert mid-round.
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
-      <p className="font-mono text-sm uppercase tracking-widest text-ink-muted">
-        {role === 'spectator' ? WATCHING_THE_BOMB_ROOM : ROUND_IN_PROGRESS}
-      </p>
+    <div className="relative flex flex-1 flex-col">
+      {surface}
+      <ResolutionBanner />
     </div>
   );
 }

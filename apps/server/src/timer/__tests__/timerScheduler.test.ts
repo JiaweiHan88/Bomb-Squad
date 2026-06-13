@@ -1,7 +1,7 @@
-import type { SessionState, TimerState } from '@bomb-squad/shared';
+import type { RoundState, SessionState, TimerState } from '@bomb-squad/shared';
 import { createMemoryRedisStore, noopLog, type MemoryRedisStore } from '../../handlers/__tests__/testSocketServer.js';
 import type { SessionIOServer } from '../../handlers/sessionHandlers.js';
-import { sessionKey, timerKey } from '../../state/keys.js';
+import { roundKey, sessionKey, timerKey } from '../../state/keys.js';
 import { createSessionState } from '../../session/createSession.js';
 import { createTimerScheduler, type TimerScheduler } from '../timerScheduler.js';
 import { startSegment, pause, rebaseForStrike } from '../timerCore.js';
@@ -59,16 +59,30 @@ function makeHarness(): Harness {
 }
 
 const SID = 'sess-1';
+const ROUND_NUMBER = 1;
 const running = (durationMs = 10_000): TimerState => startSegment(durationMs, 0);
 
+/**
+ * Seed an ACTIVE round so the timeout fire path can run the full Story 8.5
+ * ceremony (resolveRound): session 'active' with team A, plus the RoundState the
+ * ceremony's idempotency/outcome bookkeeping reads + writes.
+ */
 async function seedSession(store: MemoryRedisStore, timerMs = 10_000): Promise<void> {
-  const session: SessionState = createSessionState({
+  const base = createSessionState({
     sessionId: SID,
     joinCode: 'ABC123',
     facilitatorId: 'fac',
     config: { timerMs },
   });
+  const session: SessionState = {
+    ...base,
+    status: 'active',
+    roundNumber: ROUND_NUMBER,
+    teams: { A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0 } },
+  };
   await store.setJSON(sessionKey(SID), session);
+  const round: RoundState = { roundNumber: ROUND_NUMBER, status: 'active', defusers: { A: 'p1' }, retry: false };
+  await store.setJSON(roundKey(SID, ROUND_NUMBER), round);
 }
 
 describe('TimerScheduler.arm', () => {
@@ -102,7 +116,7 @@ describe('TimerScheduler.arm', () => {
 });
 
 describe('TimerScheduler fire path (reload + revalidate)', () => {
-  it('still-expired on fire → declares timeout: BOMB_EXPLODED + timerKey deleted', async () => {
+  it('still-expired on fire → delegates to resolveRound: BOMB_EXPLODED + records time + sets status + timerKey deleted', async () => {
     const h = makeHarness();
     await seedSession(h.store, 10_000);
     await h.store.setJSON(timerKey(SID, 'A'), running(10_000));
@@ -110,10 +124,16 @@ describe('TimerScheduler fire path (reload + revalidate)', () => {
 
     await h.scheduler.fireNow(SID, 'A');
 
+    // Story 8.5: the timeout path now runs the full ceremony, not a bare emit.
     expect(h.emitted).toEqual([
       { room: `session:${SID}:team:A`, event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: 10_000 } },
     ]);
     expect(h.store.data.has(timerKey(SID, 'A'))).toBe(false);
+    const session = (await h.store.getJSON<SessionState>(sessionKey(SID)))!;
+    expect(session.teams.A!.cumulativeTimeMs).toBe(10_000); // displayed elapsed = timerMs
+    expect(session.status).toBe('between-rounds');
+    const round = (await h.store.getJSON<RoundState>(roundKey(SID, ROUND_NUMBER)))!;
+    expect(round.status).toBe('time-expired');
   });
 
   it('reloaded timer is PAUSED → no-op (the scheduler-safety property)', async () => {
