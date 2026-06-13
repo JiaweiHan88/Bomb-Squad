@@ -4,7 +4,7 @@ baseline_commit: 6416aa5a91f233c7a020179bbaeda09841bf0b23
 
 # Story 8.5: Round Resolution
 
-Status: review
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -67,6 +67,18 @@ so that our result and time are recorded correctly.
 
 - [ ] **Task 7 — Human verification (per project rule [[human-verification-ac-rule]])**
   - [ ] Jay verifies interactively: run a round to (a) full defuse → sees "DEFUSED." + 2s hold + green LEDs; (b) 3rd strike → "DETONATED." + red tint + 3s hold; (c) timer expiry → "TIME EXPIRED." + red tint + 3s hold. Scoreboard never flashes mid-round. Confirm recorded round time looks right. Not done until his observed result is in Completion Notes. Verification caveat — see [[timer-verification-tsx-watch-gotcha]]: run the server WITHOUT `tsx watch` so in-memory expiry wakes survive; the timeout path depends on them. **PENDING — automated coverage is green; awaiting Jay's observed result. NOTE: defuse and 3rd-strike paths have no live server caller until Story 4.7 wires the `MODULE_INTERACT` interaction handler to `onBombDefused`/`onThirdStrike`; only the TIME EXPIRED path is end-to-end runnable today. Defuse/DETONATED interactive verification unblocks once 4.7 lands.**
+
+### Review Findings
+
+_Code review 2026-06-13 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). Auditor confirmed all 5 ACs satisfied and the two documented deviations (per-team timer-key fence; client label derivation) correctly implemented._
+
+- [x] [Review][Patch] Shared `SessionState` lost-update race on concurrent two-team resolution [apps/server/src/round/resolveRound.ts] — FIXED: `resolveRound` is now a per-session serialization wrapper (`sessionChains` promise chain) around `resolveRoundCeremony`; concurrent two-team resolutions queue so neither read-modify-write clobbers the other's `cumulativeTimeMs`. No CAS primitive exists on `RedisStore`, so this matches the documented single-process posture (multi-instance would need a Redis-side atomic increment/WATCH — noted in code). Added a concurrent two-team regression test asserting both teams' times land.
+- [x] [Review][Defer] `between-rounds` status flip strands the banner on any re-sync [apps/server/src/round/resolveRound.ts:113; apps/client/src/App.tsx] — deferred to 8.6: 8.6 owns the between-rounds surface and will route it to a real screen + carry resolution across re-sync; reconnect-during-hold losing the cosmetic banner is acceptable for V1. `ActiveRound`/`ResolutionBanner` mount only while `session.status === 'active'`; `resolveRound` flips Redis to `'between-rounds'` but emits no `SESSION_STATE`, so the verdict shows only on a stale snapshot — any re-sync (reconnect/late-join) routes to `<Lobby/>` and unmounts the banner.
+- [x] [Review][Patch] ResolutionBanner `held` not reset on outcome change [apps/client/src/ui/ResolutionBanner.tsx:40-49] — FIXED: the hold effect now calls `setHeld(false)` unconditionally at the top, so any outcome change (incl. value→value) restarts the hold from the un-held state instead of carrying a stale `held=true` straight to the interim surface.
+- [x] [Review][Defer] Crash window between `del(timerKey)` and session persist [apps/server/src/round/resolveRound.ts:96-119] — deferred, single-process V1 (wakes don't survive restart anyway); del-before-emit is the intentional desync-safe posture. A crash after `del` but before persisting `cumulativeTimeMs` trips the fence on restart → silent no-op losing the round result.
+- [x] [Review][Defer] `session.config.timerMs` finite-guard dropped [apps/server/src/round/resolveRound.ts:88] — deferred, config is always present on an active session with a live timer. Old `onTimerExpired` used `?? 0`; new ceremony dereferences unconditionally → NaN into `cumulativeTimeMs` if a malformed/legacy session ever reaches this seam.
+- [x] [Review][Defer] ResolutionBanner interim surface is terminal [apps/client/src/ui/ResolutionBanner.tsx:55-63] — deferred, Story 8.6 owns the between-rounds transition. If the next round never starts (session ends/errors), the `z-50` "round over" overlay has no exit until a future `BOMB_INIT`.
+- [x] [Review][Defer] Test gaps: no two-team concurrent-resolution test; idempotency test is sequential not concurrent [apps/server/src/round/__tests__/resolveRound.test.ts] — deferred, ties to the lost-update decision above. The fence is proven only for sequential double-fire (key already deleted), not the concurrent in-flight double-fire it's meant to guard.
 
 ## Dev Notes
 
@@ -190,3 +202,4 @@ claude-opus-4-8 (Claude Code, gds-dev-story workflow)
 | Date       | Change                                                                                         |
 | ---------- | ---------------------------------------------------------------------------------------------- |
 | 2026-06-13 | Story 8.5 implemented: `resolveRound` ceremony (defuse / 3rd-strike / timeout) with per-team timer-key idempotency fence, honest displayed-elapsed reconciliation, `RoundState`/`RoundOutcome` contract widening, timeout path delegated to the ceremony, and the client result banner. 620 tests green; `tsc --noEmit` clean. Status → review (human verification pending; defuse/strike-3 live call sites land with Story 4.7). |
+| 2026-06-13 | Code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All 5 ACs confirmed satisfied. 2 patches applied: (1) per-session serialization in `resolveRound` to close a concurrent two-team `cumulativeTimeMs` lost-update race (+ regression test); (2) `ResolutionBanner` resets `held` on every outcome change. 1 finding deferred to 8.6 (between-rounds status flip strands the banner on re-sync); 4 items deferred to `deferred-work.md`; 6 dismissed. `pnpm typecheck` clean; server 103 + client 195 affected tests green. Status → in-progress (awaiting Jay's Task 7 interactive verification per human-verification rule). |

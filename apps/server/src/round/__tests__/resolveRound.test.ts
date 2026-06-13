@@ -209,6 +209,59 @@ describe('resolveRound — honest elapsed reconciliation (AC-5)', () => {
   });
 });
 
+describe('resolveRound — concurrent two-team resolution (shared-session lost-update guard)', () => {
+  it('records BOTH teams cumulativeTimeMs when they resolve concurrently — no clobber', async () => {
+    // Both teams share one sessionKey. Without per-session serialization, both
+    // resolutions read the same baseline session and the second setJSON wipes the
+    // first team's recorded time. Resolve them concurrently and assert both land.
+    const store = createMemoryRedisStore();
+    const emitted: Emitted[] = [];
+    const base = createSessionState({
+      sessionId: SID,
+      joinCode: 'ABC123',
+      facilitatorId: 'fac',
+      config: { timerMs: TIMER_MS },
+    });
+    const session: SessionState = {
+      ...base,
+      status: 'active',
+      roundNumber: ROUND_NUMBER,
+      teams: {
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0 },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0 },
+      },
+    };
+    await store.setJSON(sessionKey(SID), session);
+    await store.setJSON(roundKey(SID, ROUND_NUMBER), {
+      roundNumber: ROUND_NUMBER,
+      status: 'active',
+      defusers: { A: 'p1', B: 'p2' },
+      retry: false,
+    } as RoundState);
+    await store.setJSON(timerKey(SID, 'A'), startSegment(TIMER_MS, 0));
+    await store.setJSON(timerKey(SID, 'B'), startSegment(TIMER_MS, 0));
+
+    const deps: ResolveRoundDeps = {
+      redis: store,
+      io: fakeIo(emitted),
+      log: noopLog,
+      timer: { cancel: () => {} },
+    };
+
+    await Promise.all([
+      resolveRound(deps, SID, 'A', 'defused', 60_000),
+      resolveRound(deps, SID, 'B', 'time-expired', TIMER_MS + 1),
+    ]);
+
+    const after = (await store.getJSON<SessionState>(sessionKey(SID)))!;
+    expect(after.teams.A!.cumulativeTimeMs).toBe(60_000);
+    expect(after.teams.B!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect(emitted).toHaveLength(2);
+    expect(store.data.has(timerKey(SID, 'A'))).toBe(false);
+    expect(store.data.has(timerKey(SID, 'B'))).toBe(false);
+  });
+});
+
 describe('resolveRound — named trigger wrappers (Story 4.7 seam)', () => {
   it('onBombDefused resolves as defused', async () => {
     const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });

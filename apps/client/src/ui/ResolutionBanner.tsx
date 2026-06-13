@@ -38,10 +38,12 @@ export default function ResolutionBanner() {
   const outcome = resolution?.outcome;
 
   useEffect(() => {
-    if (outcome === undefined) {
-      setHeld(false);
-      return;
-    }
+    // Always restart from the un-held state when the outcome changes — including a
+    // direct value→value transition (e.g. a new round resolving before the prior
+    // resolution cleared), so a stale `held` from the previous outcome never skips
+    // the new verdict straight to the interim surface.
+    setHeld(false);
+    if (outcome === undefined) return;
     playResolutionCue(outcome);
     const holdMs = outcome === 'defused' ? HOLD_MS_DEFUSED : HOLD_MS_FAILURE;
     const handle = window.setTimeout(() => setHeld(true), holdMs);

@@ -41,11 +41,51 @@ export interface ResolveRoundDeps {
 }
 
 /**
+ * Per-session serialization chain (single-process V1). Both racing teams share
+ * ONE `sessionKey`, and `resolveRound` does a read-modify-write of that session
+ * to add `cumulativeTimeMs`. With no CAS primitive on `RedisStore` (only
+ * get/set/del), two teams resolving concurrently would both read the same
+ * baseline and the second `setJSON` would clobber the first team's recorded
+ * time. We serialize all resolutions for a given session through a promise chain
+ * so each read-modify-write runs to completion before the next begins. This
+ * matches the documented single-process posture (timerScheduler header); a
+ * multi-instance deployment would need a Redis-side atomic increment / WATCH.
+ */
+const sessionChains = new Map<string, Promise<void>>();
+
+/**
  * Resolve one team's round to a terminal `outcome`. `now` is the
  * server-authoritative instant the resolution fires (injected wall clock — never
  * `Date.now()`); it dates the displayed-elapsed computation.
+ *
+ * Serialized per session (see `sessionChains`): the actual ceremony runs in
+ * `resolveRoundCeremony`; this entry point queues it behind any in-flight
+ * resolution for the same session so concurrent two-team resolutions cannot
+ * clobber each other's `cumulativeTimeMs`.
  */
-export async function resolveRound(
+export function resolveRound(
+  deps: ResolveRoundDeps,
+  sessionId: string,
+  teamId: TeamId,
+  outcome: RoundOutcome,
+  now: number,
+): Promise<void> {
+  const prior = sessionChains.get(sessionId) ?? Promise.resolve();
+  const next = prior.then(() => resolveRoundCeremony(deps, sessionId, teamId, outcome, now));
+  // Track the chain swallowing errors so one failed resolution never poisons a
+  // sibling team's queued resolution; callers still see `next`'s real outcome.
+  const tracked = next.then(
+    () => {},
+    () => {},
+  );
+  sessionChains.set(sessionId, tracked);
+  void tracked.then(() => {
+    if (sessionChains.get(sessionId) === tracked) sessionChains.delete(sessionId);
+  });
+  return next;
+}
+
+async function resolveRoundCeremony(
   deps: ResolveRoundDeps,
   sessionId: string,
   teamId: TeamId,
