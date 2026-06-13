@@ -1,8 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   DEV_DEMO_MODULE_ID,
+  WIRES_MODULE_ID,
   devDemoReducer,
   generateDevDemo,
+  generateWires,
+  solveWires,
   type BombContext,
   type BombState,
   type ModuleState,
@@ -81,6 +84,34 @@ describe('open/closed module registration (AC2)', () => {
     const reset = reduce(solved, { type: 'MODULE_RESET', moduleIndex: 0 });
     expect(reset.modules[0].status).toBe('armed');
     expect(reset.solved).toBe(false);
+  });
+
+  it('wires (5.3) is registered and solves/strikes through the untouched bomb reducer', () => {
+    expect(MODULE_REDUCERS[WIRES_MODULE_ID]).toBeDefined();
+    const data = generateWires(7, CTX);
+    // The answer is no longer stored in state — recompute it (Sprint 2 retro AI1).
+    const solutionIndex = solveWires(data.wires.map((w) => w.color), CTX);
+    const wiresBomb: BombState = {
+      context: CTX,
+      modules: [{ moduleId: WIRES_MODULE_ID, status: 'armed', data }],
+      strikes: 0,
+      solved: false,
+    };
+    const solved = bombReducer(wiresBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'CUT', wireIndex: solutionIndex },
+    });
+    expect(solved.modules[0].status).toBe('solved');
+    expect(solved.strikes).toBe(0);
+    const wrongIndex = (solutionIndex + 1) % data.wires.length;
+    const struck = bombReducer(wiresBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'CUT', wireIndex: wrongIndex },
+    });
+    expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
+    expect(struck.strikes).toBe(1);
   });
 
   it('dev-demo is registered in the production MODULE_REDUCERS map', () => {

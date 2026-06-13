@@ -1,5 +1,6 @@
 import type { IModule } from '@bomb-squad/shared';
 import { DEV_DEMO_MODULE } from './dev-demo/index.js';
+import { WIRES_MODULE } from './wires/index.js';
 
 /**
  * Module registration barrel — importing it (main.tsx does, once) registers
@@ -11,9 +12,10 @@ import { DEV_DEMO_MODULE } from './dev-demo/index.js';
  *  ModuleReducer erasure — per-module types live inside each module). */
 export type SandboxModule = IModule<unknown, unknown>;
 
-/** Modules available in /dev/sandbox. Wires joins in 5.3, etc. */
+/** Modules available in /dev/sandbox. */
 export const SANDBOX_MODULES: readonly SandboxModule[] = [
   DEV_DEMO_MODULE as SandboxModule,
+  WIRES_MODULE as SandboxModule,
 ];
 
-export { DEV_DEMO_MODULE };
+export { DEV_DEMO_MODULE, WIRES_MODULE };

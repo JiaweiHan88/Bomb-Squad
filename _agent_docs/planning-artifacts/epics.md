@@ -564,6 +564,12 @@ So that the lobby stays accurate and nobody gets stranded by a refresh or a pref
 **When** the code cells are full but no submitting keystroke occurred
 **Then** a visible "Join" button is shown that submits once display name and role are set — typing the 6th character continues to auto-submit as before.
 
+**Given** the disconnect-cleanup and refresh-rejoin paths above
+**When** a player's identity is resolved anywhere in the system
+**Then** it resolves against a **durable player id minted at first join and decoupled from the ephemeral `socket.id`** — not the rotating socket id — so a reconnect re-attaches to the same player record. This durable id is the **system-wide identity primitive**, not a lobby-local construct: it is the same id the `MODULE_INTERACT` authority gate (Story 4.7) and the mid-round disconnect/pause restore (Story 8.7 / FR13) resolve against. The deferred `socket.id`-as-identity items from the 2.2 / 2.3 / 2.4 / 5.2 / 8.3 / 4.7 reviews are marked resolved by this story's review.
+
+> **Scope note (widened — Sprint 2 retro Action Item 2).** Story 2.7 was originally framed as lobby-only resilience. The 4.7 snapshot-sync work made stable identity a *gameplay-authority correctness* dependency (a reconnected Defuser is refused `NOT_TEAM_DEFUSER` and never re-sent `BOMB_INIT`), not just a lobby-roster nicety. So 2.7 now **owns the durable-identity primitive** that downstream consumers depend on. It still does **not implement** mid-round reattach/resume — that ceremony (re-send each team's `BOMB_INIT`, re-establish `teamRoom` membership on resume) stays in **Story 8.7 / FR13**; 8.7 builds it on top of the identity 2.7 introduces. When `gds-create-story` runs for 2.7, carry this dependency into its Dev Notes and have 4.7 / 8.7 cite it.
+
 ---
 
 ## Epic 3: Voice Communication

@@ -3,11 +3,12 @@ import type {
   ScoreboardPayload,
   LifelineToastPayload,
   PauseResumePayload,
+  StrikePayload,
   ErrorPayload,
 } from '@bomb-squad/shared';
 import type { TimerState } from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
-import { noteTimerBroadcast } from './serverClock.js';
+import { noteTimerBroadcast, resetClockOffset } from './serverClock.js';
 import { useGameStore } from '../store/gameStore.js';
 
 /**
@@ -16,15 +17,25 @@ import { useGameStore } from '../store/gameStore.js';
  * here — never listeners owned by other modules or socket.io internals.
  */
 export function bindServerEvents(socket: AppClientSocket): () => void {
-  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setConnection } =
+  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setConnection } =
     useGameStore.getState();
 
   const onBombDefused = (payload: RoundEndPayload) => {
-    console.info('[socket] BOMB_DEFUSED', payload);
+    setResolution({ outcome: 'defused', elapsedMs: payload.elapsedMs });
   };
+  // BOMB_EXPLODED covers both failure outcomes. DETONATED (3rd strike) vs TIME
+  // EXPIRED (clock hit 0) is a client-side label — derived from the strike count
+  // in the non-authoritative bomb snapshot, the simplest correct mapping with the
+  // data on hand (no third event; Task 1). LIMITATION: this depends on the client
+  // having received the terminal strike count; until Story 4.7's interaction
+  // handler broadcasts the strike-3 bomb state, a 3rd-strike loss may fall back to
+  // the TIME EXPIRED label. Acceptable for V1.
   const onBombExploded = (payload: RoundEndPayload) => {
-    console.info('[socket] BOMB_EXPLODED', payload);
+    const strikes = useGameStore.getState().bomb?.strikes ?? 0;
+    const outcome = strikes >= 3 ? 'exploded' : 'time-expired';
+    setResolution({ outcome, elapsedMs: payload.elapsedMs });
   };
+  // Story 8.6 owns the scoreboard — left a stub here (never rendered mid-round, AC-3).
   const onScoreboard = (payload: ScoreboardPayload) => {
     console.info('[socket] SCOREBOARD', payload);
   };
@@ -40,6 +51,14 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     noteTimerBroadcast(timer);
     setTimer(timer);
   };
+  // A strike-driven rebase rides inside STRIKE (no separate TIMER_UPDATE), so the
+  // freshly server-stamped `startedAt` it carries is the only offset refresh on a
+  // strike-heavy round — feed it to the estimator (no-op when paused) before
+  // storing, same posture as onTimerUpdate, or serverNow() drifts (decision 9).
+  const onStrike = (payload: StrikePayload) => {
+    noteTimerBroadcast(payload.timer);
+    setStrike(payload);
+  };
   const onResumed = (payload: PauseResumePayload) => {
     console.info('[socket] RESUMED', payload);
   };
@@ -48,7 +67,12 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   };
 
   const onConnect = () => setConnection('connected');
-  const onDisconnect = () => setConnection('disconnected');
+  // Drop the server-clock offset on disconnect so a reconnect can't carry a
+  // stale (possibly ahead-of-server) estimate (Story 8.4).
+  const onDisconnect = () => {
+    resetClockOffset();
+    setConnection('disconnected');
+  };
   const onConnectError = () => setConnection('disconnected');
   // Manager-level event: fires on every auto-reconnect attempt, so the UI
   // shows "connecting" during the retry window instead of "disconnected".
@@ -58,7 +82,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   socket.on('BOMB_INIT', setBomb);
   socket.on('MODULE_UPDATE', applyModuleUpdate);
   socket.on('TIMER_UPDATE', onTimerUpdate);
-  socket.on('STRIKE', setStrike);
+  socket.on('STRIKE', onStrike);
 
   socket.on('BOMB_DEFUSED', onBombDefused);
   socket.on('BOMB_EXPLODED', onBombExploded);
@@ -78,7 +102,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     socket.off('BOMB_INIT', setBomb);
     socket.off('MODULE_UPDATE', applyModuleUpdate);
     socket.off('TIMER_UPDATE', onTimerUpdate);
-    socket.off('STRIKE', setStrike);
+    socket.off('STRIKE', onStrike);
     socket.off('BOMB_DEFUSED', onBombDefused);
     socket.off('BOMB_EXPLODED', onBombExploded);
     socket.off('SCOREBOARD', onScoreboard);

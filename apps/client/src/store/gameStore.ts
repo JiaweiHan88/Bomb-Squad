@@ -5,16 +5,30 @@ import type {
   TimerState,
   ModuleUpdate,
   StrikePayload,
+  RoundOutcome,
 } from '@bomb-squad/shared';
+
+/**
+ * Resolved-round result for presentation (Story 8.5). Non-authoritative — set
+ * only from the server's BOMB_DEFUSED / BOMB_EXPLODED events. `null` while a
+ * round is active. The client never derives an outcome itself.
+ */
+export interface ResolutionState {
+  outcome: RoundOutcome;
+  /** Displayed elapsed time the server recorded, in ms (RoundEndPayload). */
+  elapsedMs: number;
+}
 
 interface GameState {
   session: SessionState | null;
   bomb: BombState | null;
   timer: TimerState | null;
+  resolution: ResolutionState | null;
   connection: 'disconnected' | 'connecting' | 'connected';
   setSession: (session: SessionState) => void;
   setBomb: (bomb: BombState) => void;
   setTimer: (timer: TimerState) => void;
+  setResolution: (resolution: ResolutionState | null) => void;
   /**
    * Immutably replaces one module in the bomb's modules array.
    * Non-integer or out-of-range moduleIndex is dropped with a console warning
@@ -40,11 +54,15 @@ export const useGameStore = create<GameState>((set) => ({
   session: null,
   bomb: null,
   timer: null,
+  resolution: null,
   connection: 'disconnected',
 
   setSession: (session) => set({ session }),
-  setBomb: (bomb) => set({ bomb }),
+  // A fresh bomb (BOMB_INIT) means a new round — clear any prior resolution so a
+  // stale result banner can't bleed into the next round.
+  setBomb: (bomb) => set({ bomb, resolution: null }),
   setTimer: (timer) => set({ timer }),
+  setResolution: (resolution) => set({ resolution }),
 
   applyModuleUpdate: ({ moduleIndex, state }) =>
     set((s) => {

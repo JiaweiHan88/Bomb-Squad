@@ -59,7 +59,7 @@ Make it the *talking* game. **Pulls forward the Bomb Room voice subset ahead of 
 - ⏫ `3-2` Bomb Room bidirectional channel
 - `2-5` Lobby roster, ready state & mic check
 - `2-6` Capacity & join-window guards
-- `2-7` Lobby resilience & facilitator player controls *(added per sprint-change-proposal-2026-06-12-epic-2-lobby-followup; scheduled here at Sprint 1 retro)*
+- `2-7` Lobby resilience & facilitator player controls *(added per sprint-change-proposal-2026-06-12-epic-2-lobby-followup; scheduled here at Sprint 1 retro; **scope widened at Sprint 2 retro (AI2)** — now owns the durable-identity primitive the 4.7 authority gate + 8.7 mid-round restore depend on, see epics.md Story 2.7 scope note)*
 
 > **✅ Milestone A exit:** the core hypothesis is testable. Defuser + Expert defuse Wires over voice, with a real server-authoritative timer, strikes, and round resolution.
 

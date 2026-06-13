@@ -1,8 +1,18 @@
 import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
+import { createProductionModuleDispatch } from './net/productionDispatch.js';
+import { setModuleActionDispatch } from './modules/dispatch.js';
 import { useGameStore } from './store/gameStore.js';
-import { AppShell, Landing, Lobby, LoadingScreen, PlatformGate } from './ui/index.js';
+import {
+  ActiveRound,
+  AppShell,
+  Landing,
+  Lobby,
+  LoadingScreen,
+  PlatformGate,
+  Preparation,
+} from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
 import DevBombHarness from './scenes/DevBombHarness.js';
 import SandboxHarness from './sandbox/SandboxHarness.js';
@@ -29,10 +39,19 @@ export default function App() {
     const unbind = bindServerEvents(socket);
     socket.connect();
 
+    // Production module-action backend (Story 4.7): DefuserView dispatches become
+    // MODULE_INTERACT emits the server reduces/broadcasts. NEVER on /dev/sandbox —
+    // that route installs its own LOCAL reducer backend (SandboxHarness) and must
+    // not be overwritten. Resets to null on teardown (symmetry with unbind) so a
+    // stale socket can't be emitted into after disconnect.
+    const onSandboxRoute = window.location.pathname === '/dev/sandbox';
+    if (!onSandboxRoute) setModuleActionDispatch(createProductionModuleDispatch());
+
     return () => {
       // unbind() removes the 'disconnect' listener before disconnect() fires it,
       // so reflect the teardown in the store explicitly.
       unbind();
+      if (!onSandboxRoute) setModuleActionDispatch(null);
       socket.disconnect();
       useGameStore.getState().setConnection('disconnected');
     };
@@ -71,8 +90,17 @@ export default function App() {
         <LoadingScreen status={CONNECTING} />
       ) : (
         <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>
-          {/* Surface derives from the server snapshot — no router, no URL state. */}
-          {session === null ? <Landing /> : <Lobby />}
+          {/* Surface derives from the server snapshot — no router, no URL state.
+              between-rounds / ended fall back to Lobby until 8.5/8.6 own them. */}
+          {session === null ? (
+            <Landing />
+          ) : session.status === 'preparation' ? (
+            <Preparation />
+          ) : session.status === 'active' ? (
+            <ActiveRound />
+          ) : (
+            <Lobby />
+          )}
         </AppShell>
       )}
     </PlatformGate>

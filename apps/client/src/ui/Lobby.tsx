@@ -3,8 +3,11 @@ import type { ErrorPayload, PlayerInfo, PlayerRole, TeamId } from '@bomb-squad/s
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import Button from './Button.js';
+import ConfirmButton from './ConfirmButton.js';
 import { buildShareLink } from './shareLink.js';
 import {
+  OPEN_PREPARATION,
+  PREP_NEEDS_TEAM,
   BRING_THEM_IN,
   SHARE_SUB,
   COPY_LINK,
@@ -47,6 +50,10 @@ const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
   'INVALID_ASSIGNMENT',
   'NOT_IN_LOBBY',
   'TEAM_ASSIGN_FAILED',
+  // PREPARATION_OPEN rejections (Story 8.3) — emitted from this surface, so
+  // its error banner owns them too.
+  'CANNOT_OPEN_PREP',
+  'PREPARATION_OPEN_FAILED',
 ]);
 
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
@@ -107,6 +114,13 @@ export default function Lobby() {
   const isFacilitator = selfId !== undefined && session.players[selfId]?.role === 'facilitator';
   const roster = sortRoster(session.players);
 
+  // Prep can only open once someone can defuse — at least one team must hold a
+  // rostered player. Mirrors the server's hasPopulatedTeam guard so the button
+  // disables before the emit ever fails (the server stays the authority).
+  const canOpenPrep = Object.values(session.teams).some((team) =>
+    team.relayOrder.some((id) => session.players[id] !== undefined),
+  );
+
   // Clear any stale rejection on the facilitator's own next action — not on
   // room broadcasts, which fire for any participant's activity (a join would
   // otherwise wipe an unread rejection). A failed assign re-sets it; a silent
@@ -114,6 +128,14 @@ export default function Lobby() {
   const assign = (playerId: string, teamId: TeamId, role: PlayerRole) => {
     setAssignError(null);
     getSocket().emit('TEAM_ASSIGN', { playerId, teamId, role });
+  };
+
+  // Story 8.3: the facilitator ends the lobby by opening preparation. Server
+  // truth drives the surface change — the SESSION_STATE broadcast flips
+  // status to 'preparation' and App.tsx swaps Lobby out; no optimistic flip.
+  const openPreparation = () => {
+    setAssignError(null);
+    getSocket().emit('PREPARATION_OPEN');
   };
 
   const copyLink = async () => {
@@ -231,6 +253,19 @@ export default function Lobby() {
           </span>
           <Button onClick={() => void copyLink()}>{copied ? COPIED : COPY_LINK}</Button>
         </div>
+
+        {isFacilitator && (
+          // Two-step confirm: opening prep moves every player off the lobby —
+          // major phase change, same affordance grammar as other commits.
+          <div className="mt-6 flex flex-col items-end gap-2">
+            {!canOpenPrep && <p className="text-sm text-ink-muted">{PREP_NEEDS_TEAM}</p>}
+            <ConfirmButton
+              label={OPEN_PREPARATION}
+              onConfirm={openPreparation}
+              disabled={!canOpenPrep}
+            />
+          </div>
+        )}
       </section>
     </div>
   );

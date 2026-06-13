@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 3.1 code-reviewed (1 High patched: facilitator→lounge; 5 deferred) → done
+last_updated: 2026-06-13  # merged master into 3.1 worktree; story 3.1 code-reviewed (1 High patched: facilitator→lounge; 5 deferred) → done
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -83,14 +83,14 @@ development_status:
   4-4-diegetic-timer-lcd-with-client-extrapolation: done
   4-5-strike-indicator-and-strike-roll-up: done
   4-6-preparation-placeholder-bomb-view: backlog
-  4-7-snapshot-sync-and-optimistic-render-at-60fps: backlog
+  4-7-snapshot-sync-and-optimistic-render-at-60fps: done
   epic-4-retrospective: optional
 
   # ---- Epic 5: Core Modules — Easy (Walking Skeleton) ----
   epic-5: in-progress
   5-1-module-plugin-scaffold-sandbox-and-click-primitive: done
   5-2-expert-manual-viewer: done
-  5-3-wires-module-walking-skeleton: backlog
+  5-3-wires-module-walking-skeleton: done
   5-4-the-button-module: backlog
   5-5-passwords-module: backlog
   epic-5-retrospective: optional
@@ -112,12 +112,12 @@ development_status:
   epic-7-retrospective: optional
 
   # ---- Epic 8: Game Loop & Scoring ----
-  epic-8: backlog
+  epic-8: in-progress
   8-1-round-configuration-and-difficulty-gating: backlog
-  8-2-per-team-bomb-generation: backlog
-  8-3-round-start-defuser-assignment-and-preparation-control: backlog
-  8-4-server-authoritative-timer-and-strike-escalation: backlog
-  8-5-round-resolution: backlog
+  8-2-per-team-bomb-generation: done
+  8-3-round-start-defuser-assignment-and-preparation-control: done
+  8-4-server-authoritative-timer-and-strike-escalation: done
+  8-5-round-resolution: done
   8-6-between-round-flow-and-scoreboard-preview: backlog
   8-7-pause-facilitator-and-disconnect: backlog
   8-8-retry-a-failed-round: backlog

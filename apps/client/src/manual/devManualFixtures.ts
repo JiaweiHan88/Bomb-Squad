@@ -1,4 +1,5 @@
 import type { ManualPage } from '@bomb-squad/shared';
+import { getWiresManualPages } from '@bomb-squad/shared';
 
 /**
  * DEV FIXTURES for `/dev/manual` ONLY — not game content.
@@ -6,12 +7,10 @@ import type { ManualPage } from '@bomb-squad/shared';
  * Canonical manual content ships per-module via `IModule.getManualPages()`
  * starting with Wires in Story 5.3. These fixtures exist so the viewer can be
  * built/verified before any real module lands: the 11 chapter titles from the
- * mockup, the Wires 3/4/5/6 rule tables (verbatim from the mockup, to exercise
- * table rendering + color-word emphasis), a multi-page chapter (grouping), and
- * a long chapter (scroll memory).
+ * mockup, a multi-page chapter (grouping), and a long chapter (scroll memory).
+ * Wires is the exception: its chapter is the CANONICAL module content from
+ * getWiresManualPages() (Story 5.3), not a fixture.
  */
-
-const RULE_HEADERS = ['#', 'Condition', 'Action'];
 
 const stub = (chapterId: string, chapterTitle: string): ManualPage => ({
   chapterId,
@@ -24,69 +23,9 @@ const stub = (chapterId: string, chapterTitle: string): ManualPage => ({
 });
 
 export const DEV_MANUAL_PAGES: ManualPage[] = [
-  {
-    chapterId: 'wires',
-    chapterTitle: 'Wires',
-    sections: [
-      {
-        content:
-          'The module shows three to six coloured wires. Cut exactly one wire to disarm it. Count the wires first, then apply the matching table below — the rules differ for every wire count. Apply the first rule that matches, reading top to bottom.',
-      },
-      {
-        heading: 'Three wires',
-        content: '',
-        table: {
-          headers: RULE_HEADERS,
-          rows: [
-            ['1', 'No red wires', 'cut the 2nd'],
-            ['2', 'Last wire is white', 'cut the last'],
-            ['3', 'More than one blue wire', 'cut last blue'],
-            ['4', 'Otherwise', 'cut the last'],
-          ],
-        },
-      },
-      {
-        heading: 'Four wires',
-        content: '',
-        table: {
-          headers: RULE_HEADERS,
-          rows: [
-            ['1', 'More than one red & last serial digit odd', 'cut last red'],
-            ['2', 'Last wire yellow & no red', 'cut the 1st'],
-            ['3', 'Exactly one blue wire', 'cut the 1st'],
-            ['4', 'More than one yellow wire', 'cut the last'],
-            ['5', 'Otherwise', 'cut the 2nd'],
-          ],
-        },
-      },
-      {
-        heading: 'Five wires',
-        content: '',
-        table: {
-          headers: RULE_HEADERS,
-          rows: [
-            ['1', 'Last wire black & last serial digit odd', 'cut the 4th'],
-            ['2', 'One red & more than one yellow', 'cut the 1st'],
-            ['3', 'No black wires', 'cut the 2nd'],
-            ['4', 'Otherwise', 'cut the 1st'],
-          ],
-        },
-      },
-      {
-        heading: 'Six wires',
-        content: '',
-        table: {
-          headers: RULE_HEADERS,
-          rows: [
-            ['1', 'No yellow & last serial digit odd', 'cut the 3rd'],
-            ['2', 'One yellow & more than one white', 'cut the 4th'],
-            ['3', 'No red wires', 'cut the last'],
-            ['4', 'Otherwise', 'cut the 4th'],
-          ],
-        },
-      },
-    ],
-  },
+  // Wires: CANONICAL content from the module's getManualPages() (Story 5.3) —
+  // the rule tables render from the same data solveWires() evaluates.
+  ...getWiresManualPages(),
   // Two pages → exercises chapter grouping (buildChapters).
   {
     chapterId: 'the-button',

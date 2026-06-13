@@ -38,6 +38,18 @@ export function serverNow(nowMs: number = Date.now()): number {
   return nowMs + clockOffsetMs;
 }
 
+/**
+ * Drop the offset estimate (Story 8.4). Called on socket `disconnect` so a
+ * reconnect to a different server epoch cannot carry the previous connection's
+ * offset — which could momentarily bias `serverNow()` AHEAD of the server (the
+ * phantom-expiry direction AC3 guards against). The offset is re-established by
+ * the first running TIMER_UPDATE after reconnect (back to the safe `0` default
+ * until then). Production sibling of `resetClockOffsetForTest`.
+ */
+export function resetClockOffset(): void {
+  clockOffsetMs = 0;
+}
+
 export function resetClockOffsetForTest(): void {
   clockOffsetMs = 0;
 }

@@ -22,6 +22,7 @@ import { sessionKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
+  createTestScheduler,
   type TestSocketServer,
   type TestClientSocket,
   type MemoryRedisStore,
@@ -92,7 +93,13 @@ describe('VOICE_TOKEN handler', () => {
     const cap = captureLog();
     lines = cap.lines;
     server = await startTestSocketServer((io) => {
-      registerSessionHandlers(io, { redis: store, log: cap.log });
+      // Voice never touches the timer; session handlers now require one (Story
+      // 8.4), so supply the test scheduler purely to satisfy the dep.
+      registerSessionHandlers(io, {
+        redis: store,
+        log: cap.log,
+        timer: createTestScheduler({ redis: store, io, log: cap.log }),
+      });
       registerVoiceHandlers(io, { redis: store, log: cap.log, config: CONFIG });
     });
     client = await server.connectClient();
