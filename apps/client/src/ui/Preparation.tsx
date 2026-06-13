@@ -3,6 +3,7 @@ import type { ErrorPayload, TeamId } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import ConfirmButton from './ConfirmButton.js';
+import Button from './Button.js';
 import ManualViewer from '../manual/ManualViewer.js';
 import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
@@ -15,6 +16,7 @@ import {
   PREP_DEFUSER_LINE,
   PREP_MANUAL_LINE,
   PREP_DEFUSER_PLACEHOLDER,
+  BACK_TO_LOBBY,
   TEAM_A,
   TEAM_B,
 } from './copy.js';
@@ -27,6 +29,9 @@ const START_ERROR_CODES: ReadonlySet<string> = new Set([
   'NOT_FACILITATOR',
   'CANNOT_START_ROUND',
   'ROUND_START_FAILED',
+  // PREPARATION_CANCEL rejections share this surface's banner (Story 8.3).
+  'CANNOT_CANCEL_PREP',
+  'PREPARATION_CANCEL_FAILED',
 ]);
 
 /**
@@ -85,6 +90,11 @@ export default function Preparation() {
     getSocket().emit('ROUND_START');
   };
 
+  const cancelPrep = () => {
+    setStartError(null);
+    getSocket().emit('PREPARATION_CANCEL');
+  };
+
   if (isFacilitator) {
     return (
       <div className="flex flex-1 items-start justify-center p-8">
@@ -113,7 +123,12 @@ export default function Preparation() {
               {startError}
             </p>
           )}
-          <ConfirmButton label={START_THE_ROUND} onConfirm={startRound} />
+          <div className="flex items-center justify-between gap-3">
+            <Button variant="secondary" onClick={cancelPrep}>
+              {BACK_TO_LOBBY}
+            </Button>
+            <ConfirmButton label={START_THE_ROUND} onConfirm={startRound} />
+          </div>
         </section>
       </div>
     );

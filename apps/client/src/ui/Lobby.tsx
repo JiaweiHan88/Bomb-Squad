@@ -7,6 +7,7 @@ import ConfirmButton from './ConfirmButton.js';
 import { buildShareLink } from './shareLink.js';
 import {
   OPEN_PREPARATION,
+  PREP_NEEDS_TEAM,
   BRING_THEM_IN,
   SHARE_SUB,
   COPY_LINK,
@@ -112,6 +113,13 @@ export default function Lobby() {
   const selfId = getSocket().id;
   const isFacilitator = selfId !== undefined && session.players[selfId]?.role === 'facilitator';
   const roster = sortRoster(session.players);
+
+  // Prep can only open once someone can defuse — at least one team must hold a
+  // rostered player. Mirrors the server's hasPopulatedTeam guard so the button
+  // disables before the emit ever fails (the server stays the authority).
+  const canOpenPrep = Object.values(session.teams).some((team) =>
+    team.relayOrder.some((id) => session.players[id] !== undefined),
+  );
 
   // Clear any stale rejection on the facilitator's own next action — not on
   // room broadcasts, which fire for any participant's activity (a join would
@@ -249,8 +257,13 @@ export default function Lobby() {
         {isFacilitator && (
           // Two-step confirm: opening prep moves every player off the lobby —
           // major phase change, same affordance grammar as other commits.
-          <div className="mt-6 flex justify-end">
-            <ConfirmButton label={OPEN_PREPARATION} onConfirm={openPreparation} />
+          <div className="mt-6 flex flex-col items-end gap-2">
+            {!canOpenPrep && <p className="text-sm text-ink-muted">{PREP_NEEDS_TEAM}</p>}
+            <ConfirmButton
+              label={OPEN_PREPARATION}
+              onConfirm={openPreparation}
+              disabled={!canOpenPrep}
+            />
           </div>
         )}
       </section>

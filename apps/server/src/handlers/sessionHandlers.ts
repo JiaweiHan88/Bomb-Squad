@@ -16,7 +16,8 @@ import { createSessionState } from '../session/createSession.js';
 import { addPlayerToSession } from '../session/joinSession.js';
 import { assignPlayerToTeam } from '../session/assignTeam.js';
 import { openPreparation } from '../session/openPreparation.js';
-import { startRound } from '../session/startRound.js';
+import { cancelPreparation } from '../session/cancelPreparation.js';
+import { startRound, hasPopulatedTeam } from '../session/startRound.js';
 
 /**
  * Server-assigned per-socket bookkeeping (Socket.IO `socket.data`). A pointer
@@ -535,6 +536,19 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
+        // Population guard: opening prep with no defuser-able player on any
+        // team strands the facilitator — ROUND_START would then refuse with
+        // NO_POPULATED_TEAM and (before PREPARATION_CANCEL) prep had no exit.
+        // Same error code the Lobby banner already owns; the message differs.
+        if (!hasPopulatedTeam(state)) {
+          socket.emit('ERROR', {
+            code: 'CANNOT_OPEN_PREP',
+            message: 'Assign at least one player to a team first.',
+            recoverable: true,
+          });
+          return;
+        }
+
         const next = openPreparation(state);
         if (next === state) return;
 
@@ -547,6 +561,67 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'PREPARATION_OPEN_FAILED',
           message: 'Could not open preparation. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Facilitator returns Preparation to the lobby (Story 8.3): the inverse of
+    // PREPARATION_OPEN. Payload-less; success is the SESSION_STATE broadcast.
+    socket.on('PREPARATION_CANCEL', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: "You're not in a session.",
+          recoverable: true,
+        });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_SESSION',
+            message: "You're not in a session.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Authority gate FIRST (a non-facilitator probe learns nothing).
+        if (state.players[socket.id]?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator cancels preparation.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Phase guard: only a session in preparation can be cancelled back to
+        // the lobby. Any other status refuses loudly.
+        if (state.status !== 'preparation') {
+          socket.emit('ERROR', {
+            code: 'CANNOT_CANCEL_PREP',
+            message: 'Preparation is not open.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = cancelPreparation(state);
+        if (next === state) return;
+
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info({ sessionId, roundNumber: next.roundNumber }, 'preparation cancelled');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'PREPARATION_CANCEL failed');
+        socket.emit('ERROR', {
+          code: 'PREPARATION_CANCEL_FAILED',
+          message: 'Could not cancel preparation. Try again.',
           recoverable: true,
         });
       }

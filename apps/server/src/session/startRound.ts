@@ -31,6 +31,19 @@ export type StartRoundResult =
  * skipped rather than crashing; if every populated team is skipped the start
  * is refused.
  */
+/**
+ * Whether at least one team has a defuser-able player — i.e. a relayOrder entry
+ * that still exists in `players`. This is exactly `startRound`'s success
+ * condition (the same `relayOrder` ↔ `players` integrity check it applies per
+ * team), so it is the right precondition for opening Preparation: if this is
+ * true, a subsequent ROUND_START cannot fail with NO_POPULATED_TEAM. Pure.
+ */
+export function hasPopulatedTeam(state: SessionState): boolean {
+  return Object.values(state.teams).some((team) =>
+    team.relayOrder.some((playerId) => state.players[playerId] !== undefined),
+  );
+}
+
 export function startRound(state: SessionState): StartRoundResult {
   if (state.status !== 'preparation') return { ok: false, reason: 'NOT_IN_PREPARATION' };
 

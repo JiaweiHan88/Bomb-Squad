@@ -48,6 +48,8 @@ export const COPIED = 'Copied';
 // Preparation phase (Story 8.3) — prep has no countdown; the facilitator ends
 // it by starting the round (GDD A9: 2–5 min is guidance, not enforcement).
 export const OPEN_PREPARATION = 'Open preparation';
+export const PREP_NEEDS_TEAM = 'Assign at least one player to a team first.';
+export const BACK_TO_LOBBY = 'Back to lobby';
 export const PREP_HEADING = 'Preparation';
 export const PREP_GUIDANCE =
   'Walk them through the manual — two to five minutes is the sweet spot. Start when they stop arguing.';

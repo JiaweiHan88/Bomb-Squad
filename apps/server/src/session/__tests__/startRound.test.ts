@@ -1,5 +1,5 @@
 import type { SessionState } from '@bomb-squad/shared';
-import { startRound } from '../startRound.js';
+import { startRound, hasPopulatedTeam } from '../startRound.js';
 import { addPlayerToSession } from '../joinSession.js';
 import { assignPlayerToTeam } from '../assignTeam.js';
 import { createSessionState } from '../createSession.js';
@@ -170,5 +170,28 @@ describe('startRound', () => {
     expect(result.state.teams.A!.cumulativeTimeMs).toBe(0);
     expect(result.state.roundNumber).toBe(1);
     expect(result.state.config).toBe(state.config);
+  });
+});
+
+describe('hasPopulatedTeam', () => {
+  it('is true when a team holds a rostered player', () => {
+    expect(hasPopulatedTeam(prepState())).toBe(true);
+  });
+
+  it('is false when no team exists', () => {
+    expect(hasPopulatedTeam({ ...prepState(), teams: {} })).toBe(false);
+  });
+
+  it('is false when every relayOrder entry is missing from players (matches startRound)', () => {
+    const state: SessionState = {
+      ...prepState(),
+      teams: {
+        A: { ...prepState().teams.A!, relayOrder: ['sock-ghost-a'] },
+        B: { ...prepState().teams.B!, relayOrder: ['sock-ghost-b'] },
+      },
+    };
+    expect(hasPopulatedTeam(state)).toBe(false);
+    // The precondition mirrors startRound's success condition exactly.
+    expect(startRound(state)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
 });

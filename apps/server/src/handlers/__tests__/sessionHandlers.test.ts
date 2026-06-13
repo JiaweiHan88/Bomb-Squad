@@ -813,9 +813,32 @@ describe('PREPARATION_OPEN handler', () => {
     return statePromise;
   }
 
-  it('happy path: lobby → preparation, roundNumber 1, ALL sockets receive SESSION_STATE', async () => {
+  /** The roster playerId of the (single) player with this display name. */
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  // Await the broadcast on BOTH sockets so no stale snapshot is still in flight
+  // when a test registers its own listeners (the prep-open guard now requires a
+  // populated team, so these tests must assign before opening — same drain
+  // discipline as the ROUND_START setup).
+  const everyone = () =>
+    Promise.all([facilitator, joiner].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')));
+
+  /** Create a session, join Maya, assign her to Team A — all broadcasts drained. */
+  async function sessionWithTeam(): Promise<{ sessionId: string; joinCode: string }> {
     const ack = await createSession(facilitator);
-    await joinAs(joiner, ack.joinCode, 'Maya');
+    let bc = everyone();
+    joiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+    const [, joined] = await bc;
+    bc = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(joined, 'Maya'), teamId: 'A', role: 'expert' });
+    await bc;
+    return ack;
+  }
+
+  it('happy path: lobby → preparation, roundNumber 1, ALL sockets receive SESSION_STATE', async () => {
+    const ack = await sessionWithTeam();
 
     const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
     const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
@@ -849,8 +872,8 @@ describe('PREPARATION_OPEN handler', () => {
   });
 
   it('already in preparation → silent idempotent no-op (no persist, no broadcast, no error)', async () => {
-    const ack = await createSession(facilitator);
-    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const ack = await sessionWithTeam();
+    const opened = everyone();
     facilitator.emit('PREPARATION_OPEN');
     await opened;
     const storedAfterFirst = store.data.get(sessionKey(ack.sessionId));
@@ -890,8 +913,25 @@ describe('PREPARATION_OPEN handler', () => {
     expect(error.code).toBe('NOT_IN_SESSION');
   });
 
-  it('persist failure → PREPARATION_OPEN_FAILED, no broadcast', async () => {
+  it('no populated team → CANNOT_OPEN_PREP (the prep-open guard), no broadcast', async () => {
     const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya'); // joined but never assigned to a team
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('CANNOT_OPEN_PREP');
+    expect(error.message).toMatch(/team/i);
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('persist failure → PREPARATION_OPEN_FAILED, no broadcast', async () => {
+    const ack = await sessionWithTeam();
     const realSet = store.setJSON.bind(store);
     store.setJSON = async (key, value) => {
       if (key === sessionKey(ack.sessionId)) throw new Error('redis down');
@@ -906,6 +946,94 @@ describe('PREPARATION_OPEN handler', () => {
 
     expect(error.code).toBe('PREPARATION_OPEN_FAILED');
     expect(facSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('PREPARATION_CANCEL handler', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let joiner: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, { redis: store, log: noopLog }),
+    );
+    facilitator = await server.connectClient();
+    joiner = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  // Drain the broadcast on both sockets per emit so no stale snapshot lingers.
+  const everyone = () =>
+    Promise.all([facilitator, joiner].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')));
+
+  /** Create a session, join + team-assign Maya, then open prep. Returns the ack. */
+  async function openedPrep(): Promise<{ sessionId: string; joinCode: string }> {
+    const ack = await createSession(facilitator);
+    let bc = everyone();
+    joiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+    const [, joined] = await bc;
+    bc = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(joined, 'Maya'), teamId: 'A', role: 'expert' });
+    await bc;
+    bc = everyone();
+    facilitator.emit('PREPARATION_OPEN');
+    await bc;
+    return ack;
+  }
+
+  it('happy path: preparation → lobby, roundNumber back to 0, ALL sockets receive SESSION_STATE', async () => {
+    const ack = await openedPrep();
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_CANCEL');
+
+    const [facState, joinerState] = await Promise.all([facStatePromise, joinerStatePromise]);
+    for (const state of [facState, joinerState]) {
+      expect(state.status).toBe('lobby');
+      expect(state.roundNumber).toBe(0);
+    }
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.status).toBe('lobby');
+    expect(stored.roundNumber).toBe(0);
+  });
+
+  it('non-facilitator → NOT_FACILITATOR, no broadcast', async () => {
+    await openedPrep();
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PREPARATION_CANCEL');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('not in preparation (still lobby) → CANNOT_CANCEL_PREP', async () => {
+    await createSession(facilitator);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_CANCEL');
+    const error = await errorPromise;
+    expect(error.code).toBe('CANNOT_CANCEL_PREP');
+  });
+
+  it('a connected socket that never entered a session → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('PREPARATION_CANCEL');
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_SESSION');
   });
 });
 
@@ -1027,9 +1155,15 @@ describe('ROUND_START handler', () => {
 
   it('preparation with no populated team → CANNOT_START_ROUND, state unchanged', async () => {
     const ack = await createSession(facilitator);
-    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('PREPARATION_OPEN');
-    await opened;
+    // The PREPARATION_OPEN guard now prevents reaching prep with no populated
+    // team via the handler, so seed that state directly — ROUND_START keeps its
+    // own NO_POPULATED_TEAM defense (a player can leave between open and start).
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), {
+      ...seeded,
+      status: 'preparation',
+      roundNumber: 1,
+    });
     const storedBefore = store.data.get(sessionKey(ack.sessionId));
 
     const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
