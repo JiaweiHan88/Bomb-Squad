@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 8-4 context created → ready-for-dev
+last_updated: 2026-06-13  # merged master (4-4/4-5/5-3 done) into worktree; story 8-4 context created → ready-for-dev
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -80,8 +80,8 @@ development_status:
   4-1-3d-bomb-scene-and-camera-rig: done
   4-2-chassis-and-bomb-metadata-rendering: done
   4-3-module-slots-and-solve-leds: done
-  4-4-diegetic-timer-lcd-with-client-extrapolation: backlog
-  4-5-strike-indicator-and-strike-roll-up: backlog
+  4-4-diegetic-timer-lcd-with-client-extrapolation: done
+  4-5-strike-indicator-and-strike-roll-up: done
   4-6-preparation-placeholder-bomb-view: backlog
   4-7-snapshot-sync-and-optimistic-render-at-60fps: backlog
   epic-4-retrospective: optional
@@ -90,7 +90,7 @@ development_status:
   epic-5: in-progress
   5-1-module-plugin-scaffold-sandbox-and-click-primitive: done
   5-2-expert-manual-viewer: done
-  5-3-wires-module-walking-skeleton: backlog
+  5-3-wires-module-walking-skeleton: done
   5-4-the-button-module: backlog
   5-5-passwords-module: backlog
   epic-5-retrospective: optional

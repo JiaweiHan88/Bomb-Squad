@@ -5,7 +5,9 @@ import type {
   PauseResumePayload,
   ErrorPayload,
 } from '@bomb-squad/shared';
+import type { TimerState } from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
+import { noteTimerBroadcast } from './serverClock.js';
 import { useGameStore } from '../store/gameStore.js';
 
 /**
@@ -32,6 +34,12 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   const onPaused = (payload: PauseResumePayload) => {
     console.info('[socket] PAUSED', payload);
   };
+  // Refresh the server-clock offset before storing the segment, so the first
+  // frame extrapolating the new TimerState already uses the new estimate.
+  const onTimerUpdate = (timer: TimerState) => {
+    noteTimerBroadcast(timer);
+    setTimer(timer);
+  };
   const onResumed = (payload: PauseResumePayload) => {
     console.info('[socket] RESUMED', payload);
   };
@@ -49,7 +57,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   socket.on('SESSION_STATE', setSession);
   socket.on('BOMB_INIT', setBomb);
   socket.on('MODULE_UPDATE', applyModuleUpdate);
-  socket.on('TIMER_UPDATE', setTimer);
+  socket.on('TIMER_UPDATE', onTimerUpdate);
   socket.on('STRIKE', setStrike);
 
   socket.on('BOMB_DEFUSED', onBombDefused);
@@ -69,7 +77,7 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     socket.off('SESSION_STATE', setSession);
     socket.off('BOMB_INIT', setBomb);
     socket.off('MODULE_UPDATE', applyModuleUpdate);
-    socket.off('TIMER_UPDATE', setTimer);
+    socket.off('TIMER_UPDATE', onTimerUpdate);
     socket.off('STRIKE', setStrike);
     socket.off('BOMB_DEFUSED', onBombDefused);
     socket.off('BOMB_EXPLODED', onBombExploded);
