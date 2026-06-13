@@ -57,7 +57,6 @@ export function createTimerScheduler(deps: TimerSchedulerDeps): TimerScheduler {
   const setTimer = deps.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
   const clearTimer = deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 
-  const effectDeps: TimerEffectDeps = { redis: deps.redis, io: deps.io, log: deps.log };
   const handles = new Map<string, TimerHandle>();
   const keyOf = (sessionId: string, teamId: TeamId): string => `${sessionId}:${teamId}`;
 
@@ -112,13 +111,13 @@ export function createTimerScheduler(deps: TimerSchedulerDeps): TimerScheduler {
         return;
       }
 
-      await onTimerExpired(effectDeps, sessionId, teamId);
+      await onTimerExpired(effectDeps, sessionId, teamId, now);
     } catch (err) {
       deps.log.error({ err, sessionId, teamId }, 'timer expiry fire failed');
     }
   }
 
-  return {
+  const scheduler: TimerScheduler = {
     now: () => clock(),
 
     arm: armTimer,
@@ -141,4 +140,16 @@ export function createTimerScheduler(deps: TimerSchedulerDeps): TimerScheduler {
 
     fireNow: fire,
   };
+
+  // The timeout ceremony cancels the resolving team's wake — its `timer` dep is
+  // this scheduler. `fire` already dropped the handle, so the cancel is a no-op
+  // on this path, but resolveRound's defuse/strike-3 callers rely on it.
+  const effectDeps: TimerEffectDeps = {
+    redis: deps.redis,
+    io: deps.io,
+    log: deps.log,
+    timer: scheduler,
+  };
+
+  return scheduler;
 }

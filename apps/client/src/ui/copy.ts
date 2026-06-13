@@ -63,3 +63,12 @@ export const PREP_DEFUSER_PLACEHOLDER =
 // Active round (Story 8.3) — interim non-defuser surfaces; 8.5+/Epic 9 own the real ones.
 export const ROUND_IN_PROGRESS = 'Round in progress.';
 export const WATCHING_THE_BOMB_ROOM = 'Watching the bomb room. Keep it down.';
+
+// Round resolution (Story 8.5) — all-caps, terminal punctuation (EXPERIENCE.md
+// round-result copy). DETONATED = 3rd strike; TIME EXPIRED = clock hit 0.
+export const RESULT_DEFUSED = 'DEFUSED.';
+export const RESULT_DETONATED = 'DETONATED.';
+export const RESULT_TIME_EXPIRED = 'TIME EXPIRED.';
+// Interim post-round surface — Story 8.6 (between-rounds + scoreboard preview)
+// replaces this. Deliberately NOT a scoreboard (AC-3: no mid-round scoreboard).
+export const BETWEEN_ROUNDS_PLACEHOLDER = 'Round over. Stand by for the next one.';

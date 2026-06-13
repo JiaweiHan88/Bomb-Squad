@@ -1,6 +1,10 @@
+---
+baseline_commit: 6416aa5a91f233c7a020179bbaeda09841bf0b23
+---
+
 # Story 8.5: Round Resolution
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -24,45 +28,45 @@ so that our result and time are recorded correctly.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Widen round/outcome contracts in `packages/shared` (AC: 1, 2)**
-  - [ ] Widen `RoundState.status` from the literal `'active'` to `'active' | 'defused' | 'exploded' | 'time-expired'` in `packages/shared/src/types/round.ts`. Update the type's doc comment (it currently says "round resolution (Story 8.5) widens it" — fulfil that note).
-  - [ ] Add a `RoundOutcome` type (`'defused' | 'exploded' | 'time-expired'`) co-located in `round.ts` and export it from the shared barrel (`packages/shared/src/index.ts` / `types/index.ts`) so server + client can name outcomes without re-deriving them.
-  - [ ] Do NOT add new socket events: `BOMB_DEFUSED` and `BOMB_EXPLODED` already exist in `ServerToClientEvents` with `RoundEndPayload = { teamId, elapsedMs }`. Reuse them. (`TIME EXPIRED` vs `DETONATED` is a client-side label keyed off which event fired + round status; it does NOT need a third event.)
-  - [ ] Run `tsc --noEmit` across the workspace — widening `RoundState.status` may surface exhaustiveness gaps at existing call sites; fix them.
+- [x] **Task 1 — Widen round/outcome contracts in `packages/shared` (AC: 1, 2)**
+  - [x] Widen `RoundState.status` from the literal `'active'` to `'active' | 'defused' | 'exploded' | 'time-expired'` in `packages/shared/src/types/round.ts`. Update the type's doc comment (it currently says "round resolution (Story 8.5) widens it" — fulfil that note).
+  - [x] Add a `RoundOutcome` type (`'defused' | 'exploded' | 'time-expired'`) co-located in `round.ts` and export it from the shared barrel (`packages/shared/src/index.ts` / `types/index.ts`) so server + client can name outcomes without re-deriving them.
+  - [x] Do NOT add new socket events: `BOMB_DEFUSED` and `BOMB_EXPLODED` already exist in `ServerToClientEvents` with `RoundEndPayload = { teamId, elapsedMs }`. Reuse them. (`TIME EXPIRED` vs `DETONATED` is a client-side label keyed off which event fired + round status; it does NOT need a third event.)
+  - [x] Run `tsc --noEmit` across the workspace — widening `RoundState.status` may surface exhaustiveness gaps at existing call sites; fix them. (No gaps surfaced — `status` was only ever constructed as `'active'`, never matched exhaustively.)
 
-- [ ] **Task 2 — `resolveRound` server effect (the resolution ceremony) (AC: 1, 2, 4, 5)**
-  - [ ] Create `apps/server/src/round/resolveRound.ts` exporting `async function resolveRound(deps, sessionId, teamId, outcome, elapsedMs)`. This is the single ceremony all three outcome paths funnel through. Deps shape mirrors `TimerEffectDeps` plus the scheduler: `{ redis, io, log, timer }` (so it can cancel the wake).
-  - [ ] **Once-only guard (AC-4):** load `RoundState` (`roundKey(sessionId, roundNumber)` — see keyspace note) first; if its `status !== 'active'`, log and return (already resolved). This is the idempotency fence.
-  - [ ] **Persist-then-emit ordering (follow 8.4's `onTimerExpired` posture):** (a) cancel the scheduler wake (`deps.timer.cancel(sessionId, teamId)`) and delete the team timer key (`del(timerKey(sessionId, teamId))`); (b) record `elapsedMs` into the team's `TeamState.cumulativeTimeMs` and persist `SessionState`; (c) set `RoundState.status` to the resolved outcome and persist; (d) THEN emit `BOMB_DEFUSED` (outcome `'defused'`) or `BOMB_EXPLODED` (outcomes `'exploded'`/`'time-expired'`) to `teamRoom(sessionId, teamId)`. Clearing the live clock before announcing prevents a stray strike/re-arm from finding a "live" expired timer and double-firing (the exact reasoning documented in `onTimerExpired.ts`).
-  - [ ] **`cumulativeTimeMs` update must be immutable** — spread a new `TeamState`/`SessionState`, never mutate in place (project rule). Guard the team's existence (`session.teams[teamId]` may be undefined per `Partial<Record<TeamId, TeamState>>`).
-  - [ ] Keep `resolveRound` free of `setTimeout`/scene-hold logic — the 2s/3s holds are client-side presentation (Task 5). The server records and announces; it does not block on the cinematic.
-  - [ ] **Do NOT** flip `SessionState.status` to `'between-rounds'` blindly here without reconciling with Story 8.6's between-rounds entry. Settle the seam: 8.5 records the outcome and emits the round-end event; the explicit `active → between-rounds` status flip + scoreboard belongs to 8.6. If 8.6 is not yet merged, flip `SessionState.status` to `'between-rounds'` here (it is the correct next phase and Story 8.6 will build on it) and leave a `// Story 8.6: scoreboard preview + ready gate hooks here` marker — but never emit `SCOREBOARD` (AC-3).
+- [x] **Task 2 — `resolveRound` server effect (the resolution ceremony) (AC: 1, 2, 4, 5)**
+  - [x] Create `apps/server/src/round/resolveRound.ts` exporting `async function resolveRound(deps, sessionId, teamId, outcome, now)`. This is the single ceremony all three outcome paths funnel through. Deps `{ redis, io, log, timer }` (`timer: Pick<TimerScheduler, 'cancel'>`). NOTE: takes `now` (not a pre-computed `elapsedMs`) so the displayed-elapsed reconciliation (Task 4) has ONE definition computed inside the ceremony.
+  - [x] **Once-only guard (AC-4):** the team's LIVE TIMER KEY is the per-team fence (load it first; null → logged no-op). SETTLED SEAM: a single `RoundState` is shared by both racing teams, so its round-level `status` cannot express per-team resolution — using it as the fence would block team B after team A resolves. The timer key is per-team, deleted on first resolution, and matches the existing `onTimerExpired`/`escalateOnStrike` desync posture. `RoundState.status` is still recorded as the round-level outcome (last-writer-wins across teams). Documented in `round.ts` + `resolveRound.ts` headers.
+  - [x] **Persist-then-emit ordering:** (a) `deps.timer.cancel` + `del(timerKey)`; (b) record `elapsedMs` into `cumulativeTimeMs` + flip session toward between-rounds + persist; (c) set `RoundState.status` + persist; (d) emit `BOMB_DEFUSED`/`BOMB_EXPLODED` to `teamRoom`.
+  - [x] **`cumulativeTimeMs` update is immutable** — spread new `TeamState`/`SessionState`. Team existence guarded (`session.teams[teamId]` undefined → logged no-op).
+  - [x] No `setTimeout`/scene-hold logic in `resolveRound` — holds are client-side (Task 5).
+  - [x] Flip `SessionState.status` to `'between-rounds'` (8.6 not yet merged) only from `'active'`; left a `// Story 8.6` marker + the two-team caveat + the `cancelPreparation`-returns-to-lobby follow-up note. Never emit `SCOREBOARD` (AC-3).
 
-- [ ] **Task 3 — Wire the three trigger paths (AC: 1, 2)**
-  - [ ] **Timeout path (already exists):** replace the `// Story 8.5: round-resolution ceremony hooks here` block in `apps/server/src/timer/onTimerExpired.ts`. Today it deletes the timer key and emits `BOMB_EXPLODED` directly. Refactor so the timeout path calls `resolveRound(deps, sessionId, teamId, 'time-expired', elapsedMs)` instead — moving the `del` + emit into the ceremony so all three outcomes share one code path. Keep the existing "displayed elapsed = `timerMs`" decision but reconcile per AC-5 (Task 4).
-  - [ ] **3rd-strike path:** `escalateOnStrike` early-returns at `strikes >= 3` (it deliberately does not escalate on the terminal strike). 8.5 owns what happens on strike 3. Add a sibling entry point — e.g. extend the strike handling so that when the post-reduce strike total is `3`, the caller invokes `resolveRound(deps, sessionId, teamId, 'exploded', elapsedMs)` instead of `escalateOnStrike`. Because there is no server-side `MODULE_INTERACT` handler in the repo yet (see Cross-Story Seam), expose this as a named function (`onThirdStrike` or fold the branch into a small `applyStrike` orchestrator) and exercise it directly via tests, exactly as 8.4 did with `escalateOnStrike`.
-  - [ ] **Defuse path:** expose `onBombDefused(deps, sessionId, teamId, elapsedMs)` (or fold into the same orchestrator) that calls `resolveRound(..., 'defused', ...)`. The trigger is `BombState.solved` transitioning `false → true` after a `bombReducer` reduce. The reduce + detection happens in the (not-yet-built) interaction handler — 8.5 provides the function and the detection contract; Story 4.7 wires the live call site (coordinate — see Cross-Story Seam). Exercise via tests now.
+- [x] **Task 3 — Wire the three trigger paths (AC: 1, 2)**
+  - [x] **Timeout path:** `onTimerExpired` now delegates to `resolveRound(..., 'time-expired', now)`; the `del` + emit moved into the ceremony. Scheduler passes `now` + itself as the `timer` dep. The 8.5 hook-marker block is gone.
+  - [x] **3rd-strike path:** exported `onThirdStrike(deps, sessionId, teamId, now)` → `resolveRound(..., 'exploded', ...)`. `escalateOnStrike`'s strike-3 early-return is unchanged; 4.7's interaction handler calls `onThirdStrike` instead of `escalateOnStrike` at the terminal strike. Exercised by tests.
+  - [x] **Defuse path:** exported `onBombDefused(deps, sessionId, teamId, now)` → `resolveRound(..., 'defused', ...)`. 4.7 wires the live call site (no `MODULE_INTERACT` handler in repo yet — see Completion Notes for the landed-seam status). Exercised by tests.
 
-- [ ] **Task 4 — Honest elapsed-time reconciliation (AC: 5)**
-  - [ ] **Defuse elapsed:** real elapsed = wall-clock since the timer's first segment began. The clean computation is from the live `TimerState`: `displayedElapsed = timerMs - displayedRemaining(timer, now)`, using the same per-segment formula in `timerCore`/`types/timer.ts` (`remaining = remainingAtStart - (now - startedAt) * speedMultiplier`). Reuse the existing `timerCore` helper (`displayedRemaining`/equivalent) — do NOT re-derive the segment math (check `apps/server/src/timer/timerCore.ts` for the exact exported helper name before writing your own).
-  - [ ] **Timeout elapsed:** displayed clock is 0 by definition, so displayed elapsed = `config.timerMs` (8.4 decision 6, preserved). Confirm this is what gets summed — and that it is consistent with the defuse formula above (both express *displayed* elapsed, so per-round times are comparable for scoring).
-  - [ ] **Strike-3 elapsed:** time at the moment of failure = displayed elapsed at the strike instant, computed via the same `timerCore` helper from the current (rebased) `TimerState`.
-  - [ ] Document the chosen convention in a comment so Story 8.10 (scoring) sums a single consistent definition. Resolves deferred-work item: *"`elapsedMs` at expiry is the configured `timerMs`, not real wall-clock … Story 8.5 must reconcile real-vs-displayed before summing into `cumulativeTimeMs`"*.
+- [x] **Task 4 — Honest elapsed-time reconciliation (AC: 5)**
+  - [x] **Single definition:** `elapsedMs = max(0, config.timerMs - remainingMs(timer, now))`, computed once inside `resolveRound` reusing `timerCore.remainingMs` (no re-derived segment math).
+  - [x] **Timeout elapsed:** `remainingMs` clamps to 0 at/after the deadline → displayed elapsed = `timerMs` (8.4 decision 6 preserved), and it falls out of the SAME formula as defuse/strike-3.
+  - [x] **Strike-3 elapsed:** displayed elapsed at the strike instant from the rebased `TimerState` — same formula.
+  - [x] Convention documented in `resolveRound.ts` header for Story 8.10. Resolves the `deferred-work.md` "elapsedMs at expiry is timerMs, not real wall-clock" item; the strike-accelerated test proves no over-count.
 
-- [ ] **Task 5 — Client resolution presentation (AC: 1, 2, 3)**
-  - [ ] Replace the `console.info` stubs for `onBombDefused`/`onBombExploded` in `apps/client/src/net/bindServerEvents.ts` with handlers that drive a resolution UI state (add a `resolution` field to `gameStore` — e.g. `{ outcome: 'defused' | 'exploded' | 'time-expired'; elapsedMs: number } | null`). Distinguish DETONATED vs TIME EXPIRED on the client by reading the current `RoundState`/`SESSION_STATE` (or carry it via a follow-up `SESSION_STATE` broadcast). If the round status isn't readily available client-side, label `BOMB_EXPLODED` generically per the simplest correct mapping and note the limitation; do not invent a new event.
-  - [ ] Render the result banner in the bomb scene area: **"DEFUSED."** (all-caps, terminal punctuation — EXPERIENCE.md), all LEDs green, ~2s hold, then transition. **"DETONATED."** / **"TIME EXPIRED."** — red scene tint, ~3s hold, then transition. No replay/freeze-frame in V1 (EXPERIENCE.md §"Detonated"). SFX cues (fanfare / explosion bass) are Epic 10 polish — wire a no-op/placeholder hook, do not block on audio assets.
-  - [ ] **AC-3 enforcement:** the scoreboard surface must NOT appear while the round is active or during the hold; transition target is the between-rounds surface (Story 8.6). If 8.6's surface doesn't exist yet, transition to the existing post-round placeholder and leave a marker.
-  - [ ] R3F discipline: the red tint / LED-green changes are rendering-only and must read from store via `getState()` patterns already established (4.4/4.5); no game logic in components; dispose any added Three.js material/objects on unmount.
+- [x] **Task 5 — Client resolution presentation (AC: 1, 2, 3)**
+  - [x] `gameStore` gains `resolution: { outcome; elapsedMs } | null` + `setResolution`; `setBomb` clears it (new round). `bindServerEvents`: `onBombDefused` → `'defused'`; `onBombExploded` → `'exploded'` if snapshot `strikes >= 3` else `'time-expired'` (simplest correct client mapping; limitation noted in code — depends on 4.7 broadcasting the terminal strike count). `onScoreboard` left a stub (8.6).
+  - [x] `ResolutionBanner.tsx` (rendering-only DOM overlay) renders **"DEFUSED."** (green, 2s hold) / **"DETONATED."** / **"TIME EXPIRED."** (red tint, 3s hold), then an interim post-round surface. Defuse LEDs are already green (all modules solved → 4.3 solve LEDs). SFX = no-op `playResolutionCue` placeholder (Epic 10). Wired into `ActiveRound` as an overlay across all role surfaces.
+  - [x] **AC-3:** no scoreboard surface exists on this path; banner self-hides while `resolution === null`; interim transition target marked for 8.6.
+  - [x] R3F discipline: banner is a plain DOM overlay (no Three.js objects added/to-dispose); no game logic in the component (outcome comes from the store).
 
-- [ ] **Task 6 — Tests (AC: 1–5)**
-  - [ ] `apps/server/src/round/__tests__/resolveRound.test.ts`: defuse records `cumulativeTimeMs` + emits `BOMB_DEFUSED` + cancels wake + deletes timer key + sets `RoundState.status='defused'`; timeout → `'time-expired'` + `BOMB_EXPLODED`; 3rd strike → `'exploded'` + `BOMB_EXPLODED`. **Idempotency (AC-4):** second call on an already-resolved round is a no-op (no second emit, no double time). **No-session / no-team / missing timer** desync paths are logged no-ops, never throw (mirror `escalateOnStrike`'s desync handling).
-  - [ ] Elapsed-time reconciliation tests (AC-5): defuse mid-round computes displayed elapsed from `TimerState`; timeout sums `timerMs`; a strike-accelerated round does not over-count. Use injected `now`/clock — **never `Date.now()` or `setTimeout` in tests** (project rule).
-  - [ ] Update `onTimerExpired` test (`apps/server/src/timer/__tests__/`) to assert it now delegates to `resolveRound` (records time + sets status), not just emits.
-  - [ ] Client: assert `bindServerEvents` sets the resolution store state on `BOMB_DEFUSED`/`BOMB_EXPLODED` and that no scoreboard renders mid-round (AC-3). Keep R3F components to rendering-only (no logic tests — project testing boundary).
+- [x] **Task 6 — Tests (AC: 1–5)**
+  - [x] `apps/server/src/round/__tests__/resolveRound.test.ts`: defuse / timeout / 3rd-strike outcomes (cumulativeTimeMs + event + cancel + timer-key del + RoundState.status); idempotency (late strike after defuse = no-op); desync no-ops (no timer / no session / no round / unknown team) never throw; named wrappers.
+  - [x] Elapsed reconciliation tests (AC-5): strike-accelerated round records displayed (not wall) elapsed and ≤ `timerMs`; clamp-at-0; payload matches recorded value. Injected `now` only — no `Date.now()`/`setTimeout`.
+  - [x] Updated the timeout path tests (`timerScheduler.test.ts` + the `sessionHandlers.test.ts` ROUND_START→expiry integration test) to assert delegation to `resolveRound` (records time + flips status), not just an emit.
+  - [x] Client: `apps/client/src/net/__tests__/resolutionBinding.test.ts` asserts the binding sets resolution state for DEFUSED/EXPLODED (both labels), resolution stays null mid-round (AC-3), SCOREBOARD never touches it, and `setBomb` clears a stale resolution.
 
 - [ ] **Task 7 — Human verification (per project rule [[human-verification-ac-rule]])**
-  - [ ] Jay verifies interactively: run a round to (a) full defuse → sees "DEFUSED." + 2s hold + green LEDs; (b) 3rd strike → "DETONATED." + red tint + 3s hold; (c) timer expiry → "TIME EXPIRED." + red tint + 3s hold. Scoreboard never flashes mid-round. Confirm recorded round time looks right. Not done until his observed result is in Completion Notes. Verification caveat — see [[timer-verification-tsx-watch-gotcha]]: run the server WITHOUT `tsx watch` so in-memory expiry wakes survive; the timeout path depends on them.
+  - [ ] Jay verifies interactively: run a round to (a) full defuse → sees "DEFUSED." + 2s hold + green LEDs; (b) 3rd strike → "DETONATED." + red tint + 3s hold; (c) timer expiry → "TIME EXPIRED." + red tint + 3s hold. Scoreboard never flashes mid-round. Confirm recorded round time looks right. Not done until his observed result is in Completion Notes. Verification caveat — see [[timer-verification-tsx-watch-gotcha]]: run the server WITHOUT `tsx watch` so in-memory expiry wakes survive; the timeout path depends on them. **PENDING — automated coverage is green; awaiting Jay's observed result. NOTE: defuse and 3rd-strike paths have no live server caller until Story 4.7 wires the `MODULE_INTERACT` interaction handler to `onBombDefused`/`onThirdStrike`; only the TIME EXPIRED path is end-to-end runnable today. Defuse/DETONATED interactive verification unblocks once 4.7 lands.**
 
 ## Dev Notes
 
@@ -143,10 +147,46 @@ Consequences for 8.5:
 
 ### Agent Model Used
 
+claude-opus-4-8 (Claude Code, gds-dev-story workflow)
+
 ### Debug Log References
+
+- One pre-existing 8.4 integration test (`sessionHandlers.test.ts` "authoritative expiry … status stays active (8.5 fence)") asserted the timeout path leaves `SessionState.status === 'active'` — that was the explicit 8.4 fence documenting "8.5 will flip it." Updated to assert the 8.5 ceremony now records `cumulativeTimeMs` and flips to `'between-rounds'`. No production regression — the assertion was a forward-reference to this story.
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- **Idempotency fence (settled seam, deviates from the literal spec):** The story's Task 2 said "load `RoundState`; if `status !== 'active'`, return — this is the idempotency fence." But a single `RoundState` is shared by BOTH racing teams (one `roundKey(sessionId, roundNumber)`, one `status` field — confirmed in `startRound.ts`), so a round-level status cannot express per-team resolution and would block team B after team A resolves. AC-4 requires "resolves exactly once **per team**." Resolved by using the **team's live timer key** as the per-team once-only fence (load first; null → logged no-op) — it exists once per active team and is deleted on first resolution, matching the existing `onTimerExpired`/`escalateOnStrike` desync posture. `RoundState.status` is still recorded as the round-level outcome (last-writer-wins across teams); the authoritative per-team result is the emitted event + that team's `cumulativeTimeMs`, exactly as the `ScoreboardPayload` contract already states. Documented in `round.ts` and `resolveRound.ts` headers. A future per-team round-outcome model (8.6/8.10) may widen `RoundState`.
+- **`resolveRound` takes `now`, not a pre-computed `elapsedMs`:** so the displayed-elapsed reconciliation (AC-5) has ONE definition computed inside the ceremony from the live `TimerState` via `timerCore.remainingMs`. At timeout `remainingMs` clamps to 0 → displayed elapsed = `timerMs` (preserves 8.4 decision 6); under strikes the accelerated countdown is baked into `remainingMs` so per-round time never over-counts (proven by the strike-accelerated test: ×1.5625 round records 156 250 ms displayed at 100 000 ms wall, ≤ `timerMs`). The emitted payload and the recorded `cumulativeTimeMs` are the same value.
+- **Cross-story seam — which story lands the call sites:** there is still NO server-side `MODULE_INTERACT` handler in the repo (only `sessionHandlers.ts` + `manualHandlers.ts`). 8.5 ships `resolveRound` + the named entry points `onBombDefused` / `onThirdStrike`, fully unit-tested. The **TIME EXPIRED** path is wired end-to-end (the scheduler is its real caller). **Story 4.7 must land the defuse + 3rd-strike call sites:** after reducing a `MODULE_INTERACT`, call `onBombDefused` when `BombState.solved` flips false→true, and `onThirdStrike` (instead of `escalateOnStrike`) when the new strike total reaches 3. 8.5 did NOT land those call sites (the handler doesn't exist yet).
+- **Deferred-work items:** (1) "elapsedMs at expiry is `timerMs`, not real wall-clock" → RESOLVED by the single displayed-elapsed definition. (2) "`cancel`/`cancelSession` unwired for defuse/round-end" → RESOLVED: `resolveRound` calls `deps.timer.cancel`. (3) "`cancelPreparation` hard-codes return to `'lobby'`" → NOT in 8.5 scope; flagged as an 8.6 follow-up in a `resolveRound.ts` comment (8.5 makes `'between-rounds'` reachable; 8.6 owns the `between-rounds → preparation` cancel restore).
+- **Client DETONATED vs TIME EXPIRED:** derived from the non-authoritative bomb snapshot strike count (`strikes >= 3` → DETONATED, else TIME EXPIRED). No third socket event (Task 1). Limitation noted in `bindServerEvents.ts`: until 4.7 broadcasts the terminal strike-3 bomb state, a 3rd-strike loss may fall back to the TIME EXPIRED label. Acceptable for V1.
+- **Validation:** `pnpm typecheck` clean (the project's quality gate — no ESLint configured; the husky pre-commit runs `tsc --noEmit`). Full suite green: shared 136, client 195 (incl. 8 new resolution-binding tests), server 289 (incl. new `resolveRound.test.ts`) = 620 tests.
+- **Human verification: PENDING** (Task 7). Automated coverage is complete and green, but per [[human-verification-ac-rule]] the story is not "done" until Jay's observed result is recorded here. Only the TIME EXPIRED path is interactively runnable today; defuse + DETONATED need Story 4.7's interaction handler. Run the server WITHOUT `tsx watch` ([[timer-verification-tsx-watch-gotcha]]) so the in-memory expiry wake survives.
 
 ### File List
+
+**Shared**
+- `packages/shared/src/types/round.ts` — widened `RoundState.status` to `'active' | RoundOutcome`; added `RoundOutcome` type; documented the round-level-vs-per-team status seam.
+- `packages/shared/src/types/index.ts` — export `RoundOutcome`.
+
+**Server**
+- `apps/server/src/round/resolveRound.ts` — NEW: `resolveRound` ceremony + `onBombDefused` / `onThirdStrike` entry points.
+- `apps/server/src/round/__tests__/resolveRound.test.ts` — NEW: full ceremony / idempotency / desync / elapsed-reconciliation / wrapper coverage.
+- `apps/server/src/timer/onTimerExpired.ts` — refactored to delegate to `resolveRound('time-expired', now)`; `TimerEffectDeps` now aliases `ResolveRoundDeps`; takes `now`.
+- `apps/server/src/timer/timerScheduler.ts` — `fire` passes `now` to `onTimerExpired`; `effectDeps` now includes the scheduler as the `timer` dep (built after the scheduler object).
+- `apps/server/src/timer/__tests__/timerScheduler.test.ts` — `seedSession` seeds an active round + team A + `RoundState`; timeout test asserts the 8.5 ceremony (time recorded + status flipped).
+- `apps/server/src/handlers/__tests__/sessionHandlers.test.ts` — updated the ROUND_START→expiry integration test for the 8.5 ceremony.
+
+**Client**
+- `apps/client/src/store/gameStore.ts` — `resolution` field + `setResolution`; `setBomb` clears resolution on a new round; `ResolutionState` type.
+- `apps/client/src/net/bindServerEvents.ts` — `onBombDefused`/`onBombExploded` drive `setResolution` (DETONATED vs TIME EXPIRED label derivation); `onScoreboard` left a stub.
+- `apps/client/src/ui/ResolutionBanner.tsx` — NEW: rendering-only result-banner overlay (holds + tint + interim post-round surface + Epic-10 SFX placeholder).
+- `apps/client/src/ui/ActiveRound.tsx` — overlay `ResolutionBanner` across all role surfaces.
+- `apps/client/src/ui/copy.ts` — `RESULT_DEFUSED` / `RESULT_DETONATED` / `RESULT_TIME_EXPIRED` / `BETWEEN_ROUNDS_PLACEHOLDER`.
+- `apps/client/src/net/__tests__/resolutionBinding.test.ts` — NEW: binding + store resolution tests.
+
+## Change Log
+
+| Date       | Change                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------------- |
+| 2026-06-13 | Story 8.5 implemented: `resolveRound` ceremony (defuse / 3rd-strike / timeout) with per-team timer-key idempotency fence, honest displayed-elapsed reconciliation, `RoundState`/`RoundOutcome` contract widening, timeout path delegated to the ceremony, and the client result banner. 620 tests green; `tsc --noEmit` clean. Status → review (human verification pending; defuse/strike-3 live call sites land with Story 4.7). |
