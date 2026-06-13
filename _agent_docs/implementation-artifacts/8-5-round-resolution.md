@@ -4,7 +4,7 @@ baseline_commit: 6416aa5a91f233c7a020179bbaeda09841bf0b23
 
 # Story 8.5: Round Resolution
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -65,8 +65,8 @@ so that our result and time are recorded correctly.
   - [x] Updated the timeout path tests (`timerScheduler.test.ts` + the `sessionHandlers.test.ts` ROUND_START→expiry integration test) to assert delegation to `resolveRound` (records time + flips status), not just an emit.
   - [x] Client: `apps/client/src/net/__tests__/resolutionBinding.test.ts` asserts the binding sets resolution state for DEFUSED/EXPLODED (both labels), resolution stays null mid-round (AC-3), SCOREBOARD never touches it, and `setBomb` clears a stale resolution.
 
-- [ ] **Task 7 — Human verification (per project rule [[human-verification-ac-rule]])**
-  - [ ] Jay verifies interactively: run a round to (a) full defuse → sees "DEFUSED." + 2s hold + green LEDs; (b) 3rd strike → "DETONATED." + red tint + 3s hold; (c) timer expiry → "TIME EXPIRED." + red tint + 3s hold. Scoreboard never flashes mid-round. Confirm recorded round time looks right. Not done until his observed result is in Completion Notes. Verification caveat — see [[timer-verification-tsx-watch-gotcha]]: run the server WITHOUT `tsx watch` so in-memory expiry wakes survive; the timeout path depends on them. **PENDING — automated coverage is green; awaiting Jay's observed result. NOTE: defuse and 3rd-strike paths have no live server caller until Story 4.7 wires the `MODULE_INTERACT` interaction handler to `onBombDefused`/`onThirdStrike`; only the TIME EXPIRED path is end-to-end runnable today. Defuse/DETONATED interactive verification unblocks once 4.7 lands.**
+- [x] **Task 7 — Human verification (per project rule [[human-verification-ac-rule]])**
+  - [x] Jay verified interactively on the full Docker stack (server on plain `tsx`, not `tsx watch`, per [[timer-verification-tsx-watch-gotcha]]) at `https://localhost`: defuse / 3rd-strike / timer-expiry all resolve with the correct banner (DEFUSED. / DETONATED. / TIME EXPIRED.), holds and red/green treatment correct, no scoreboard mid-round, recorded round time looks right. The two 4.7-follow-up fixes confirmed: the timer LCD freezes on resolution (stops counting behind the banner) and the result overlay no longer flickers on browser scroll. **VERIFIED PASS — 2026-06-13.**
 
 ### Review Findings
 
@@ -212,3 +212,4 @@ claude-opus-4-8 (Claude Code, gds-dev-story workflow)
 | 2026-06-13 | Story 8.5 implemented: `resolveRound` ceremony (defuse / 3rd-strike / timeout) with per-team timer-key idempotency fence, honest displayed-elapsed reconciliation, `RoundState`/`RoundOutcome` contract widening, timeout path delegated to the ceremony, and the client result banner. 620 tests green; `tsc --noEmit` clean. Status → review (human verification pending; defuse/strike-3 live call sites land with Story 4.7). |
 | 2026-06-13 | Code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All 5 ACs confirmed satisfied. 2 patches applied: (1) per-session serialization in `resolveRound` to close a concurrent two-team `cumulativeTimeMs` lost-update race (+ regression test); (2) `ResolutionBanner` resets `held` on every outcome change. 1 finding deferred to 8.6 (between-rounds status flip strands the banner on re-sync); 4 items deferred to `deferred-work.md`; 6 dismissed. `pnpm typecheck` clean; server 103 + client 195 affected tests green. Status → in-progress (awaiting Jay's Task 7 interactive verification per human-verification rule). |
 | 2026-06-13 | Addressed 2 defects logged during Story 4.7's interactive verification (deferred to 8.5): (1) `TimerLcd` now freezes — holds the remaining captured on the first resolved frame instead of extrapolating via `serverNow()` while `resolution !== null`, clearing on the next `BOMB_INIT`; (2) `ResolutionBanner` overlay layers promoted to their own GPU compositor layer (`transform-gpu will-change-transform`) to stop the scroll-repaint flicker over the WebGL canvas. `pnpm typecheck` clean; client 204 tests green. |
+| 2026-06-13 | Task 7 human verification PASSED (Jay, full Docker stack at `https://localhost`): all three resolution paths correct, LCD freezes on resolve, no scroll flicker. Status → done. |
