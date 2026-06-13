@@ -4,7 +4,7 @@ baseline_commit: 8eb17a5143cd9c96fcfe4576eb790322f3b28b94
 
 # Story 3.1: Role-Scoped LiveKit Token Minting
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -146,6 +146,26 @@ Per the Sprint 3 analysis: the only shared-file contention is `packages/shared/s
 - [Source: apps/server/src/config/env.ts] — `Config` exposes validated `LIVEKIT_URL/API_KEY/API_SECRET/TURN_TTL`.
 - [Source: apps/server/src/handlers/sessionHandlers.ts:257-308] — `register*Handlers` + ack-callback pattern to mirror.
 - [Source: livekit-server-sdk v2.15.x — AccessToken/addGrant/`toJwt()` (async)] — https://docs.livekit.io/reference/server-sdk-js/classes/AccessToken.html
+
+## Review Findings
+
+_Code review 2026-06-13 (gds-code-review, 3 adversarial layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor). 1 decision → patched, 5 deferred, 6 dismissed as noise. Full server suite 187/187, tsc clean after patch._
+
+### Resolved (decision → patch applied)
+
+- [x] [Review][Patch] **Facilitator can never receive a voice token** [`apps/server/src/voice/mintToken.ts`] — `resolveVoiceScope` classified `facilitator` as a `BOMB_ROOM_ROLES` member requiring a `teamId`, but `createSession.ts:42` / `assignTeam.ts:38` mean a facilitator's `teamId` is structurally always `undefined`, so every facilitator `VOICE_TOKEN` request was denied with `VOICE_SCOPE_UNAVAILABLE`. _(Found by: edge + auditor; severity High.)_ **Decision (Jay, 2026-06-13):** facilitator's baseline voice room is the **Spectator Lounge** alongside spectators, but with **`canPublish: true`** (host narration); spectators stay listen-only (`canPublish:false`). The on-demand push-to-talk **into a team Bomb Room** is a separate mechanism deferred to its own story. **Fix:** removed `facilitator` from `BOMB_ROOM_ROLES`; `resolveVoiceScope` now scopes `spectator | facilitator` → `spectator-lounge:{sessionId}` with `canPublish = (role === 'facilitator')`. Added unit tests (facilitator scope + no-throw without team; the no-team throw test now uses `expert`) and a handler integration test (facilitator → lounge, `canPublish:true`, no team needed). Suites green.
+
+### Deferred → follow-up story: Facilitator PTT bridge
+
+- [ ] [Review][Defer] **Facilitator on-demand push-to-talk into a team's Bomb Room** — the facilitator must be able to talk into a specific defusing team's Bomb Room on demand (PTT), on top of their Spectator Lounge baseline. This is a multi-room/second-grant mechanism that exceeds 3.1's "mint exactly one room" model. Needs its own story (token-switch or additional grant + client PTT UI). — deferred, new scope
+
+### Deferred (real, not actionable now)
+
+- [x] [Review][Defer] **No lower-bound guard on minted TTL** [`apps/server/src/handlers/voiceHandlers.ts:503`] — `Math.min(TURN_TTL, MAX_VOICE_TOKEN_TTL_S)` caps the upper bound only; a `TURN_TTL` of `0`/negative would mint an already-expired token. Mitigated upstream: `config/env.ts:94` already rejects `TURN_TTL <= 0` at parse time, so unreachable in production; defense-in-depth in the pure module would be belt-and-suspenders. — deferred, mitigated upstream
+- [x] [Review][Defer] **Room names interpolate `sessionId`/`teamId` with no delimiter escaping** [`apps/server/src/voice/mintToken.ts:814-819`] — `bomb-room:${sessionId}:${teamId}` uses `:` as the structural delimiter; a `sessionId` or `teamId` containing `:` would break room-namespace isolation (a security boundary). Not triggerable today (ids are UUID/join-code), but the mint function is the documented single authority for topology and validates none of its inputs. — deferred, latent
+- [x] [Review][Defer] **Error-path logging serializes the full `err` object** [`apps/server/src/handlers/voiceHandlers.ts:575`] — `deps.log.error({ err, socketId }, ...)` in the catch. `mintVoiceToken` constructs `AccessToken` with `apiSecret`; if the SDK ever throws an error embedding signing material, it would be logged. The leak-guard test only checks the *token* is absent, never the secret. Low likelihood. — deferred, speculative
+- [x] [Review][Defer] **No rate-limiting / de-dup on `VOICE_TOKEN`** [`apps/server/src/handlers/voiceHandlers.ts:506`] — each request is an unbounded Redis read + a `jose` asymmetric signature; a socket can hammer it. Project-wide concern (other handlers are likewise unthrottled), not specific to this change; AC does not require a limit. — deferred, project-wide
+- [x] [Review][Defer] **Authority rests on `socket.data.sessionId` pointer + `socket.id` key with no cross-check** [`apps/server/src/handlers/voiceHandlers.ts:523-541`] — a stale pointer or reused `socket.id` could resolve a player row in the wrong/foreign session and mint a mis-scoped token. Inherited architectural tradeoff (the codebase already uses `socket.id` as the player identity everywhere); not introduced by this story. — deferred, pre-existing architecture
 
 ## Dev Agent Record
 

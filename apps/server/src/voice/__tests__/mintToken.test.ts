@@ -72,12 +72,35 @@ describe('resolveVoiceScope', () => {
     expect(grant.canSubscribe).toBe(true);
   });
 
+  it('scopes a facilitator to the Spectator Lounge with publish (host narration)', () => {
+    const { room, grant } = resolveVoiceScope({
+      identity: 'p-fac',
+      role: 'facilitator',
+      sessionId: 'sess1',
+    });
+    // Baseline room is the lounge alongside spectators, but the facilitator may
+    // publish (narrate); the on-demand Bomb Room PTT bridge is a later story.
+    expect(room).toBe('spectator-lounge:sess1');
+    expect(grant).toMatchObject({
+      roomJoin: true,
+      room: 'spectator-lounge:sess1',
+      canPublish: true,
+      canSubscribe: true,
+    });
+  });
+
+  it('does not require a teamId for a facilitator (lounge-scoped, never throws)', () => {
+    expect(() =>
+      resolveVoiceScope({ identity: 'p5', role: 'facilitator', sessionId: 'sess1' }),
+    ).not.toThrow();
+  });
+
   it('throws VoiceScopeError for a Bomb Room role with no team', () => {
     expect(() =>
       resolveVoiceScope({ identity: 'p4', role: 'defuser', sessionId: 'sess1' }),
     ).toThrow(VoiceScopeError);
     expect(() =>
-      resolveVoiceScope({ identity: 'p5', role: 'facilitator', sessionId: 'sess1' }),
+      resolveVoiceScope({ identity: 'p6', role: 'expert', sessionId: 'sess1' }),
     ).toThrow(VoiceScopeError);
   });
 });

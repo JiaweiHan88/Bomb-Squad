@@ -136,6 +136,23 @@ describe('VOICE_TOKEN handler', () => {
     expect(claims.video?.canSubscribe).toBe(true);
   });
 
+  it('mints a Spectator Lounge token with publish for a facilitator (no team needed)', async () => {
+    const { sessionId } = await createSession(client);
+    await setPlayer(store, sessionId, client.id as string, 'facilitator'); // no teamId
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true);
+    if (!isGrant(res)) return;
+
+    // Facilitator baselines into the lounge alongside spectators, but may publish
+    // (host narration); the on-demand Bomb Room PTT bridge is a later story.
+    expect(res.room).toBe(`spectator-lounge:${sessionId}`);
+    const claims = decodeJwt(res.token);
+    expect(claims.video?.room).toBe(`spectator-lounge:${sessionId}`);
+    expect(claims.video?.canPublish).toBe(true);
+    expect(claims.video?.canSubscribe).toBe(true);
+  });
+
   it('denies a socket with no session (never created/joined)', async () => {
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(false);

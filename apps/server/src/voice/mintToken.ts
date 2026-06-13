@@ -13,11 +13,15 @@
 import { AccessToken, type VideoGrant } from 'livekit-server-sdk';
 import type { PlayerRole, TeamId } from '@bomb-squad/shared';
 
-/** Roles that belong in a team's bidirectional Bomb Room (AR12). */
+/**
+ * Roles that belong in a team's bidirectional Bomb Room (AR12). The facilitator
+ * is deliberately NOT here: their baseline room is the Spectator Lounge (see
+ * {@link resolveVoiceScope}). Their on-demand push-to-talk INTO a team's Bomb
+ * Room is a separate mechanism (its own grant/token) handled by a later story.
+ */
 const BOMB_ROOM_ROLES: ReadonlySet<PlayerRole> = new Set<PlayerRole>([
   'defuser',
   'expert',
-  'facilitator',
 ]);
 
 /** Raised when a participant cannot be scoped to a room (e.g. a Bomb Room role
@@ -64,19 +68,32 @@ export const spectatorLoungeName = (sessionId: string): string =>
  * total over valid inputs; throws {@link VoiceScopeError} for the one
  * unrepresentable case (a Bomb Room role with no team).
  *
- * - defuser / expert / facilitator → `bomb-room:{sessionId}:{teamId}`,
- *   `canPublish: true`, `canSubscribe: true` (bidirectional).
+ * - defuser / expert → `bomb-room:{sessionId}:{teamId}`, `canPublish: true`,
+ *   `canSubscribe: true` (bidirectional).
  * - spectator → `spectator-lounge:{sessionId}`, `canPublish: false`,
  *   `canSubscribe: true` (listen-only — enforced at the grant level, FR39).
+ * - facilitator → `spectator-lounge:{sessionId}`, `canPublish: true`,
+ *   `canSubscribe: true`. The facilitator's baseline is the lounge alongside the
+ *   spectators, but as the host they may narrate (publish). Their on-demand
+ *   push-to-talk into a team's Bomb Room is a separate grant handled by a later
+ *   story — never minted here.
  */
 export function resolveVoiceScope(participant: VoiceParticipant): ResolvedVoiceScope {
   const { role, sessionId, teamId } = participant;
 
-  if (role === 'spectator') {
+  // Spectators and the facilitator share the Spectator Lounge as their baseline
+  // room; only the facilitator may publish into it (host narration). Spectators
+  // stay listen-only (FR39), enforced at the grant level.
+  if (role === 'spectator' || role === 'facilitator') {
     const room = spectatorLoungeName(sessionId);
     return {
       room,
-      grant: { roomJoin: true, room, canPublish: false, canSubscribe: true },
+      grant: {
+        roomJoin: true,
+        room,
+        canPublish: role === 'facilitator',
+        canSubscribe: true,
+      },
     };
   }
 
