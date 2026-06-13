@@ -69,6 +69,23 @@ export function createTimerScheduler(deps: TimerSchedulerDeps): TimerScheduler {
     }
   }
 
+  function armTimer(sessionId: string, teamId: TeamId, timer: TimerState): void {
+    const key = keyOf(sessionId, teamId);
+    clearHandle(key); // replace any prior wake for this team
+    const instant = expiryInstant(timer);
+    if (instant === null) return; // paused → no live deadline, no wake
+    // Round UP: a fractional expiryInstant (any multiplier that doesn't divide
+    // remaining evenly, e.g. ×1.25) truncated by setTimeout could fire just
+    // BEFORE the deadline, leaving the reloaded timer not-yet-expired. Ceil
+    // guarantees the wake never fires early, so the revalidation in `fire`
+    // sees a genuinely-expired timer.
+    const delay = Math.max(0, Math.ceil(instant - clock()));
+    const handle = setTimer(() => {
+      void fire(sessionId, teamId);
+    }, delay);
+    handles.set(key, handle);
+  }
+
   async function fire(sessionId: string, teamId: TeamId): Promise<void> {
     // The wake fired (or was fired manually); drop its handle first.
     handles.delete(keyOf(sessionId, teamId));
@@ -77,28 +94,34 @@ export function createTimerScheduler(deps: TimerSchedulerDeps): TimerScheduler {
     // explode off the in-memory timer the wake was scheduled from — it may have
     // been rebased later (resume), paused (isExpired false), or the round may
     // have already resolved and the key been deleted.
-    const now = clock();
-    const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
-    if (timer === null) return; // already resolved / cleared → no-op
-    if (!isExpired(timer, now)) return; // paused or deadline moved later → no-op
+    //
+    // This runs on a bare setTimeout callback (no caller to await it), so any
+    // rejection here would be an unhandledRejection — guard the whole body and
+    // log, never let a Redis blip at expiry crash the process or silently lose
+    // the round declaration.
+    try {
+      const now = clock();
+      const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+      if (timer === null) return; // already resolved / cleared → no-op
+      if (!isExpired(timer, now)) {
+        // Not yet expired: a future deadline (resume) or a sub-ms-early wake
+        // (the truncated setTimeout firing just before a fractional
+        // expiryInstant). Re-arm at the true deadline rather than dropping the
+        // wake — otherwise a running timer would silently never expire.
+        if (timer.pausedAt === null) armTimer(sessionId, teamId, timer);
+        return;
+      }
 
-    await onTimerExpired(effectDeps, sessionId, teamId);
+      await onTimerExpired(effectDeps, sessionId, teamId);
+    } catch (err) {
+      deps.log.error({ err, sessionId, teamId }, 'timer expiry fire failed');
+    }
   }
 
   return {
     now: () => clock(),
 
-    arm(sessionId, teamId, timer) {
-      const key = keyOf(sessionId, teamId);
-      clearHandle(key); // replace any prior wake for this team
-      const instant = expiryInstant(timer);
-      if (instant === null) return; // paused → no live deadline, no wake
-      const delay = Math.max(0, instant - clock());
-      const handle = setTimer(() => {
-        void fire(sessionId, teamId);
-      }, delay);
-      handles.set(key, handle);
-    },
+    arm: armTimer,
 
     cancel(sessionId, teamId) {
       clearHandle(keyOf(sessionId, teamId));

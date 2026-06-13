@@ -32,12 +32,16 @@ export async function onTimerExpired(
   const session = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
   const elapsedMs = session?.config.timerMs ?? 0;
 
+  // Persist-then-emit: clear the live clock BEFORE declaring the timeout. If the
+  // del were to run after the emit and then reject, the round would be announced
+  // to clients while the timer key still lived in Redis — allowing a stray re-arm
+  // or a strike to find a "live" expired timer and fire BOMB_EXPLODED twice.
+  // A resolved round has no live clock — drop the team timer key.
+  await deps.redis.del(timerKey(sessionId, teamId));
+
   // Declare the authoritative timeout to the team. BOMB_EXPLODED already exists
   // (ServerToClientEvents); RoundEndPayload = { teamId, elapsedMs }.
   deps.io.to(teamRoom(sessionId, teamId)).emit('BOMB_EXPLODED', { teamId, elapsedMs });
-
-  // A resolved round has no live clock — drop the team timer key.
-  await deps.redis.del(timerKey(sessionId, teamId));
 
   // Story 8.5: round-resolution ceremony hooks here — record time into
   // cumulativeTimeMs, flip status to 'between-rounds', explosion scene + hold,

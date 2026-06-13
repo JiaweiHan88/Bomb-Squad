@@ -38,6 +38,9 @@ export async function escalateOnStrike(
 ): Promise<void> {
   // 3rd strike ends the round (Story 8.5) — no timer escalation.
   if (strikes >= 3) return;
+  // Sub-1 strike totals (0, or a desync/duplicate delivery) are not real strikes:
+  // rebasing the segment and broadcasting STRIKE { strikes: 0 } would be spurious.
+  if (strikes < 1) return;
 
   const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
   if (timer === null) {
@@ -48,7 +51,13 @@ export async function escalateOnStrike(
   }
 
   const session = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
-  const strikeSpeedUpPct = session?.config.strikeSpeedUpPct ?? 0;
+  if (session === null) {
+    // No session but a live timer is a desync too — do not silently rebase at 0%
+    // and broadcast STRIKE into a session that no longer exists. Logged no-op.
+    deps.log.error({ sessionId, teamId, strikes }, 'strike with no session — dropped');
+    return;
+  }
+  const strikeSpeedUpPct = session.config.strikeSpeedUpPct;
 
   const rebased = rebaseForStrike(timer, strikeSpeedUpPct, now);
   await deps.redis.setJSON(timerKey(sessionId, teamId), rebased);

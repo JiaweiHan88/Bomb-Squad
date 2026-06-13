@@ -150,6 +150,34 @@ describe('TimerScheduler fire path (reload + revalidate)', () => {
     expect(h.emitted).toHaveLength(0);
     expect(h.store.data.has(timerKey(SID, 'A'))).toBe(true);
   });
+
+  it('reloaded running timer not-yet-expired on fire → RE-ARMS (self-heal), no explosion', async () => {
+    // Regression: a fractional expiryInstant truncated by setTimeout can fire the
+    // wake just before the deadline. fire() must re-arm rather than drop the
+    // handle, or the bomb would silently never expire.
+    const h = makeHarness();
+    await seedSession(h.store);
+    const stillRunning: TimerState = { startedAt: 0, remainingAtStart: 10_000, speedMultiplier: 1, pausedAt: null };
+    await h.store.setJSON(timerKey(SID, 'A'), stillRunning);
+    h.setNow(9_999); // 1 ms shy of expiry
+
+    await h.scheduler.fireNow(SID, 'A');
+
+    expect(h.emitted).toHaveLength(0); // not declared
+    expect(h.store.data.has(timerKey(SID, 'A'))).toBe(true);
+    // A fresh wake was scheduled for the remaining 1 ms.
+    expect(h.timers).toHaveLength(1);
+    expect(h.timers[0].ms).toBe(1);
+  });
+
+  it('arm rounds a fractional expiry delay UP so the wake never fires early', () => {
+    const h = makeHarness();
+    // remaining 10_001 at ×1.25 → expiryInstant = 8000.8; ceil(8000.8 - 0) = 8001.
+    const fractional: TimerState = { startedAt: 0, remainingAtStart: 10_001, speedMultiplier: 1.25, pausedAt: null };
+    h.scheduler.arm(SID, 'A', fractional);
+    expect(h.timers).toHaveLength(1);
+    expect(h.timers[0].ms).toBe(8_001);
+  });
 });
 
 describe('TimerScheduler cancel / dispose', () => {

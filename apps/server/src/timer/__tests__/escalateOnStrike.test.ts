@@ -134,4 +134,23 @@ describe('escalateOnStrike', () => {
     expect(h.emitted).toHaveLength(1);
     expect(h.emitted[0]).toMatchObject({ event: 'STRIKE', payload: { strikes: 1 } });
   });
+
+  it('strikes < 1 (0 / desync) → no-op: no rebase, no STRIKE, no re-arm', async () => {
+    const h = await makeHarness(25);
+    const before = await loadTimer(h.store);
+    await escalateOnStrike(h.deps, SID, 'A', 0 as StrikeCount, 1_000);
+    expect(await loadTimer(h.store)).toEqual(before); // untouched
+    expect(h.emitted).toHaveLength(0);
+    expect(h.armCalls).toHaveLength(0);
+  });
+
+  it('live timer but no session in Redis → logged no-op, no rebase, no STRIKE', async () => {
+    const h = await makeHarness(25);
+    await h.store.del(sessionKey(SID)); // session vanished, timer still live
+    const before = await loadTimer(h.store);
+    await expect(escalateOnStrike(h.deps, SID, 'A', 1 as StrikeCount, 1_000)).resolves.toBeUndefined();
+    expect(await loadTimer(h.store)).toEqual(before); // not rebased at a silent 0%
+    expect(h.emitted).toHaveLength(0);
+    expect(h.armCalls).toHaveLength(0);
+  });
 });

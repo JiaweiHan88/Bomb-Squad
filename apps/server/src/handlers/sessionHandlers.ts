@@ -737,6 +737,11 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         );
       } catch (err) {
         deps.log.error({ err, socketId: socket.id }, 'ROUND_START failed');
+        // The per-team timer mint is non-atomic: an earlier team may already be
+        // persisted, broadcast, AND armed when a later team's write throws. Cancel
+        // every armed wake for this session so an orphan timer can't autonomously
+        // fire BOMB_EXPLODED into a round the facilitator was just told failed.
+        deps.timer.cancelSession(sessionId);
         socket.emit('ERROR', {
           code: 'ROUND_START_FAILED',
           message: 'Could not start the round. Try again.',
