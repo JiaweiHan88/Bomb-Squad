@@ -7,7 +7,10 @@ import type {
   ModuleUpdate,
   StrikePayload,
   StrikeCount,
+  BombContext,
+  WireColor,
 } from '@bomb-squad/shared';
+import { solveWires } from '@bomb-squad/shared';
 import { registerSessionHandlers } from '../sessionHandlers.js';
 import { registerModuleHandlers } from '../moduleHandlers.js';
 import { bombKey, timerKey } from '../../state/keys.js';
@@ -41,21 +44,33 @@ function createSession(socket: TestClientSocket): Promise<SessionCreatedPayload>
   return new Promise((resolve) => socket.emit('SESSION_CREATE', {}, resolve));
 }
 
-/** Controlled bomb: one wires module, three wires, the given correct index. */
-function wiresBomb(solutionIndex: number, strikes: StrikeCount = 0): BombState {
+const CTX_FIXED: BombContext = { serialNumber: 'AB1CD2', batteryCount: 0, indicators: [], ports: [] };
+
+/**
+ * Controlled bomb: one three-wire wires module whose GDD solution IS the given
+ * index. The answer is no longer stored in state (Sprint 2 retro AI1) — the
+ * reducer recomputes solveWires(colours, ctx) — so the layout, not a baked
+ * field, must produce the wanted index. (3-wire rules can't yield index 0, so
+ * 0 is only ever the "wrong cut".) Verified against solveWires below.
+ */
+function wiresBomb(correctIndex: number, strikes: StrikeCount = 0): BombState {
+  const layoutByIndex: Record<number, readonly WireColor[]> = {
+    1: ['blue', 'blue', 'blue'], // no red → rule 3① cut the 2nd
+    2: ['red', 'blue', 'yellow'], // otherwise → rule 3④ cut the last
+  };
+  const colors = layoutByIndex[correctIndex];
+  if (!colors || solveWires(colors, CTX_FIXED) !== correctIndex) {
+    throw new Error(`wiresBomb: no 3-wire layout solving at index ${correctIndex}`);
+  }
   return {
-    context: { serialNumber: 'AB1CD2', batteryCount: 0, indicators: [], ports: [] },
+    context: CTX_FIXED,
     modules: [
       {
         moduleId: 'wires',
         status: 'armed',
         data: {
-          wires: [
-            { color: 'red', cut: false },
-            { color: 'blue', cut: false },
-            { color: 'yellow', cut: false },
-          ],
-          solutionIndex,
+          wires: colors.map((color) => ({ color, cut: false })),
+          ctx: CTX_FIXED,
         },
       },
     ],

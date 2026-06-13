@@ -5,6 +5,7 @@ import {
   devDemoReducer,
   generateDevDemo,
   generateWires,
+  solveWires,
   type BombContext,
   type BombState,
   type ModuleState,
@@ -88,6 +89,8 @@ describe('open/closed module registration (AC2)', () => {
   it('wires (5.3) is registered and solves/strikes through the untouched bomb reducer', () => {
     expect(MODULE_REDUCERS[WIRES_MODULE_ID]).toBeDefined();
     const data = generateWires(7, CTX);
+    // The answer is no longer stored in state — recompute it (Sprint 2 retro AI1).
+    const solutionIndex = solveWires(data.wires.map((w) => w.color), CTX);
     const wiresBomb: BombState = {
       context: CTX,
       modules: [{ moduleId: WIRES_MODULE_ID, status: 'armed', data }],
@@ -97,11 +100,11 @@ describe('open/closed module registration (AC2)', () => {
     const solved = bombReducer(wiresBomb, {
       type: 'MODULE_ACTION',
       moduleIndex: 0,
-      payload: { type: 'CUT', wireIndex: data.solutionIndex },
+      payload: { type: 'CUT', wireIndex: solutionIndex },
     });
     expect(solved.modules[0].status).toBe('solved');
     expect(solved.strikes).toBe(0);
-    const wrongIndex = (data.solutionIndex + 1) % data.wires.length;
+    const wrongIndex = (solutionIndex + 1) % data.wires.length;
     const struck = bombReducer(wiresBomb, {
       type: 'MODULE_ACTION',
       moduleIndex: 0,
