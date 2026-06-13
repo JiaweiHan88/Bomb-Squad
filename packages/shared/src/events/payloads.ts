@@ -132,3 +132,39 @@ export interface ExpertManualPositionPayload {
   /** The navigating Expert's player id. */
   playerId: string;
 }
+
+// ─── Voice (Story 3.1 — Role-Scoped LiveKit Token Minting) ───────────────────
+
+/**
+ * VOICE_TOKEN request. Intentionally empty: the requester supplies NO room and
+ * NO role. The server derives both from the authoritative session state keyed
+ * by the requesting socket — so a client can never ask for a room or a publish
+ * grant its role does not allow (FR39: token-grant enforced, not UI-hidden).
+ */
+export interface VoiceTokenRequestPayload {
+  // Reserved for future opt-in fields (e.g. requested device label). No
+  // authority-bearing field may ever be added here.
+  readonly _?: never;
+}
+
+/**
+ * VOICE_TOKEN success response, delivered via the event's ack callback (the
+ * requester needs a direct reply, not a broadcast). The `token` is a short-TTL
+ * LiveKit JWT scoped to exactly `room` with exactly the caller's role grants.
+ * NEVER log the `token` field (project-context Security).
+ */
+export interface VoiceTokenGrantPayload {
+  /** LiveKit server URL the client connects to (from server Config). */
+  url: string;
+  /** Signed LiveKit access token (JWT). Secret — never logged. */
+  token: string;
+  /** The single room the token is scoped to (`bomb-room:…` or `spectator-lounge:…`). */
+  room: string;
+  /** The participant identity baked into the token (the server-side player id). */
+  identity: string;
+}
+
+/** VOICE_TOKEN failure response (ack), used when no token can be minted. */
+export interface VoiceTokenErrorPayload {
+  error: string;
+}

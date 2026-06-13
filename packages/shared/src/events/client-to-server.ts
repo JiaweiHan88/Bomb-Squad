@@ -8,6 +8,9 @@ import type {
   RoundRetryPayload,
   LifelineSendPayload,
   ManualPositionPayload,
+  VoiceTokenRequestPayload,
+  VoiceTokenGrantPayload,
+  VoiceTokenErrorPayload,
 } from './payloads.js';
 
 /**
@@ -37,4 +40,15 @@ export interface ClientToServerEvents {
   FACILITATOR_RESUME: () => void;
   ROUND_RETRY: (payload: RoundRetryPayload) => void;
   LIFELINE_SEND: (payload: LifelineSendPayload) => void;
+  /**
+   * Request a role-scoped LiveKit voice token (Story 3.1). Uses an ack callback
+   * because the requester needs the token back directly, not via a broadcast.
+   * The payload carries no room/role — the server derives the scope from the
+   * authoritative session state for this socket. On failure the ack receives a
+   * `VoiceTokenErrorPayload` and no token is minted.
+   */
+  VOICE_TOKEN: (
+    payload: VoiceTokenRequestPayload,
+    ack: (result: VoiceTokenGrantPayload | VoiceTokenErrorPayload) => void,
+  ) => void;
 }

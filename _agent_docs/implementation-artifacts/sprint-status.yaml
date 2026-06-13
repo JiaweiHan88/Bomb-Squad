@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 4.5 code-reviewed (clean, 2 low defers) → done
+last_updated: 2026-06-13  # story 3.1 implemented → review
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -66,8 +66,8 @@ development_status:
   epic-2-retrospective: optional
 
   # ---- Epic 3: Voice Communication ----
-  epic-3: backlog
-  3-1-role-scoped-livekit-token-minting: backlog
+  epic-3: in-progress
+  3-1-role-scoped-livekit-token-minting: review
   3-2-bomb-room-bidirectional-channel: backlog
   3-3-spectator-lounge-listen-only-channel: backlog
   3-4-speaker-indicator-and-mute-controls: backlog

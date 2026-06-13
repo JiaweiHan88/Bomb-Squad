@@ -18,4 +18,7 @@ export type {
   ErrorPayload,
   ManualPositionPayload,
   ExpertManualPositionPayload,
+  VoiceTokenRequestPayload,
+  VoiceTokenGrantPayload,
+  VoiceTokenErrorPayload,
 } from './payloads.js';

@@ -9,6 +9,7 @@ import { connectRedis } from './state/index.js';
 import { connectPostgres } from './persistence/index.js';
 import { registerSessionHandlers, type SessionSocketData } from './handlers/sessionHandlers.js';
 import { registerManualHandlers } from './handlers/manualHandlers.js';
+import { registerVoiceHandlers } from './handlers/voiceHandlers.js';
 
 /** A typed Socket.IO server. Generic order is `<ClientToServer, ServerToClient>` (incoming first). */
 export type AppIOServer = SocketIOServer<
@@ -86,6 +87,16 @@ async function start(): Promise<void> {
   // stays pure construction — handlers need the connected Redis store.
   registerSessionHandlers(io, { redis: redisStore, log: fastify.log });
   registerManualHandlers(io, { redis: redisStore, log: fastify.log });
+  registerVoiceHandlers(io, {
+    redis: redisStore,
+    log: fastify.log,
+    config: {
+      LIVEKIT_URL: config.LIVEKIT_URL,
+      LIVEKIT_API_KEY: config.LIVEKIT_API_KEY,
+      LIVEKIT_API_SECRET: config.LIVEKIT_API_SECRET,
+      TURN_TTL: config.TURN_TTL,
+    },
+  });
 
   // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
   // Per-connection runAll() is acceptable in V1 (infrequent handshakes).
