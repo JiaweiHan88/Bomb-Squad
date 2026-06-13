@@ -1,6 +1,8 @@
 import {
   DEV_DEMO_MODULE_ID,
+  WIRES_MODULE_ID,
   devDemoReducer,
+  wiresReducer,
   type ModuleState,
   type Reducer,
 } from '@bomb-squad/shared';
@@ -22,4 +24,6 @@ export const MODULE_REDUCERS: Record<string, ModuleReducer> = {
   // dev-demo: Story 5.1 reference module. Harmless in production — no bomb
   // generation emits 'dev-demo' until Story 8.2 defines the module pool.
   [DEV_DEMO_MODULE_ID]: devDemoReducer as ModuleReducer,
+  // wires: Story 5.3 walking skeleton — first real module.
+  [WIRES_MODULE_ID]: wiresReducer as ModuleReducer,
 };
