@@ -21,6 +21,8 @@ import {
   TEAM_A,
   TEAM_B,
   UNASSIGNED,
+  REMOVE_PLAYER,
+  REMOVE_CONFIRM,
 } from './copy.js';
 
 const ROLE_LABELS: Record<PlayerInfo['role'], string> = {
@@ -54,6 +56,9 @@ const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
   // its error banner owns them too.
   'CANNOT_OPEN_PREP',
   'PREPARATION_OPEN_FAILED',
+  // PLAYER_REMOVE rejections (Story 2.7) — facilitator-only control on this surface.
+  'INVALID_REMOVAL',
+  'PLAYER_REMOVE_FAILED',
 ]);
 
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
@@ -79,6 +84,9 @@ function sortRoster(players: Record<string, PlayerInfo>): PlayerInfo[] {
  */
 export default function Lobby() {
   const session = useGameStore((s) => s.session);
+  // Reactive self-id (Story 2.7) — updates the moment SESSION_IDENTITY lands, so
+  // the "You" tag appears on first join, not only after a refresh.
+  const selfId = useGameStore((s) => s.myPlayerId);
   // Presentation state only — never Zustand (2.1 rule).
   const [copied, setCopied] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -110,8 +118,7 @@ export default function Lobby() {
   if (session === null) return null;
 
   const link = buildShareLink(window.location.origin, session.joinCode);
-  const selfId = getSocket().id;
-  const isFacilitator = selfId !== undefined && session.players[selfId]?.role === 'facilitator';
+  const isFacilitator = selfId !== null && session.players[selfId]?.role === 'facilitator';
   const roster = sortRoster(session.players);
 
   // Prep can only open once someone can defuse — at least one team must hold a
@@ -128,6 +135,14 @@ export default function Lobby() {
   const assign = (playerId: string, teamId: TeamId, role: PlayerRole) => {
     setAssignError(null);
     getSocket().emit('TEAM_ASSIGN', { playerId, teamId, role });
+  };
+
+  // Story 2.7: the facilitator removes a player (server re-broadcasts the roster;
+  // the removed client receives SESSION_REMOVED and drops to Landing). The
+  // secondary confirm is the ConfirmButton's two-step affordance.
+  const remove = (playerId: string) => {
+    setAssignError(null);
+    getSocket().emit('PLAYER_REMOVE', { playerId });
   };
 
   // Story 8.3: the facilitator ends the lobby by opening preparation. Server
@@ -227,6 +242,15 @@ export default function Lobby() {
                         </option>
                       ))}
                     </select>
+                    {/* Remove (Story 2.7): two-step confirm; server re-validates
+                        facilitator authority + rejects self-removal. */}
+                    <span aria-label={`Remove ${player.displayName}`}>
+                      <ConfirmButton
+                        label={REMOVE_PLAYER}
+                        confirmLabel={REMOVE_CONFIRM}
+                        onConfirm={() => remove(player.playerId)}
+                      />
+                    </span>
                   </>
                 ) : (
                   <span className="font-mono text-xs uppercase tracking-widest text-ink-muted">

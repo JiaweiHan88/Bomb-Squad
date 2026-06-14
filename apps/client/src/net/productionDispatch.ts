@@ -16,12 +16,16 @@
  */
 import type { ModuleActionDispatch } from '../modules/dispatch.js';
 import { getSocket } from './socket.js';
+import { getIdentity } from './identity.js';
 import { useGameStore } from '../store/gameStore.js';
 
 export function createProductionModuleDispatch(): ModuleActionDispatch {
   return (moduleIndex, action) => {
     const socket = getSocket();
-    const selfId = socket.id;
+    // Resolve self by the durable playerId (Story 2.7), not socket.id — the
+    // roster is keyed by the durable id, so a socket.id lookup finds no team
+    // and silently drops the Defuser's interaction.
+    const selfId = getIdentity()?.playerId;
     const teamId =
       selfId !== undefined
         ? useGameStore.getState().session?.players[selfId]?.teamId

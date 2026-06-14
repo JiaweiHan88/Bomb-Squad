@@ -25,7 +25,21 @@ interface GameState {
   timer: TimerState | null;
   resolution: ResolutionState | null;
   connection: 'disconnected' | 'connecting' | 'connected';
+  /** This client's durable playerId (Story 2.7), resolved from SESSION_IDENTITY.
+   * Reactive so the "You" tag / role routing update the moment identity lands —
+   * a sessionStorage read is not reactive and would miss the first render. */
+  myPlayerId: string | null;
+  /** Human-readable notice to surface on Landing after a forced return (e.g. the
+   * facilitator removed this client — Story 2.7). Read-then-cleared by Landing. */
+  removalNotice: string | null;
   setSession: (session: SessionState) => void;
+  /** Record this client's durable playerId (from SESSION_IDENTITY or a stored seed). */
+  setMyPlayerId: (playerId: string | null) => void;
+  /** Drop all session/round snapshot state — routes the app back to Landing.
+   * Optionally carry a notice to show there (e.g. a removal message). */
+  clearSession: (notice?: string) => void;
+  /** Acknowledge the removal notice once Landing has shown it. */
+  clearRemovalNotice: () => void;
   setBomb: (bomb: BombState) => void;
   setTimer: (timer: TimerState) => void;
   setResolution: (resolution: ResolutionState | null) => void;
@@ -56,8 +70,14 @@ export const useGameStore = create<GameState>((set) => ({
   timer: null,
   resolution: null,
   connection: 'disconnected',
+  myPlayerId: null,
+  removalNotice: null,
 
   setSession: (session) => set({ session }),
+  setMyPlayerId: (myPlayerId) => set({ myPlayerId }),
+  clearSession: (notice) =>
+    set({ session: null, bomb: null, timer: null, resolution: null, myPlayerId: null, removalNotice: notice ?? null }),
+  clearRemovalNotice: () => set({ removalNotice: null }),
   // A fresh bomb (BOMB_INIT) means a new round — clear any prior resolution so a
   // stale result banner can't bleed into the next round.
   setBomb: (bomb) => set({ bomb, resolution: null }),

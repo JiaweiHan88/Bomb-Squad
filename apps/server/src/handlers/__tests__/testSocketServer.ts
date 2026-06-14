@@ -10,6 +10,7 @@ import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
+  SessionState,
   TeamId,
   TimerState,
 } from '@bomb-squad/shared';
@@ -149,8 +150,15 @@ export function createTestScheduler(deps: {
 export interface TestSocketServer {
   url: string;
   io: TestIOServer;
-  /** Connects a typed client socket; resolves once connected. */
-  connectClient(): Promise<TestClientSocket>;
+  /** Connects a typed client socket; resolves once connected. Pass `auth` to
+   * present a handshake auth payload (Story 2.7 reattach token). */
+  connectClient(auth?: Record<string, unknown>): Promise<TestClientSocket>;
+  /** Connect with `auth` AND capture the first SESSION_STATE — the listener is
+   * attached before the handshake completes (as the real client binds before
+   * connect), so a server-driven reattach broadcast can't be missed. */
+  connectClientCapturingState(
+    auth: Record<string, unknown>,
+  ): Promise<{ socket: TestClientSocket; state: SessionState }>;
   /** Disconnects all clients and closes server + HTTP listener. */
   close(): Promise<void>;
 }
@@ -170,14 +178,30 @@ export async function startTestSocketServer(
   return {
     url,
     io,
-    async connectClient(): Promise<TestClientSocket> {
-      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'] });
+    async connectClient(auth?: Record<string, unknown>): Promise<TestClientSocket> {
+      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'], auth });
       clients.push(socket);
       await new Promise<void>((resolve, reject) => {
         socket.once('connect', () => resolve());
         socket.once('connect_error', (err) => reject(err));
       });
       return socket;
+    },
+    async connectClientCapturingState(
+      auth: Record<string, unknown>,
+    ): Promise<{ socket: TestClientSocket; state: SessionState }> {
+      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'], auth });
+      clients.push(socket);
+      // Attach the SESSION_STATE listener immediately (before connect resolves)
+      // so a fast server-driven reattach broadcast is never missed.
+      const statePromise = new Promise<SessionState>((resolve) =>
+        socket.once('SESSION_STATE', (s) => resolve(s)),
+      );
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', () => resolve());
+        socket.once('connect_error', (err) => reject(err));
+      });
+      return { socket, state: await statePromise };
     },
     async close(): Promise<void> {
       for (const client of clients) client.disconnect();

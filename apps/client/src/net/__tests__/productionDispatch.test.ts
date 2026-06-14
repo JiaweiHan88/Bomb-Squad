@@ -10,10 +10,15 @@ import { useGameStore } from '../../store/gameStore.js';
  */
 
 const emit = vi.fn();
-let socketId: string | undefined = 'self-1';
 
 vi.mock('../socket.js', () => ({
-  getSocket: () => ({ id: socketId, emit }),
+  getSocket: () => ({ id: 'rotating-socket-id', emit }),
+}));
+
+// Story 2.7: self is resolved by the durable playerId from the identity store,
+// not socket.id. The roster keys on the durable id ('self-1').
+vi.mock('../identity.js', () => ({
+  getIdentity: () => ({ sessionId: 'sess-1', playerId: 'self-1', reattachToken: 'tok' }),
 }));
 
 /** Minimal session with `self-1` committed as Team A's defuser. */
@@ -26,7 +31,6 @@ function sessionWithSelf(teamId: 'A' | 'B' | undefined): SessionState {
 }
 
 beforeEach(() => {
-  socketId = 'self-1';
   useGameStore.setState({ session: sessionWithSelf('A') });
 });
 

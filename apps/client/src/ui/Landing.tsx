@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PlayerRole } from '@bomb-squad/shared';
 import { getSocket } from '../net/socket.js';
+import { useGameStore } from '../store/gameStore.js';
 import Button from './Button.js';
 import {
   CODE_LENGTH,
@@ -27,6 +28,7 @@ import {
   JOIN_INCOMPLETE,
   JOIN_BUSY,
   JOIN_TIMEOUT,
+  JOIN_NOW,
   OR_DIVIDER,
 } from './copy.js';
 
@@ -103,6 +105,17 @@ export default function Landing() {
     if (prefill !== '') {
       setCells(applyPasteAt(EMPTY_CELLS, 0, prefill).cells);
       nameRef.current?.focus();
+    }
+  }, []);
+
+  // Story 2.7: a facilitator-removed client lands back here carrying a notice in
+  // the store (it survived the remount that ERROR-local state could not). Show
+  // it once, then acknowledge so it can't re-appear on the next mount.
+  useEffect(() => {
+    const { removalNotice, clearRemovalNotice } = useGameStore.getState();
+    if (removalNotice !== null) {
+      setError(removalNotice);
+      clearRemovalNotice();
     }
   }, []);
 
@@ -243,6 +256,18 @@ export default function Landing() {
         <p className="text-sm text-ink-muted">
           {JOIN_HELP} <b className="font-semibold text-ink-primary">{JOIN_HELP_EMPHASIS}</b>
         </p>
+        {/* Story 2.7: a `?join=` link prefills the cells without a submitting
+            keystroke, so a complete code needs an explicit Join. Typing the 6th
+            character still auto-submits (Story 2.3) — this button is additive. */}
+        {isCodeComplete(cells) && (
+          <Button
+            onClick={() => tryJoin(cells, name, role)}
+            disabled={busy}
+            className="mt-3 w-full"
+          >
+            {JOIN_NOW}
+          </Button>
+        )}
         {joining && <p className="mt-3 text-sm text-ink-muted">{JOIN_BUSY}</p>}
         {hint !== null && <p className="mt-3 text-sm text-ink-muted">{hint}</p>}
 

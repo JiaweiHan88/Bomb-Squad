@@ -30,3 +30,21 @@ export const manualPositionKey = (sessionId: string): string =>
 /** Join-code → sessionId lookup (value: the sessionId string, stored as JSON). */
 export const joinCodeKey = (joinCode: string): string =>
   `joincode:${joinCode}`;
+
+/**
+ * Reattach record (Story 2.7): a secret-token → durable identity mapping.
+ * Value: JSON `{ playerId, displayName, role }`. The token is the reconnect
+ * credential (never broadcast, never logged); this key is the only place that
+ * resolves it back to the durable `playerId`. O(1) single-key lookup.
+ */
+export const reattachKey = (sessionId: string, reattachToken: string): string =>
+  `reattach:${sessionId}:${reattachToken}`;
+
+/**
+ * Companion lookup (Story 2.7): durable `playerId` → its reattach token (value:
+ * the token string, stored as JSON). Lets PLAYER_REMOVE invalidate a kicked
+ * player's token without a reverse scan — the handler knows the playerId, not
+ * the secret token. O(1).
+ */
+export const reattachByPlayerKey = (sessionId: string, playerId: string): string =>
+  `reattachByPlayer:${sessionId}:${playerId}`;

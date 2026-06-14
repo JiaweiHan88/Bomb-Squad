@@ -16,7 +16,9 @@ export const DEFAULT_ROUND_CONFIG: RoundConfig = {
 export interface CreateSessionArgs {
   sessionId: string;
   joinCode: string;
-  /** Socket id of the creating client — becomes the Facilitator player. */
+  /** Durable minted player id of the creating client (Story 2.7) — becomes the
+   * Facilitator player. Decoupled from the ephemeral socket.id so a reconnect
+   * re-attaches to the same record. This factory treats it as an opaque id. */
   facilitatorId: string;
   /** Validated config overrides (handler-sanitized; this factory trusts it). */
   config?: Partial<RoundConfig>;

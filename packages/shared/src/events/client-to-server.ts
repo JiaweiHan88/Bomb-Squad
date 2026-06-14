@@ -8,6 +8,7 @@ import type {
   RoundRetryPayload,
   LifelineSendPayload,
   ManualPositionPayload,
+  PlayerRemovePayload,
 } from './payloads.js';
 
 /**
@@ -28,6 +29,10 @@ import type {
 export interface ClientToServerEvents {
   SESSION_CREATE: (payload: SessionCreatePayload, ack: (result: SessionCreatedPayload) => void) => void;
   SESSION_JOIN: (payload: SessionJoinPayload) => void;
+  /** Facilitator-only (Story 2.7). Removes a player from the lobby roster by
+   * durable playerId. No ack: success = SESSION_STATE broadcast + SESSION_REMOVED
+   * to the target; failure = typed ERROR to the caller. */
+  PLAYER_REMOVE: (payload: PlayerRemovePayload) => void;
   TEAM_ASSIGN: (payload: TeamAssignPayload) => void;
   ROUND_CONFIGURE: (payload: RoundConfigurePayload) => void;
   /** Facilitator-only. Opens the Preparation phase for the next round (Story 8.3).

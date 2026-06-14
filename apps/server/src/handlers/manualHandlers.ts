@@ -87,17 +87,20 @@ export function registerManualHandlers(io: ManualIOServer, deps: ManualHandlerDe
           return;
         }
 
-        if (state.players[socket.id]?.role !== 'expert') return;
+        // Authority resolves against the durable playerId (Story 2.7), never the
+        // rotating socket.id — an Expert who reconnects keeps publishing.
+        const playerId = socket.data.playerId;
+        if (playerId === undefined || state.players[playerId]?.role !== 'expert') return;
 
         const position: ExpertManualPositionPayload = {
           chapterId: parsed.chapterId,
-          playerId: socket.id,
+          playerId,
         };
         // Persist then emit (handler pipeline order). Single-key write —
         // nothing partial to roll back.
         await deps.redis.setJSON(manualPositionKey(sessionId), position);
         io.to(sessionRoom(sessionId)).emit('EXPERT_MANUAL_POSITION', position);
-        deps.log.info({ sessionId, playerId: socket.id, chapterId: parsed.chapterId }, 'manual navigate');
+        deps.log.info({ sessionId, playerId, chapterId: parsed.chapterId }, 'manual navigate');
       } catch (err) {
         deps.log.error({ err, socketId: socket.id }, 'MANUAL_NAVIGATE failed');
         socket.emit('ERROR', {

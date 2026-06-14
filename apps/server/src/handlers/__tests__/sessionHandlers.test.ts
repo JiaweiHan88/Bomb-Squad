@@ -3,6 +3,8 @@ import type {
   SessionState,
   SessionCreatePayload,
   SessionCreatedPayload,
+  SessionIdentityPayload,
+  SessionRemovedPayload,
   ErrorPayload,
   RoundState,
   TimerState,
@@ -18,7 +20,7 @@ import {
   type SessionLog,
 } from '../sessionHandlers.js';
 import { createSessionState } from '../../session/createSession.js';
-import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey, reattachKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
@@ -766,7 +768,9 @@ describe('TEAM_ASSIGN handler', () => {
     await server.close();
   });
 
-  /** Join a socket into the session and resolve with that socket's broadcast snapshot. */
+  /** Join a socket into the session and resolve with that socket's broadcast
+   * snapshot. Also drains the facilitator's copy of the join broadcast so a
+   * later facSpy/assignment listener can't race this in-flight broadcast. */
   async function joinAs(
     socket: TestClientSocket,
     joinCode: string,
@@ -774,8 +778,10 @@ describe('TEAM_ASSIGN handler', () => {
     role: 'defuser' | 'expert' | 'spectator',
   ): Promise<SessionState> {
     const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
     socket.emit('SESSION_JOIN', { joinCode, displayName, role });
-    return statePromise;
+    const [state] = await Promise.all([statePromise, facStatePromise]);
+    return state;
   }
 
   /** The roster playerId of the (single) player with this display name. */
@@ -1006,8 +1012,11 @@ describe('PREPARATION_OPEN handler', () => {
     displayName: string,
   ): Promise<SessionState> {
     const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    // Drain the facilitator's copy too so a later listener can't race it.
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
     socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
-    return statePromise;
+    const [state] = await Promise.all([statePromise, facStatePromise]);
+    return state;
   }
 
   /** The roster playerId of the (single) player with this display name. */
@@ -1269,8 +1278,11 @@ describe('ROUND_START handler', () => {
     displayName: string,
   ): Promise<SessionState> {
     const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    // Drain the facilitator's copy too so a later listener can't race it.
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
     socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
-    return statePromise;
+    const [state] = await Promise.all([statePromise, facStatePromise]);
+    return state;
   }
 
   function idOf(state: SessionState, displayName: string): string {
@@ -1332,8 +1344,9 @@ describe('ROUND_START handler', () => {
 
     const teamA = await server.io.in(teamRoom(sessionId, 'A')).fetchSockets();
     const teamB = await server.io.in(teamRoom(sessionId, 'B')).fetchSockets();
-    expect(teamA.map((s) => s.id)).toEqual([mayaId]);
-    expect(teamB.map((s) => s.id)).toEqual([devonId]);
+    // Story 2.7: team-room membership resolves by the durable playerId, not socket.id.
+    expect(teamA.map((s) => s.data.playerId)).toEqual([mayaId]);
+    expect(teamB.map((s) => s.data.playerId)).toEqual([devonId]);
   });
 
   it('generates + persists a bomb per populated team and broadcasts BOMB_INIT to each team room (Story 4.7)', async () => {
@@ -1584,3 +1597,267 @@ interface RoundEndPayloadLike {
   teamId: 'A' | 'B';
   elapsedMs: number;
 }
+
+describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reattach', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        // Short grace so disconnect-removal tests don't wait the 8s default, but
+        // long enough that an in-test reconnect reliably wins the cancellation race.
+        disconnectGraceMs: 500,
+      }),
+    );
+    facilitator = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** Resolve with the next SESSION_IDENTITY packet on a socket. */
+  function nextIdentity(socket: TestClientSocket): Promise<SessionIdentityPayload> {
+    return new Promise((resolve) => socket.once('SESSION_IDENTITY', (p) => resolve(p)));
+  }
+
+  /** Create a session and capture the facilitator's identity packet. */
+  async function createWithIdentity(): Promise<{ ack: SessionCreatedPayload; identity: SessionIdentityPayload }> {
+    const idPromise = nextIdentity(facilitator);
+    const ack = await createSession(facilitator);
+    return { ack, identity: await idPromise };
+  }
+
+  /** Join a fresh socket, capturing both its identity and post-join snapshot. */
+  async function joinWithIdentity(
+    joinCode: string,
+    displayName: string,
+    role: 'defuser' | 'expert' | 'spectator' = 'expert',
+  ): Promise<{ socket: TestClientSocket; identity: SessionIdentityPayload; state: SessionState }> {
+    const socket = await server.connectClient();
+    const idPromise = nextIdentity(socket);
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role });
+    const [identity, state] = await Promise.all([idPromise, statePromise]);
+    return { socket, identity, state };
+  }
+
+  // ── Identity mint ──────────────────────────────────────────────────────────
+  it('SESSION_CREATE mints a durable identity: reattach record stored, token absent from the broadcast', async () => {
+    const { ack, identity } = await createWithIdentity();
+    expect(identity.sessionId).toBe(ack.sessionId);
+    expect(identity.playerId).toMatch(UUID_RE);
+    expect(identity.reattachToken).toMatch(UUID_RE);
+
+    // The reattach record resolves the token → the durable identity.
+    const record = JSON.parse(store.data.get(reattachKey(ack.sessionId, identity.reattachToken))!);
+    expect(record).toMatchObject({ playerId: identity.playerId, role: 'facilitator' });
+
+    // The token is a secret — never part of the broadcast SessionState.
+    const state = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(JSON.stringify(state)).not.toContain(identity.reattachToken);
+    expect(state.players[identity.playerId]?.role).toBe('facilitator');
+  });
+
+  it('SESSION_JOIN mints a joiner identity; the durable id keys the roster', async () => {
+    const { ack } = await createWithIdentity();
+    const { identity, state } = await joinWithIdentity(ack.joinCode, 'Maya');
+    expect(state.players[identity.playerId]).toMatchObject({ displayName: 'Maya', role: 'expert' });
+    expect(store.data.get(reattachKey(ack.sessionId, identity.reattachToken))).toBeDefined();
+  });
+
+  // ── Disconnect cleanup (AC 3) — after the grace window elapses ──────────────
+  it('a lobby disconnect frees the seat after the grace + broadcasts; the reattach record survives', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+
+    const facUpdate = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    socket.disconnect(); // no reconnect → the grace timer fires the removal
+    const after = await facUpdate;
+
+    expect(after.players[identity.playerId]).toBeUndefined();
+    expect(Object.keys(after.players)).toHaveLength(1); // facilitator only
+    // Capacity freed in the store; reattach record kept so a refresh re-attaches.
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(Object.keys(stored.players)).toHaveLength(1);
+    expect(store.data.get(reattachKey(ack.sessionId, identity.reattachToken))).toBeDefined();
+  });
+
+  it('a non-lobby (active) disconnect does NOT remove the player even after the grace (Epic 8 owns mid-round)', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+
+    socket.disconnect();
+    await new Promise((r) => setTimeout(r, 650)); // past the 500ms grace
+    const afterStored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(afterStored.players[identity.playerId]).toBeDefined();
+  });
+
+  // ── PLAYER_REMOVE (AC 1/2) ────────────────────────────────────────────────────
+  it('facilitator removes a player: roster shrinks, SESSION_REMOVED to the target, reattach record deleted', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity, state } = await joinWithIdentity(ack.joinCode, 'Maya');
+    expect(Object.keys(state.players)).toHaveLength(2);
+
+    const removed = new Promise<SessionRemovedPayload>((resolve) =>
+      socket.once('SESSION_REMOVED', (p) => resolve(p)),
+    );
+    const facUpdate = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PLAYER_REMOVE', { playerId: identity.playerId });
+
+    const [notice, after] = await Promise.all([removed, facUpdate]);
+    expect(notice.message).toMatch(/removed/i);
+    expect(after.players[identity.playerId]).toBeUndefined();
+    // Kick is permanent: the reattach record is gone.
+    expect(store.data.get(reattachKey(ack.sessionId, identity.reattachToken))).toBeUndefined();
+  });
+
+  it('a non-facilitator PLAYER_REMOVE → NOT_FACILITATOR, store byte-identical, no broadcast', async () => {
+    const { ack, identity: facId } = await createWithIdentity();
+    const { socket } = await joinWithIdentity(ack.joinCode, 'Maya');
+    const before = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(socket, 'ERROR');
+    socket.emit('PLAYER_REMOVE', { playerId: facId.playerId }); // joiner tries to remove the facilitator
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(before);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('the facilitator removing themselves → INVALID_REMOVAL, no writes', async () => {
+    const { ack, identity } = await createWithIdentity();
+    const before = store.data.get(sessionKey(ack.sessionId));
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PLAYER_REMOVE', { playerId: identity.playerId });
+    const error = await errorPromise;
+    expect(error.code).toBe('INVALID_REMOVAL');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(before);
+  });
+
+  it('removing an unknown player → INVALID_REMOVAL, no writes', async () => {
+    const { ack } = await createWithIdentity();
+    const before = store.data.get(sessionKey(ack.sessionId));
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PLAYER_REMOVE', { playerId: 'no-such-id' });
+    const error = await errorPromise;
+    expect(error.code).toBe('INVALID_REMOVAL');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(before);
+  });
+
+  it('updateJSON failure during removal → PLAYER_REMOVE_FAILED, no broadcast', async () => {
+    const { ack } = await createWithIdentity();
+    const { identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    store.updateJSON = async () => {
+      throw new Error('boom');
+    };
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PLAYER_REMOVE', { playerId: identity.playerId });
+    const error = await errorPromise;
+    expect(error.code).toBe('PLAYER_REMOVE_FAILED');
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Reattach (AC 4) ───────────────────────────────────────────────────────────
+  it('reconnect with a valid reattach token converges to the same player record — no duplicate', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    socket.disconnect(); // reconnect within the grace cancels the seat removal
+
+    // Reconnect a fresh socket presenting the token → server restore converges to
+    // the SAME durable id (no duplicate, no capacity error).
+    const { state } = await server.connectClientCapturingState({
+      sessionId: ack.sessionId,
+      reattachToken: identity.reattachToken,
+    });
+    expect(state.players[identity.playerId]).toMatchObject({ displayName: 'Maya', role: 'expert' });
+    expect(Object.keys(state.players)).toHaveLength(2); // facilitator + the one Maya, no dup
+  });
+
+  it('a refresh within the grace window preserves the player team + role + relayOrder (AC 4 — same seat)', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+
+    // Facilitator reassigns Maya to Team A as defuser.
+    const assigned = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: identity.playerId, teamId: 'A', role: 'defuser' });
+    await assigned;
+
+    // Maya refreshes: disconnect, then reconnect with her token within the grace —
+    // the removal is cancelled, so her seat is never torn down (the bug this fixes).
+    socket.disconnect();
+    const { state } = await server.connectClientCapturingState({
+      sessionId: ack.sessionId,
+      reattachToken: identity.reattachToken,
+    });
+
+    expect(state.players[identity.playerId]).toMatchObject({ teamId: 'A', role: 'defuser' });
+    expect(state.teams.A?.relayOrder).toContain(identity.playerId);
+    expect(Object.keys(state.players)).toHaveLength(2);
+  });
+
+  it('a reconnect with a bad/absent token is treated as a fresh client (no restore)', async () => {
+    const { ack } = await createWithIdentity();
+    const stranger = await server.connectClient({ sessionId: ack.sessionId, reattachToken: 'not-a-real-token' });
+    // No restore broadcast should arrive; a plain SESSION_JOIN still works as a fresh join.
+    const statePromise = nextEvent<SessionState>(stranger, 'SESSION_STATE');
+    stranger.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Newbie', role: 'spectator' });
+    const state = await statePromise;
+    const newbie = Object.values(state.players).find((p) => p.displayName === 'Newbie');
+    expect(newbie).toBeDefined();
+  });
+
+  // ── AR15: the reattach token is a secret ─────────────────────────────────────
+  it('AR15: the reattach token never appears in a log line across create/join/remove/disconnect', async () => {
+    const lines: string[] = [];
+    const capturingLog: SessionLog = {
+      info: (obj, msg) => lines.push(`${JSON.stringify(obj)} ${msg ?? ''}`),
+      error: (obj, msg) => lines.push(`${JSON.stringify(obj)} ${msg ?? ''}`),
+    };
+    const logStore = createMemoryRedisStore();
+    const logServer = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: logStore,
+        log: capturingLog,
+        timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+      }),
+    );
+    try {
+      const fac = await logServer.connectClient();
+      const facId = new Promise<SessionIdentityPayload>((r) => fac.once('SESSION_IDENTITY', r));
+      const ack = await new Promise<SessionCreatedPayload>((r) => fac.emit('SESSION_CREATE', {}, r));
+      const facIdentity = await facId;
+
+      const joiner = await logServer.connectClient();
+      const joinId = new Promise<SessionIdentityPayload>((r) => joiner.once('SESSION_IDENTITY', r));
+      const joined = new Promise<SessionState>((r) => joiner.once('SESSION_STATE', r));
+      joiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+      const joinerIdentity = await joinId;
+      await joined;
+
+      const removeBroadcast = new Promise<SessionState>((r) => fac.once('SESSION_STATE', r));
+      fac.emit('PLAYER_REMOVE', { playerId: joinerIdentity.playerId });
+      await removeBroadcast;
+
+      const blob = lines.join('\n');
+      expect(blob).not.toContain(facIdentity.reattachToken);
+      expect(blob).not.toContain(joinerIdentity.reattachToken);
+      expect(blob).not.toContain(ack.joinCode);
+    } finally {
+      await logServer.close();
+    }
+  });
+});

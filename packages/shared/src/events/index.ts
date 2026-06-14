@@ -18,4 +18,7 @@ export type {
   ErrorPayload,
   ManualPositionPayload,
   ExpertManualPositionPayload,
+  PlayerRemovePayload,
+  SessionIdentityPayload,
+  SessionRemovedPayload,
 } from './payloads.js';
