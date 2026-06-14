@@ -4,7 +4,7 @@ baseline_commit: 782d82e (worktree branch; story 2.6 committed, clean tree at st
 
 # Story 2.7: Lobby Resilience & Facilitator Player Controls
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -112,6 +112,24 @@ so that the lobby stays accurate and nobody gets stranded by a refresh or a pref
     4. **AR15:** `grep` server stdout for the join code **and** the reattach token → 0 hits.
   - [x] If a browser pass isn't possible, state exactly what was verified headlessly (the share-link Join button + Remove-confirm UI are the browser-only bits).
   - [x] **Jay verifies interactively (not done until his observed result is in Completion Notes):** in two browsers against the real stack — (a) open a `?join=` share link with a complete code, set name+role, click **Join** → lands in Lobby; (b) as Facilitator, **Remove** a player past the secondary confirm → that player drops to Landing with the notice and the facilitator's roster updates; (c) **refresh** a joined player's tab → they re-appear in the same seat with no duplicate row and the "You" tag intact; (d) refresh the **Facilitator's** tab → they retain the facilitator seat. Record Jay's observed outcome for each.
+
+## Review Findings
+
+_Code review 2026-06-14 (gds-code-review: Blind Hunter + Edge Case Hunter + Acceptance Auditor). 0 decision · 3 patch · 8 deferred · 5 dismissed (D1 resolved → deferred for V1)._
+
+- [x] [Review][Defer] Reattach record can't restore team/seat once the grace window elapses (AC 4 is timing-bounded, not durable) — the `reattach:*` record stores `{ playerId, displayName, role }` only (`session/identity.ts`), never `teamId`/team placement. A disconnect that outlasts `DEFAULT_DISCONNECT_GRACE_MS` (8 s) frees the seat; a later reconnect re-adds via `addPlayerToSession` as an *unassigned* player with the join-time role. **Deferred (Jay, 2026-06-14): V1 lobby scope — the common refresh case is covered within the 8 s grace; durable team-seat reconstruction (persist teamId in the record, refresh on TEAM_ASSIGN) is follow-up work.** [blind+auditor]
+
+- [x] [Review][Patch] Disconnect handler reschedules a grace removal without checking for a live socket on the same `playerId` → an actively reconnected player's seat is freed after the grace (intermittent AC 4 violation) [apps/server/src/handlers/sessionHandlers.ts] — **FIXED 2026-06-14:** disconnect handler now skips scheduling if any other connected socket maps to the same `(sessionId, playerId)`. Regression test added (`sessionHandlers.test.ts` "refresh race…") — verified red without the guard, green with it; full server suite 332 green.
+- [x] [Review][Patch] Identity `io.use` is registered before the readiness gate, inverting the spec-mandated order ("readiness first, identity second") [apps/server/src/index.ts] — **FIXED 2026-06-14:** readiness `io.use` now registers before `registerSessionHandlers` so a Redis-down server rejects the handshake before the identity middleware touches Redis.
+- [x] [Review][Patch] `RemoveOutcome` reused with `kind: 'removed'` to carry an *added* state in the reattach re-add branch [apps/server/src/handlers/sessionHandlers.ts] — **FIXED 2026-06-14:** added a dedicated `RestoreOutcome` (`restored`/`skipped`); the discriminant now tells the truth.
+
+- [x] [Review][Defer] Reconnecting socket joins the session room before confirming roster membership → a resolved-but-absent non-lobby socket becomes a ghost room member receiving broadcasts [apps/server/src/handlers/sessionHandlers.ts:386] — deferred (Epic 8 owns non-lobby reattach)
+- [x] [Review][Defer] `storeReattachRecord` writes the `reattach:*` + `reattachByPlayer:*` pair non-atomically → a lost companion write means PLAYER_REMOVE can't invalidate the token, so a kicked player could reattach [apps/server/src/session/identity.ts storeReattachRecord] — deferred (low-probability hardening)
+- [x] [Review][Defer] In-memory `pendingRemovals` Map → a server restart inside the grace window strands the ghost roster entry forever (counts toward capacity) [apps/server/src/handlers/sessionHandlers.ts:444] — deferred (V1, consistent with no-persistence posture)
+- [x] [Review][Defer] AC 4 capacity boundary: if the room fills with other joiners during the grace, the refresh re-add no-ops and the reconnecting player gets a snapshot but is never re-added to the roster [apps/server/src/handlers/sessionHandlers.ts:399] — deferred (edge; lobby rarely at cap)
+- [x] [Review][Defer] Join-path `storeReattachRecord` failure (after the SESSION_STATE broadcast) routes to the catch → player is rostered + broadcast but identity-less and told the join failed [apps/server/src/handlers/sessionHandlers.ts:~1865] — deferred (low-probability Redis write fail)
+- [x] [Review][Defer] `SESSION_REMOVED` notice shares the `setError` surface on Landing → a later connect hint/error can clobber the kick notice before the user reads it [apps/client/src/ui/Landing.tsx] — deferred (Low UX)
+- [x] [Review][Defer] Reattach records (`reattach:*`/`reattachByPlayer:*`) have no TTL → tab-close-in-lobby orphans both keys indefinitely [apps/server/src/session/identity.ts] — deferred (consistent with session key's own no-TTL V1 posture)
 
 ## Dev Notes
 

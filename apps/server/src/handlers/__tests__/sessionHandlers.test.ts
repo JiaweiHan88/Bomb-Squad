@@ -1701,6 +1701,31 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
     expect(afterStored.players[identity.playerId]).toBeDefined();
   });
 
+  it('refresh race: the OLD socket disconnecting AFTER the NEW one reconnects must NOT free the live seat (AC 4)', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket: oldSocket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+
+    // Model a page refresh where the NEW socket connects (resolving the same
+    // durable id via the reattach token) BEFORE the OLD socket's disconnect fires
+    // — the ordering that defeats a naive "cancel-on-reconnect" guard, because at
+    // reconnect time there is no pending removal to cancel.
+    const newSocket = await server.connectClient({
+      sessionId: ack.sessionId,
+      reattachToken: identity.reattachToken,
+    });
+
+    // Now the stale socket finally drops. A live socket still holds Maya's id, so
+    // the disconnect handler must skip scheduling the seat removal.
+    oldSocket.disconnect();
+    await new Promise((r) => setTimeout(r, 650)); // past the 500ms grace
+
+    const afterStored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(afterStored.players[identity.playerId]).toMatchObject({ displayName: 'Maya', role: 'expert' });
+    expect(Object.keys(afterStored.players)).toHaveLength(2); // facilitator + Maya
+
+    newSocket.disconnect();
+  });
+
   // ── PLAYER_REMOVE (AC 1/2) ────────────────────────────────────────────────────
   it('facilitator removes a player: roster shrinks, SESSION_REMOVED to the target, reattach record deleted', async () => {
     const { ack } = await createWithIdentity();

@@ -215,6 +215,16 @@ type RemoveOutcome =
   | { kind: 'noop' };
 
 /**
+ * Outcome of the reconnect-restore re-add (Story 2.7, AC 4). Distinct from
+ * {@link RemoveOutcome} so the discriminant tells the truth: a successful
+ * restore is an *add*, not a removal. 'skipped' covers every can't-restore
+ * branch (vanished / non-lobby / raced back in / full).
+ */
+type RestoreOutcome =
+  | { kind: 'restored'; state: SessionState }
+  | { kind: 'skipped' };
+
+/**
  * Boundary validation for the untrusted SESSION_JOIN payload. Normalizes the
  * code (trim + uppercase) and the name (trim), whitelists the role, and
  * rebuilds a fresh object — unknown extra keys are inert, never forwarded.
@@ -389,7 +399,7 @@ async function restoreReattachedSocket(
     if (snapshot.players[playerId] === undefined && snapshot.status === 'lobby' && reattachToken !== null) {
       const record = await resolveReattachRecord(deps.redis, sessionId, reattachToken);
       if (record !== null) {
-        const { result } = await deps.redis.updateJSON<SessionState, RemoveOutcome>(
+        const { result } = await deps.redis.updateJSON<SessionState, RestoreOutcome>(
           sessionKey(sessionId),
           (current) => {
             if (
@@ -398,17 +408,17 @@ async function restoreReattachedSocket(
               current.players[playerId] !== undefined || // raced back in
               Object.keys(current.players).length >= MAX_PLAYERS // full → can't restore
             ) {
-              return { commit: false, result: { kind: 'noop' } };
+              return { commit: false, result: { kind: 'skipped' } };
             }
             const next = addPlayerToSession(current, {
               playerId,
               displayName: record.displayName,
               role: record.role,
             });
-            return { commit: true, value: next, result: { kind: 'removed', state: next } };
+            return { commit: true, value: next, result: { kind: 'restored', state: next } };
           },
         );
-        if (result.kind === 'removed') {
+        if (result.kind === 'restored') {
           io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
           restored = true;
         }
@@ -1178,6 +1188,21 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
       const sessionId = socket.data.sessionId;
       const playerId = socket.data.playerId;
       if (sessionId === undefined || playerId === undefined) return;
+      // Refresh race: a page reload's NEW socket can connect (and cancel any
+      // pending removal) BEFORE this OLD socket's disconnect fires. If another
+      // live socket already holds this durable identity, the seat is still
+      // occupied — scheduling a removal here would free an actively-connected
+      // player's seat once the grace elapses (AC 4). Skip if any other connected
+      // socket maps to the same player in this session.
+      for (const other of io.sockets.sockets.values()) {
+        if (
+          other.id !== socket.id &&
+          other.data.playerId === playerId &&
+          other.data.sessionId === sessionId
+        ) {
+          return;
+        }
+      }
       const key = `${sessionId}:${playerId}`;
       if (pendingRemovals.has(key)) return; // already scheduled by a prior socket
       const timer = setTimeout(() => {
