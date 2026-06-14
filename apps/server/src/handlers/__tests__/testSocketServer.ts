@@ -10,10 +10,11 @@ import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
+  SessionState,
   TeamId,
   TimerState,
 } from '@bomb-squad/shared';
-import type { RedisStore } from '../../state/redis.js';
+import type { RedisStore, UpdateDecision } from '../../state/redis.js';
 import type { SessionLog, SessionSocketData } from '../sessionHandlers.js';
 import { createTimerScheduler, type TimerScheduler } from '../../timer/timerScheduler.js';
 
@@ -30,10 +31,27 @@ export interface MemoryRedisStore extends RedisStore {
   data: Map<string, string>;
 }
 
-/** Map-backed RedisStore fake. Pass `overrides` to inject failures. */
-export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryRedisStore {
+export interface MemoryRedisStoreOptions {
+  /**
+   * One-shot interleave hook for updateJSON. Fires ONCE, between this store's
+   * read of `key` and its write, then disarms — modelling "another client wrote
+   * between my load and my commit". A test arms it to mutate `data`; the fake
+   * notices `data` changed since its read and re-runs `mutate` against the new
+   * value, exercising the real adapter's WATCH/EXEC-null → retry path (which a
+   * single-threaded Map is otherwise too atomic to surface).
+   */
+  onBeforeCommit?: (key: string) => void | Promise<void>;
+}
+
+/** Map-backed RedisStore fake. Pass `overrides` to inject failures, `options` to arm the race hook. */
+export function createMemoryRedisStore(
+  overrides?: Partial<RedisStore>,
+  options?: MemoryRedisStoreOptions,
+): MemoryRedisStore {
   const data = new Map<string, string>();
-  return {
+  let onBeforeCommit = options?.onBeforeCommit;
+
+  const store: MemoryRedisStore = {
     data,
     async getJSON<T>(key: string): Promise<T | null> {
       const raw = data.get(key);
@@ -45,6 +63,34 @@ export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryR
     async del(key: string): Promise<void> {
       data.delete(key);
     },
+    async updateJSON<T, R>(
+      key: string,
+      mutate: (current: T | null) => UpdateDecision<T, R>,
+      _opts?: { maxRetries?: number },
+    ): Promise<{ committed: boolean; result: R }> {
+      // Re-read → mutate, looping if the one-shot hook (or anything) changed the
+      // raw bytes between read and write. Models the optimistic retry: a fresh
+      // read on every attempt, so the guard inside `mutate` re-evaluates.
+      for (;;) {
+        const before = data.get(key);
+        const current = before === undefined ? null : (JSON.parse(before) as T);
+        const decision = mutate(current);
+
+        if (onBeforeCommit) {
+          const hook = onBeforeCommit;
+          onBeforeCommit = undefined; // self-clearing: fire exactly once
+          await hook(key);
+        }
+
+        // If the raw bytes moved since our read, retry from a fresh load — this
+        // is the "WATCHed key changed, EXEC returned null" branch.
+        if (data.get(key) !== before) continue;
+
+        if (!decision.commit) return { committed: false, result: decision.result };
+        data.set(key, JSON.stringify(decision.value));
+        return { committed: true, result: decision.result };
+      }
+    },
     async ping(): Promise<boolean> {
       return true;
     },
@@ -53,6 +99,7 @@ export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryR
     },
     ...overrides,
   };
+  return store;
 }
 
 /** No-op pino-shaped logger for handler deps. */
@@ -103,8 +150,15 @@ export function createTestScheduler(deps: {
 export interface TestSocketServer {
   url: string;
   io: TestIOServer;
-  /** Connects a typed client socket; resolves once connected. */
-  connectClient(): Promise<TestClientSocket>;
+  /** Connects a typed client socket; resolves once connected. Pass `auth` to
+   * present a handshake auth payload (Story 2.7 reattach token). */
+  connectClient(auth?: Record<string, unknown>): Promise<TestClientSocket>;
+  /** Connect with `auth` AND capture the first SESSION_STATE — the listener is
+   * attached before the handshake completes (as the real client binds before
+   * connect), so a server-driven reattach broadcast can't be missed. */
+  connectClientCapturingState(
+    auth: Record<string, unknown>,
+  ): Promise<{ socket: TestClientSocket; state: SessionState }>;
   /** Disconnects all clients and closes server + HTTP listener. */
   close(): Promise<void>;
 }
@@ -124,14 +178,30 @@ export async function startTestSocketServer(
   return {
     url,
     io,
-    async connectClient(): Promise<TestClientSocket> {
-      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'] });
+    async connectClient(auth?: Record<string, unknown>): Promise<TestClientSocket> {
+      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'], auth });
       clients.push(socket);
       await new Promise<void>((resolve, reject) => {
         socket.once('connect', () => resolve());
         socket.once('connect_error', (err) => reject(err));
       });
       return socket;
+    },
+    async connectClientCapturingState(
+      auth: Record<string, unknown>,
+    ): Promise<{ socket: TestClientSocket; state: SessionState }> {
+      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'], auth });
+      clients.push(socket);
+      // Attach the SESSION_STATE listener immediately (before connect resolves)
+      // so a fast server-driven reattach broadcast is never missed.
+      const statePromise = new Promise<SessionState>((resolve) =>
+        socket.once('SESSION_STATE', (s) => resolve(s)),
+      );
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', () => resolve());
+        socket.once('connect_error', (err) => reject(err));
+      });
+      return { socket, state: await statePromise };
     },
     async close(): Promise<void> {
       for (const client of clients) client.disconnect();

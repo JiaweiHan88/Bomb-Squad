@@ -50,6 +50,7 @@ const START_ERROR_CODES: ReadonlySet<string> = new Set([
  */
 export default function Preparation() {
   const session = useGameStore((s) => s.session);
+  const selfId = useGameStore((s) => s.myPlayerId);
   const [startError, setStartError] = useState<string | null>(null);
 
   // getManualPages() is pure and the registry is import-time static — build once.
@@ -74,8 +75,8 @@ export default function Preparation() {
 
   if (session === null) return null;
 
-  const selfId = getSocket().id;
-  const self = selfId !== undefined ? session.players[selfId] : undefined;
+  // Durable playerId (Story 2.7) from the reactive store, not socket.id.
+  const self = selfId !== null ? session.players[selfId] : undefined;
   const isFacilitator = self?.role === 'facilitator';
 
   const teams = Object.values(session.teams);

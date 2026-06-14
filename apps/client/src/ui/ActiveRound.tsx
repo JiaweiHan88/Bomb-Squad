@@ -1,6 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
 import { useGameStore } from '../store/gameStore.js';
-import { getSocket } from '../net/socket.js';
 import BombStage from '../scenes/BombStage.js';
 import BombScene from '../scenes/BombScene.js';
 import ManualViewer from '../manual/ManualViewer.js';
@@ -24,6 +23,7 @@ import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
  */
 export default function ActiveRound() {
   const session = useGameStore((s) => s.session);
+  const selfId = useGameStore((s) => s.myPlayerId);
 
   const chapters = useMemo(
     () => buildChapters(SANDBOX_MODULES.flatMap((m) => m.getManualPages())),
@@ -32,8 +32,9 @@ export default function ActiveRound() {
 
   if (session === null) return null;
 
-  const selfId = getSocket().id;
-  const role = selfId !== undefined ? session.players[selfId]?.role : undefined;
+  // Resolve "which player am I" by the durable playerId (Story 2.7) from the
+  // reactive store, not socket.id — socket.id is no longer a roster key.
+  const role = selfId !== null ? session.players[selfId]?.role : undefined;
 
   let surface: ReactNode;
   if (role === 'defuser') {

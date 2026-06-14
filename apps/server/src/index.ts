@@ -90,25 +90,15 @@ async function start(): Promise<void> {
   // store + the live io) and disposed in shutdown() before io.close().
   const timerScheduler = createTimerScheduler({ redis: redisStore, io, log: fastify.log });
 
-  // Game socket handlers. Registered here (not in buildServer) so buildServer
-  // stays pure construction — handlers need the connected Redis store.
-  registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
-  registerManualHandlers(io, { redis: redisStore, log: fastify.log });
-  registerModuleHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
-  registerVoiceHandlers(io, {
-    redis: redisStore,
-    log: fastify.log,
-    config: {
-      LIVEKIT_URL: config.LIVEKIT_URL,
-      LIVEKIT_API_KEY: config.LIVEKIT_API_KEY,
-      LIVEKIT_API_SECRET: config.LIVEKIT_API_SECRET,
-      TURN_TTL: config.TURN_TTL,
-    },
-  });
-
   // Connection gate: reject Socket.IO handshakes while any store is unhealthy.
   // Per-connection runAll() is acceptable in V1 (infrequent handshakes).
   // Future optimization: cache the last readiness result with a ~1 s TTL.
+  //
+  // ORDER MATTERS (Story 2.7): this readiness gate MUST register before
+  // registerSessionHandlers, whose identity middleware (io.use) reads Redis to
+  // resolve a reattach token. Socket.IO runs connection middleware in
+  // registration order, so registering readiness first guarantees a Redis-down
+  // server rejects the handshake BEFORE the identity middleware touches Redis.
   io.use(async (_socket, next) => {
     try {
       const { healthy } = await healthRegistry.runAll();
@@ -121,6 +111,24 @@ async function start(): Promise<void> {
       fastify.log.error(err, 'readiness gate error — rejecting handshake');
       next(new Error('SERVER_NOT_READY'));
     }
+  });
+
+  // Game socket handlers. Registered here (not in buildServer) so buildServer
+  // stays pure construction — handlers need the connected Redis store. The
+  // identity middleware inside registerSessionHandlers registers AFTER the
+  // readiness gate above (see ORDER MATTERS note).
+  registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
+  registerManualHandlers(io, { redis: redisStore, log: fastify.log });
+  registerModuleHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
+  registerVoiceHandlers(io, {
+    redis: redisStore,
+    log: fastify.log,
+    config: {
+      LIVEKIT_URL: config.LIVEKIT_URL,
+      LIVEKIT_API_KEY: config.LIVEKIT_API_KEY,
+      LIVEKIT_API_SECRET: config.LIVEKIT_API_SECRET,
+      TURN_TTL: config.TURN_TTL,
+    },
   });
 
   let shuttingDown = false;

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { createSocket } from './net/socket.js';
 import { bindServerEvents } from './net/bindServerEvents.js';
+import { applyAuthFromIdentity, getIdentity } from './net/identity.js';
 import { createProductionModuleDispatch } from './net/productionDispatch.js';
 import { setModuleActionDispatch } from './modules/dispatch.js';
 import { useGameStore } from './store/gameStore.js';
@@ -37,6 +38,12 @@ export default function App() {
     useGameStore.getState().setConnection('connecting');
     const socket = createSocket(SERVER_URL);
     const unbind = bindServerEvents(socket);
+    // Story 2.7: replay a stored reattach token via the handshake auth so a
+    // refresh re-attaches to the same player record (set BEFORE connect). Seed
+    // the reactive self-id from storage so the "You" tag is correct on the very
+    // first render after a refresh (before SESSION_IDENTITY re-arrives).
+    applyAuthFromIdentity(socket);
+    useGameStore.getState().setMyPlayerId(getIdentity()?.playerId ?? null);
     socket.connect();
 
     // Production module-action backend (Story 4.7): DefuserView dispatches become

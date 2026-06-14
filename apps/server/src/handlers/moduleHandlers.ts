@@ -112,7 +112,7 @@ export function registerModuleHandlers(io: SessionIOServer, deps: SessionHandler
         // with that team's bomb (the bomb is team-private; a teammate Expert or a
         // foreign socket must be refused). Role is committed to 'defuser' at
         // ROUND_START, so session state alone settles this — no extra round read.
-        const self = session.players[socket.id];
+        const self = session.players[socket.data.playerId ?? ''];
         if (self === undefined || self.role !== 'defuser' || self.teamId !== teamId) {
           socket.emit('ERROR', {
             code: 'NOT_TEAM_DEFUSER',

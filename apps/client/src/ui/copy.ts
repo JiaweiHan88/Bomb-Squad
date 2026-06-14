@@ -33,6 +33,13 @@ export const TEAM_ROSTER = 'Team roster';
 export const YOU_TAG = 'You';
 export const ROLE_FACILITATOR = 'Facilitator';
 
+// Facilitator player controls (Story 2.7) — secondary-confirm Remove on a row.
+export const REMOVE_PLAYER = 'Remove';
+export const REMOVE_CONFIRM = 'Remove';
+
+// Share-link Join button (Story 2.7) — shown when a prefilled code is complete.
+export const JOIN_NOW = 'Join';
+
 // Team assignment (Story 2.4) — mockup "6. Facilitator Dashboard" team badges.
 export const TEAM_A = 'Team A';
 export const TEAM_B = 'Team B';

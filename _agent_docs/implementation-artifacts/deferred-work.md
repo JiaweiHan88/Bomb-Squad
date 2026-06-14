@@ -158,6 +158,10 @@
 - **Authority rests on `socket.data.sessionId` pointer + `socket.id` key with no cross-check** (`apps/server/src/handlers/voiceHandlers.ts:78-94`) — stale pointer / reused socket.id could mint a mis-scoped token. Inherited architectural tradeoff (socket.id-as-identity used throughout). Ties into the `socket.id`-as-identity reconnect cluster indexed below.
 - **NEW STORY — Facilitator push-to-talk bridge into team Bomb Rooms** — 3.1 gives the facilitator a Spectator Lounge baseline token (canPublish:true). The facilitator must additionally be able to talk into a *specific* defusing team's Bomb Room on demand (PTT). This is a multi-room / second-grant mechanism (token-switch or additional grant + client PTT control) that exceeds 3.1's single-room mint model — needs its own story. (Decision: Jay, 2026-06-13 code review of 3.1.)
 
+## Deferred from: manual verification of 2-7-lobby-resilience-and-facilitator-player-controls (2026-06-14)
+
+- **Brief Lobby flicker on refresh** (`apps/client/src/App.tsx` surface routing; `net/bindServerEvents.ts` reattach) — on a refresh the app remounts with an empty store (`session === null`) and reconnects; for the moment between connect and the server-restore `SESSION_STATE` arriving, the surface briefly renders Landing/loading before snapping back to the Lobby, so a player sometimes sees a short flash of the lobby/landing on reload. Cosmetic only — the reattach itself is correct (identity + seat preserved). Fix with reconnect-UX polish: gate the surface on a "restoring" state (or keep the last surface) until the post-reattach `SESSION_STATE` lands, rather than falling to Landing while `session` is transiently null. Relates to the existing reconnect-resync / "Connecting…" affordance deferrals (2.1, 1-7). Deferred — minor visual, observed during Jay's 2.7 interactive pass.
+
 ---
 
 ## ⚠️ Network-realism deferred class (Sprint 2 retro Action Item 3)
@@ -177,3 +181,21 @@ A coherent class of deferrals the dev harness **structurally cannot reach** — 
 ## Deferred from: code review of story-3.2 (2026-06-14)
 
 - **Blocked-autoplay remote audio has no recovery affordance** (`apps/client/src/voice/connectVoice.ts:178`) — `room.startAudio()` rejection is intentionally swallowed (best-effort, inside the gesture chain), so if the browser blocks autoplay the participant shows `connected` but hears nothing, with no retry UI. The full "click to enable audio" affordance is explicitly Story 3.6 (graceful-degradation polish) per 3.2's Dev Notes. Deferred — out of 3.2 scope by spec.
+
+## Deferred from: code review of story-2.7 (2026-06-14)
+
+- **Ghost room membership on non-lobby reattach** — `restoreReattachedSocket` joins the session room before confirming roster membership; a resolved-but-absent non-lobby socket receives broadcasts as a non-participant (`sessionHandlers.ts:386`). Epic 8 owns non-lobby reattach.
+- **Non-atomic reattach-record pair** — `storeReattachRecord` writes `reattach:*` + `reattachByPlayer:*` as two non-transactional `setJSON`s; a lost companion write means PLAYER_REMOVE can't invalidate the token → a kicked player could reattach (`session/identity.ts`). Low-probability hardening (consider MULTI or companion-first ordering).
+- **Grace timers are in-memory** — `pendingRemovals` Map is lost on server restart; a restart inside the 8 s grace strands a ghost lobby roster entry that counts toward capacity (`sessionHandlers.ts:444`). Consistent with the V1 no-persistence posture; revisit with a Redis-backed disconnect-at sweep.
+- **AC 4 capacity boundary** — if other joiners fill the room during a disconnected player's grace, the refresh re-add no-ops (room full) and the reconnecting player gets a snapshot but is never re-added (`sessionHandlers.ts:399`). Edge; lobby rarely at cap.
+- **Join-path identity-write failure is swallowed post-broadcast** — a `storeReattachRecord` throw after the SESSION_STATE broadcast routes to the catch; the player is rostered + broadcast but identity-less and told the join failed (`sessionHandlers.ts:~1865`).
+- **Removal notice can be clobbered** — `SESSION_REMOVED` shares the `setError` surface on Landing; a later connect hint can overwrite the kick notice before the user reads it (`ui/Landing.tsx`).
+- **Reattach records have no TTL** — a tab-close in lobby orphans `reattach:*`/`reattachByPlayer:*` indefinitely (`session/identity.ts`). Consistent with the session key's own no-TTL V1 posture; add TTLs when session eviction is introduced.
+- **AC 4 seat is timing-bounded, not durable** — the reattach record carries `{ playerId, displayName, role }` but no `teamId`; a disconnect outlasting the 8 s grace frees the seat and re-adds the player unassigned, losing team + relayOrder (`session/identity.ts`). Deferred for V1 (refresh-within-grace is the common case Jay verified); make durable by persisting team placement in the record and refreshing it on TEAM_ASSIGN.
+
+## Deferred from: code review of story-2.6 (2026-06-14)
+
+- **Global serialization queue is a liveness coupling** — every `updateJSON` (now 4+ call sites) chains off one queue on one dedicated connection; a slow/hung transaction serially blocks all sessions' joins/cleanups. Bounded in practice by the main client's `commandTimeout: 2000` (inherited by `duplicate()`), so a hung command rejects in ~2 s. Revisit (per-key queues / connection pool) only if join contention ever becomes real (`state/redis.ts`).
+- **`txConn` lifecycle** — the dedicated tx connection is never `quit()`/torn down; recovery relies on ioredis auto-reconnect plus the new `'error'`/`'close'` listeners. A fuller health/reset story (and graceful shutdown of txConn) is hardening, not yet needed at V1 (`state/redis.ts`).
+- **`rejoin` reload can return null** — the SESSION_JOIN rejoin branch re-`getJSON`s for the freshest snapshot; if the session was evicted in that window the socket joins the room + sets `socket.data` for a vanished session with no snapshot. Narrow window, benign convergence (`handlers/sessionHandlers.ts`).
+- **No standing real-Redis race test** — AC1's headline race is proven only against the in-memory fake (a different code path from the real WATCH/MULTI adapter); the live-smoke harness that exercised real ioredis concurrency was deleted after the dev pass. Add a real-Redis integration test for the capacity race when CI Redis infra is available (`handlers/__tests__/sessionHandlers.test.ts`).

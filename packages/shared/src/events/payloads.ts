@@ -28,6 +28,16 @@ export interface SessionJoinPayload {
   role: PlayerRole;
 }
 
+/**
+ * Facilitator-authored request to remove a player from the lobby roster
+ * (Story 2.7). Carries the target's durable `playerId` — never a `socket.id`.
+ * No ack: success is the SESSION_STATE broadcast + a SESSION_REMOVED notice to
+ * the target; failure is a typed ERROR to the facilitator.
+ */
+export interface PlayerRemovePayload {
+  playerId: string;
+}
+
 export interface TeamAssignPayload {
   playerId: string;
   teamId: TeamId;
@@ -119,6 +129,29 @@ export interface ErrorPayload {
   code: string;
   message: string;
   recoverable: boolean;
+}
+
+/**
+ * Private identity packet (Story 2.7) sent to exactly one socket — the owner —
+ * on create/join and on a successful reconnect-restore. The `reattachToken` is
+ * a SECRET (the reconnect credential): it is never part of SessionState (which
+ * the whole room receives) and is never logged. The client persists this to
+ * sessionStorage and presents the token via the Socket.IO handshake `auth` on
+ * (re)connect. `playerId` is the public, durable roster/authority key.
+ */
+export interface SessionIdentityPayload {
+  sessionId: string;
+  playerId: string;
+  reattachToken: string;
+}
+
+/**
+ * Notice sent to a client that the Facilitator removed from the session
+ * (Story 2.7). The client clears its stored identity, drops to Landing, and
+ * renders `message` verbatim (server-authored, human-readable).
+ */
+export interface SessionRemovedPayload {
+  message: string;
 }
 
 /**

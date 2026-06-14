@@ -5,10 +5,13 @@ import type {
   PauseResumePayload,
   StrikePayload,
   ErrorPayload,
+  SessionIdentityPayload,
+  SessionRemovedPayload,
 } from '@bomb-squad/shared';
 import type { TimerState } from '@bomb-squad/shared';
 import type { AppClientSocket } from './socket.js';
 import { noteTimerBroadcast, resetClockOffset } from './serverClock.js';
+import { setIdentity, clearIdentity } from './identity.js';
 import { useGameStore } from '../store/gameStore.js';
 
 /**
@@ -17,7 +20,7 @@ import { useGameStore } from '../store/gameStore.js';
  * here — never listeners owned by other modules or socket.io internals.
  */
 export function bindServerEvents(socket: AppClientSocket): () => void {
-  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setConnection } =
+  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setConnection, clearSession, setMyPlayerId } =
     useGameStore.getState();
 
   const onBombDefused = (payload: RoundEndPayload) => {
@@ -65,6 +68,23 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   const onError = (payload: ErrorPayload) => {
     console.error('[socket] ERROR', payload);
   };
+  // Durable identity (Story 2.7): persist the private packet so a refresh can
+  // re-attach via the handshake auth. AR15: the token is a secret — never log it.
+  const onIdentity = (payload: SessionIdentityPayload) => {
+    setIdentity(payload);
+    // Reactively record the durable playerId so the "You" tag / role routing
+    // update immediately on first join (a sessionStorage write is not reactive).
+    setMyPlayerId(payload.playerId);
+    // Keep the live socket's auth current so an auto-reconnect replays the token.
+    socket.auth = { sessionId: payload.sessionId, reattachToken: payload.reattachToken };
+  };
+  // The facilitator removed this client: forget the identity, drop to Landing,
+  // and carry the human-readable notice across the remount.
+  const onRemoved = (payload: SessionRemovedPayload) => {
+    clearIdentity();
+    socket.auth = {};
+    clearSession(payload.message);
+  };
 
   const onConnect = () => setConnection('connected');
   // Drop the server-clock offset on disconnect so a reconnect can't carry a
@@ -79,6 +99,8 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
   const onReconnectAttempt = () => setConnection('connecting');
 
   socket.on('SESSION_STATE', setSession);
+  socket.on('SESSION_IDENTITY', onIdentity);
+  socket.on('SESSION_REMOVED', onRemoved);
   socket.on('BOMB_INIT', setBomb);
   socket.on('MODULE_UPDATE', applyModuleUpdate);
   socket.on('TIMER_UPDATE', onTimerUpdate);
@@ -99,6 +121,8 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
 
   return () => {
     socket.off('SESSION_STATE', setSession);
+    socket.off('SESSION_IDENTITY', onIdentity);
+    socket.off('SESSION_REMOVED', onRemoved);
     socket.off('BOMB_INIT', setBomb);
     socket.off('MODULE_UPDATE', applyModuleUpdate);
     socket.off('TIMER_UPDATE', onTimerUpdate);

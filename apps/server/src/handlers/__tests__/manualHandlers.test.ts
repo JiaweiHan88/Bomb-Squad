@@ -43,15 +43,28 @@ function createSession(socket: TestClientSocket): Promise<SessionCreatedPayload>
   });
 }
 
-/** Joins and resolves once the joiner receives the post-join SESSION_STATE. */
+/** Joins and resolves with the joiner's durable playerId (from SESSION_IDENTITY,
+ * Story 2.7) once the post-join SESSION_STATE has also arrived. */
 function joinSession(
   socket: TestClientSocket,
   joinCode: string,
   displayName: string,
   role: 'defuser' | 'expert' | 'spectator',
-): Promise<void> {
+): Promise<string> {
   return new Promise((resolve) => {
-    socket.once('SESSION_STATE', () => resolve());
+    let playerId: string | null = null;
+    let gotState = false;
+    const maybeDone = () => {
+      if (playerId !== null && gotState) resolve(playerId);
+    };
+    socket.once('SESSION_IDENTITY', (p) => {
+      playerId = p.playerId;
+      maybeDone();
+    });
+    socket.once('SESSION_STATE', () => {
+      gotState = true;
+      maybeDone();
+    });
     socket.emit('SESSION_JOIN', { joinCode, displayName, role });
   });
 }
@@ -102,7 +115,7 @@ describe('MANUAL_NAVIGATE handler', () => {
   it('expert navigation broadcasts EXPERT_MANUAL_POSITION to the session room and persists it', async () => {
     const { sessionId, joinCode } = await createSession(facilitator);
     const expert = await server.connectClient();
-    await joinSession(expert, joinCode, 'Devon', 'expert');
+    const expertId = await joinSession(expert, joinCode, 'Devon', 'expert');
 
     const seenByFacilitator = nextEvent<ExpertManualPositionPayload>(
       facilitator,
@@ -111,18 +124,19 @@ describe('MANUAL_NAVIGATE handler', () => {
     expert.emit('MANUAL_NAVIGATE', { chapterId: 'wires' });
 
     const payload = await seenByFacilitator;
-    expect(payload).toEqual({ chapterId: 'wires', playerId: expert.id });
+    // Story 2.7: the payload carries the durable playerId, not the rotating socket.id.
+    expect(payload).toEqual({ chapterId: 'wires', playerId: expertId });
 
     expect(JSON.parse(store.data.get(manualPositionKey(sessionId))!)).toEqual({
       chapterId: 'wires',
-      playerId: expert.id,
+      playerId: expertId,
     });
   });
 
   it('last navigation wins on the persisted position (locked-mirror, GDD A3)', async () => {
     const { sessionId, joinCode } = await createSession(facilitator);
     const expert = await server.connectClient();
-    await joinSession(expert, joinCode, 'Devon', 'expert');
+    const expertId = await joinSession(expert, joinCode, 'Devon', 'expert');
 
     const first = nextEvent<ExpertManualPositionPayload>(facilitator, 'EXPERT_MANUAL_POSITION');
     expert.emit('MANUAL_NAVIGATE', { chapterId: 'wires' });
@@ -133,7 +147,7 @@ describe('MANUAL_NAVIGATE handler', () => {
 
     expect(JSON.parse(store.data.get(manualPositionKey(sessionId))!)).toEqual({
       chapterId: 'memory',
-      playerId: expert.id,
+      playerId: expertId,
     });
   });
 

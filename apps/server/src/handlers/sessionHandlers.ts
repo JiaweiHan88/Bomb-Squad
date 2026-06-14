@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Server as SocketIOServer, DefaultEventsMap } from 'socket.io';
+import type { Server as SocketIOServer, Socket as SocketIOSocket, DefaultEventsMap } from 'socket.io';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -16,6 +16,13 @@ import type { TimerScheduler } from '../timer/timerScheduler.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
 import { addPlayerToSession } from '../session/joinSession.js';
+import { removePlayerFromSession } from '../session/removePlayerFromSession.js';
+import {
+  mintPlayerIdentity,
+  storeReattachRecord,
+  deleteReattachRecord,
+  resolveReattachRecord,
+} from '../session/identity.js';
 import { assignPlayerToTeam } from '../session/assignTeam.js';
 import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
@@ -23,20 +30,34 @@ import { startRound, hasPopulatedTeam } from '../session/startRound.js';
 import { initializeRoundBombs } from '../round/initializeRoundBombs.js';
 
 /**
- * Server-assigned per-socket bookkeeping (Socket.IO `socket.data`). A pointer
- * only, never authority: it selects which session key to load; every authority
- * decision is made against the freshly Redis-loaded state. Transient by design
- * (Pattern 1) — it dies with the socket, same lifetime as the socket.id
- * identity this codebase already accepts (deferred-work.md).
+ * Server-assigned per-socket bookkeeping (Socket.IO `socket.data`). Pointers
+ * only, never authority by themselves: they select which session key to load
+ * and which player record this socket *is*; every authority decision is made
+ * against the freshly Redis-loaded state, resolved by `playerId`.
+ *
+ * `playerId` is the **durable** id (Story 2.7) — minted at create/join, or
+ * resolved from a reattach token by the reconnect middleware — NOT `socket.id`,
+ * which Socket.IO rotates on every (re)connection. Authority gates read
+ * `state.players[socket.data.playerId]`. Both fields are transient (die with
+ * the socket); the durable identity itself survives in the reattach record.
  */
 export interface SessionSocketData {
   sessionId?: string;
+  playerId?: string;
 }
 
 /** Typed server alias declared locally to avoid an import cycle with index.ts.
  * Exported (type-only consumers) so the timer effect modules can type their
  * `io` parameter without re-deriving the 4-generic form. */
 export type SessionIOServer = SocketIOServer<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  DefaultEventsMap,
+  SessionSocketData
+>;
+
+/** The per-connection socket type carried by {@link SessionIOServer}. */
+export type SessionServerSocket = SocketIOSocket<
   ClientToServerEvents,
   ServerToClientEvents,
   DefaultEventsMap,
@@ -58,7 +79,16 @@ export interface SessionHandlerDeps {
   /** Server-authoritative expiry scheduler (Story 8.4). Owns the wall clock the
    * handlers stamp timers with, and the setTimeout-backed expiry wakes. */
   timer: TimerScheduler;
+  /** Lobby disconnect grace (Story 2.7): how long to wait before freeing a
+   * disconnected player's seat. A refresh reconnects well within this window and
+   * cancels the removal, so role/team/relayOrder survive (AC 4). A genuine leave
+   * frees the slot after it elapses (AC 3). Default {@link DEFAULT_DISCONNECT_GRACE_MS}. */
+  disconnectGraceMs?: number;
 }
+
+/** Default lobby disconnect grace — long enough for a page refresh round-trip,
+ * short enough that a real departure frees the seat promptly. */
+export const DEFAULT_DISCONNECT_GRACE_MS = 8000;
 
 /** Socket.IO room for all participants of a session (architecture Pattern 1). */
 export const sessionRoom = (sessionId: string): string => `session:${sessionId}`;
@@ -163,6 +193,38 @@ type JoinParseResult =
   | { ok: false; message: string };
 
 /**
+ * Outcome of the atomic SESSION_JOIN transaction. The store owns the WATCH/MULTI
+ * mechanics; this carries the accept/reject/no-op *meaning* back out (the only
+ * side-channel from the pure `mutate`), with the committed snapshot threaded on
+ * 'added' so the broadcast uses the post-commit state, never a racy re-read.
+ */
+type JoinOutcome =
+  | { kind: 'vanished' }
+  | { kind: 'rejoin' }
+  | { kind: 'not-joinable' }
+  | { kind: 'full' }
+  | { kind: 'added'; state: SessionState };
+
+/**
+ * Outcome of a race-safe roster removal (disconnect cleanup / PLAYER_REMOVE).
+ * The committed post-removal snapshot rides out on 'removed' so the broadcast
+ * uses the post-commit state, not a racy re-read.
+ */
+type RemoveOutcome =
+  | { kind: 'removed'; state: SessionState }
+  | { kind: 'noop' };
+
+/**
+ * Outcome of the reconnect-restore re-add (Story 2.7, AC 4). Distinct from
+ * {@link RemoveOutcome} so the discriminant tells the truth: a successful
+ * restore is an *add*, not a removal. 'skipped' covers every can't-restore
+ * branch (vanished / non-lobby / raced back in / full).
+ */
+type RestoreOutcome =
+  | { kind: 'restored'; state: SessionState }
+  | { kind: 'skipped' };
+
+/**
  * Boundary validation for the untrusted SESSION_JOIN payload. Normalizes the
  * code (trim + uppercase) and the name (trim), whitelists the role, and
  * rebuilds a fresh object — unknown extra keys are inert, never forwarded.
@@ -237,6 +299,26 @@ export function parseTeamAssignPayload(payload: unknown): TeamAssignParseResult 
   return { ok: true, playerId, teamId, role: role as PlayerRole };
 }
 
+type PlayerRemoveParseResult =
+  | { ok: true; playerId: string }
+  | { ok: false; message: string };
+
+/**
+ * Boundary validation for the untrusted PLAYER_REMOVE payload (Story 2.7).
+ * Bounds the opaque durable playerId (1–128 chars) and rebuilds a fresh object
+ * — unknown extra keys are inert. Authority + self-target are the handler's job.
+ */
+export function parsePlayerRemovePayload(payload: unknown): PlayerRemoveParseResult {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'payload must be an object' };
+  }
+  const { playerId } = payload as { playerId?: unknown };
+  if (typeof playerId !== 'string' || playerId.length < 1 || playerId.length > 128) {
+    return { ok: false, message: 'playerId must be a 1–128 character string' };
+  }
+  return { ok: true, playerId };
+}
+
 /** Retry cap for join-code collisions (36^6 codes — collisions are theoretical). */
 const MAX_CODE_ATTEMPTS = 5;
 
@@ -249,13 +331,166 @@ async function mintJoinCode(redis: RedisStore): Promise<string> {
 }
 
 /**
+ * Free a disconnected player's lobby seat (Story 2.7, AC 3). Race-safe via the
+ * 2.6 updateJSON primitive; a no-op unless the session is still in `lobby` and
+ * the player is still rostered (a status change or a reconnect-in-the-grace-
+ * window makes it inert). Keeps the reattach record so identity survives.
+ * Fired from the disconnect grace timer, never synchronously on disconnect.
+ */
+async function removeLobbyPlayer(
+  io: SessionIOServer,
+  deps: SessionHandlerDeps,
+  sessionId: string,
+  playerId: string,
+): Promise<void> {
+  try {
+    const { result } = await deps.redis.updateJSON<SessionState, RemoveOutcome>(
+      sessionKey(sessionId),
+      (current) => {
+        if (
+          current === null ||
+          current.status !== 'lobby' ||
+          current.players[playerId] === undefined
+        ) {
+          return { commit: false, result: { kind: 'noop' } };
+        }
+        const next = removePlayerFromSession(current, playerId);
+        return { commit: true, value: next, result: { kind: 'removed', state: next } };
+      },
+    );
+    if (result.kind === 'removed') {
+      io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+      deps.log.info({ sessionId, playerId }, 'lobby disconnect cleanup');
+    }
+  } catch (err) {
+    deps.log.error({ err, sessionId }, 'disconnect cleanup failed');
+  }
+}
+
+/**
+ * Reconnect restore (Story 2.7, AC 4): if the handshake middleware resolved a
+ * durable identity onto `socket.data`, re-attach this socket to its session
+ * without a fresh SESSION_JOIN. Handles the Facilitator (who has no `?join=`
+ * re-entry path) and joiners uniformly:
+ *  - still in roster → converge (join room + re-emit snapshot, no write);
+ *  - absent & lobby → re-add from the reattach record with the SAME durable id
+ *    (no duplicate; frees-then-refills the slot, so no false capacity error);
+ *  - absent & non-lobby → just resend the snapshot (Epic 8 owns mid-round).
+ * Self-guarded (never throws into the connection callback).
+ */
+async function restoreReattachedSocket(
+  io: SessionIOServer,
+  deps: SessionHandlerDeps,
+  socket: SessionServerSocket,
+): Promise<void> {
+  const sessionId = socket.data.sessionId;
+  const playerId = socket.data.playerId;
+  if (sessionId === undefined || playerId === undefined) return; // fresh client
+  const auth = socket.handshake.auth as { reattachToken?: unknown };
+  const reattachToken = typeof auth?.reattachToken === 'string' ? auth.reattachToken : null;
+
+  try {
+    const snapshot = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+    if (snapshot === null) return; // session evicted — nothing to restore
+
+    await socket.join(sessionRoom(sessionId));
+
+    let restored = false;
+    if (snapshot.players[playerId] === undefined && snapshot.status === 'lobby' && reattachToken !== null) {
+      const record = await resolveReattachRecord(deps.redis, sessionId, reattachToken);
+      if (record !== null) {
+        const { result } = await deps.redis.updateJSON<SessionState, RestoreOutcome>(
+          sessionKey(sessionId),
+          (current) => {
+            if (
+              current === null ||
+              current.status !== 'lobby' ||
+              current.players[playerId] !== undefined || // raced back in
+              Object.keys(current.players).length >= MAX_PLAYERS // full → can't restore
+            ) {
+              return { commit: false, result: { kind: 'skipped' } };
+            }
+            const next = addPlayerToSession(current, {
+              playerId,
+              displayName: record.displayName,
+              role: record.role,
+            });
+            return { commit: true, value: next, result: { kind: 'restored', state: next } };
+          },
+        );
+        if (result.kind === 'restored') {
+          io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+          restored = true;
+        }
+      }
+    }
+
+    if (!restored) {
+      const fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+      if (fresh !== null) socket.emit('SESSION_STATE', fresh);
+    }
+    // Re-emit the identity (token unchanged) so the client refreshes its store.
+    if (reattachToken !== null) {
+      socket.emit('SESSION_IDENTITY', { sessionId, playerId, reattachToken });
+    }
+    deps.log.info({ sessionId, playerId, restored }, 'socket reattached');
+  } catch (err) {
+    deps.log.error({ err, socketId: socket.id }, 'reattach restore failed');
+  }
+}
+
+/**
  * Session lifecycle handlers. Canonical handler pipeline (architecture
  * Pattern 2): parse/validate → build state (pure factory) → persist to Redis →
  * join room → ack + broadcast. No game logic beyond that flow; the process
  * keeps no authoritative in-memory session state.
  */
 export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandlerDeps): void {
+  const graceMs = deps.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS;
+  // Pending lobby-disconnect removals, keyed `${sessionId}:${playerId}`. A
+  // disconnect schedules one; a reconnect (or a PLAYER_REMOVE) within the grace
+  // cancels it — so a refresh never tears down the player's seat (AC 4) while a
+  // genuine departure still frees it after the grace (AC 3).
+  const pendingRemovals = new Map<string, ReturnType<typeof setTimeout>>();
+  const cancelPendingRemoval = (sessionId: string, playerId: string): void => {
+    const key = `${sessionId}:${playerId}`;
+    const timer = pendingRemovals.get(key);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      pendingRemovals.delete(key);
+    }
+  };
+
+  // Identity resolution middleware (Story 2.7): resolve a presented reattach
+  // token into socket.data.playerId BEFORE any handler or the connection event
+  // runs. Optional identity, NEVER access control — a bad/absent/expired token
+  // leaves socket.data unset (a fresh client); the readiness gate owns access.
+  io.use(async (socket, next) => {
+    try {
+      const auth = socket.handshake.auth as { sessionId?: unknown; reattachToken?: unknown };
+      if (typeof auth?.sessionId === 'string' && typeof auth?.reattachToken === 'string') {
+        const record = await resolveReattachRecord(deps.redis, auth.sessionId, auth.reattachToken);
+        if (record !== null) {
+          socket.data.sessionId = auth.sessionId;
+          socket.data.playerId = record.playerId;
+        }
+      }
+    } catch (err) {
+      // Never block the handshake on a resolution error — treat as a fresh client.
+      deps.log.error({ err }, 'reattach resolution failed');
+    }
+    next();
+  });
+
   io.on('connection', (socket) => {
+    // A reconnect within the grace window cancels the pending seat removal, so
+    // the player's role/team/relayOrder are never torn down by a refresh (AC 4).
+    if (socket.data.sessionId !== undefined && socket.data.playerId !== undefined) {
+      cancelPendingRemoval(socket.data.sessionId, socket.data.playerId);
+    }
+    // Re-attach a reconnecting socket whose token the middleware resolved.
+    void restoreReattachedSocket(io, deps, socket);
+
     socket.on('SESSION_CREATE', async (payload, ack) => {
       // A hand-rolled client can omit the ack — without this guard, calling it throws.
       if (typeof ack !== 'function') {
@@ -270,33 +505,47 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
       }
 
       const sessionId = randomUUID();
+      // Mint the facilitator's durable identity (Story 2.7): the public playerId
+      // becomes the roster + authority key; the secret reattachToken is returned
+      // only to this socket via SESSION_IDENTITY and stored server-side.
+      const { playerId, reattachToken } = mintPlayerIdentity();
       let joinCode: string | null = null;
       try {
         joinCode = await mintJoinCode(deps.redis);
         const state = createSessionState({
           sessionId,
           joinCode,
-          facilitatorId: socket.id,
+          facilitatorId: playerId,
           config: parsed.config,
         });
 
         // Persist BEFORE emitting; on persist failure emit nothing but ERROR.
         await deps.redis.setJSON(sessionKey(sessionId), state);
         await deps.redis.setJSON(joinCodeKey(joinCode), sessionId);
+        await storeReattachRecord(deps.redis, sessionId, reattachToken, {
+          playerId,
+          displayName: 'Facilitator',
+          role: 'facilitator',
+        });
 
         await socket.join(sessionRoom(sessionId));
         socket.data.sessionId = sessionId;
+        socket.data.playerId = playerId;
         ack({ sessionId, joinCode });
+        // Private identity packet to the creator only — before the broadcast, so
+        // the client has it when SESSION_STATE lands. AR15: never log the token.
+        socket.emit('SESSION_IDENTITY', { sessionId, playerId, reattachToken });
         io.to(sessionRoom(sessionId)).emit('SESSION_STATE', state);
-        // AR15: never log the joinCode — it is the session's only secret.
-        deps.log.info({ sessionId }, 'session created');
+        // AR15: never log the joinCode or reattachToken — the session's secrets.
+        deps.log.info({ sessionId, playerId }, 'session created');
       } catch (err) {
-        // Best-effort rollback: the two persists are not atomic, so the session
-        // key may have been written before the joincode write failed. Without
-        // cleanup that leaves an unreachable session orphaned in Redis.
+        // Best-effort rollback: the persists are not atomic, so the session/
+        // joincode/reattach keys may be partially written. Without cleanup that
+        // leaves an unreachable session orphaned in Redis.
         try {
           await deps.redis.del(sessionKey(sessionId));
           if (joinCode !== null) await deps.redis.del(joinCodeKey(joinCode));
+          await deleteReattachRecord(deps.redis, sessionId, playerId);
         } catch {
           // Already in the failure path — swallow so the ERROR still reaches the client.
         }
@@ -326,6 +575,13 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           recoverable: true,
         });
 
+      // Durable identity (Story 2.7): reuse an id already resolved from a
+      // reattach token (set by the reconnect middleware), else mint a fresh one.
+      // Only a fresh identity gets a new token + reattach record + SESSION_IDENTITY.
+      const existingPlayerId = socket.data.playerId;
+      const playerId = existingPlayerId ?? randomUUID();
+      const mintedToken = existingPlayerId === undefined ? randomUUID() : null;
+
       try {
         const sessionId = await deps.redis.getJSON<string>(joinCodeKey(parsed.joinCode));
         if (sessionId === null) {
@@ -340,16 +596,69 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Already in the roster: converge idempotently — re-assert room
-        // membership, re-send the snapshot, change nothing, broadcast nothing.
-        if (state.players[socket.id] !== undefined) {
+        // Already in the roster (by durable id): converge idempotently — re-assert
+        // room membership, re-send the snapshot, change nothing, broadcast nothing.
+        if (state.players[playerId] !== undefined) {
           await socket.join(sessionRoom(sessionId));
           socket.data.sessionId = sessionId;
+          socket.data.playerId = playerId;
           socket.emit('SESSION_STATE', state);
           return;
         }
 
-        if (Object.keys(state.players).length >= MAX_PLAYERS) {
+        // Capacity (AC 1) and the join-window (AC 2/3) are evaluated ATOMICALLY
+        // against the WATCHed state inside updateJSON — a plain read-check ahead
+        // of a separate write let two joins at 15 occupancy both pass and reach
+        // 17 (deferred-work.md:65). The mutate is pure and may run once per retry;
+        // per-attempt meaning rides out on `result`. 'between-rounds' admits;
+        // Epic 8 owns relay eligibility for a late joiner. The roster is keyed by
+        // the durable playerId (Story 2.7), never socket.id.
+        const { result } = await deps.redis.updateJSON<SessionState, JoinOutcome>(
+          sessionKey(sessionId),
+          (current) => {
+            if (current === null) return { commit: false, result: { kind: 'vanished' } };
+            if (current.players[playerId] !== undefined) {
+              return { commit: false, result: { kind: 'rejoin' } };
+            }
+            if (current.status !== 'lobby' && current.status !== 'between-rounds') {
+              return { commit: false, result: { kind: 'not-joinable' } };
+            }
+            if (Object.keys(current.players).length >= MAX_PLAYERS) {
+              return { commit: false, result: { kind: 'full' } };
+            }
+            const next = addPlayerToSession(current, {
+              playerId,
+              displayName: parsed.displayName,
+              role: parsed.role,
+            });
+            return { commit: true, value: next, result: { kind: 'added', state: next } };
+          },
+        );
+
+        if (result.kind === 'vanished') {
+          // Session evicted between the pre-read and the transaction.
+          notFound();
+          return;
+        }
+        if (result.kind === 'rejoin') {
+          // Became a rejoin between the fast-path read and the transaction —
+          // converge as the fast path would; reload for the freshest snapshot.
+          const fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+          await socket.join(sessionRoom(sessionId));
+          socket.data.sessionId = sessionId;
+          socket.data.playerId = playerId;
+          if (fresh !== null) socket.emit('SESSION_STATE', fresh);
+          return;
+        }
+        if (result.kind === 'not-joinable') {
+          socket.emit('ERROR', {
+            code: 'SESSION_NOT_JOINABLE',
+            message: 'That session has already started.',
+            recoverable: true,
+          });
+          return;
+        }
+        if (result.kind === 'full') {
           socket.emit('ERROR', {
             code: 'SESSION_FULL',
             message: 'That session is full — 16 is the limit.',
@@ -358,33 +667,25 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Defensive join-window guard; Story 2.6 refines it (between-rounds admits).
-        if (state.status !== 'lobby') {
-          socket.emit('ERROR', {
-            code: 'SESSION_NOT_JOINABLE',
-            message: 'That session has already started.',
-            recoverable: true,
-          });
-          return;
-        }
-
-        const next = addPlayerToSession(state, {
-          playerId: socket.id,
-          displayName: parsed.displayName,
-          role: parsed.role,
-        });
-
-        // Persist then emit. Single-key write — nothing partial to roll back.
-        // Known accepted race (V1 single process): two concurrent joins can
-        // interleave load→modify→store and drop one player; human-speed lobby
-        // joins make this theoretical. No locks/WATCH for this.
-        await deps.redis.setJSON(sessionKey(sessionId), next);
-
-        // Join the room BEFORE broadcasting so the joiner receives their own join.
+        // result.kind === 'added' — broadcast the committed snapshot the store
+        // threaded back (not a re-read), so the broadcast can't reflect a later
+        // interleaving write. Join the room BEFORE broadcasting so the joiner
+        // receives their own join. Broadcast FIRST (before the reattach-record
+        // write) so the roster update isn't delayed behind a Redis round-trip.
         await socket.join(sessionRoom(sessionId));
         socket.data.sessionId = sessionId;
-        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
-        deps.log.info({ sessionId, playerId: socket.id, role: parsed.role }, 'player joined');
+        socket.data.playerId = playerId;
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+        if (mintedToken !== null) {
+          await storeReattachRecord(deps.redis, sessionId, mintedToken, {
+            playerId,
+            displayName: parsed.displayName,
+            role: parsed.role,
+          });
+          // Private identity packet to the joiner only. AR15: never log the token.
+          socket.emit('SESSION_IDENTITY', { sessionId, playerId, reattachToken: mintedToken });
+        }
+        deps.log.info({ sessionId, playerId, role: parsed.role }, 'player joined');
       } catch (err) {
         deps.log.error({ err, socketId: socket.id }, 'SESSION_JOIN failed');
         socket.emit('ERROR', {
@@ -430,7 +731,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
 
         // Authority gate FIRST: a non-facilitator probe must learn nothing
         // about session contents (e.g. whether a playerId exists).
-        if (state.players[socket.id]?.role !== 'facilitator') {
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
           socket.emit('ERROR', {
             code: 'NOT_FACILITATOR',
             message: 'Only the facilitator assigns teams.',
@@ -523,7 +824,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         }
 
         // Authority gate FIRST (a non-facilitator probe learns nothing).
-        if (state.players[socket.id]?.role !== 'facilitator') {
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
           socket.emit('ERROR', {
             code: 'NOT_FACILITATOR',
             message: 'Only the facilitator opens preparation.',
@@ -599,7 +900,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         }
 
         // Authority gate FIRST (a non-facilitator probe learns nothing).
-        if (state.players[socket.id]?.role !== 'facilitator') {
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
           socket.emit('ERROR', {
             code: 'NOT_FACILITATOR',
             message: 'Only the facilitator cancels preparation.',
@@ -661,7 +962,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         }
 
         // Authority gate FIRST.
-        if (state.players[socket.id]?.role !== 'facilitator') {
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
           socket.emit('ERROR', {
             code: 'NOT_FACILITATOR',
             message: 'Only the facilitator starts the round.',
@@ -720,7 +1021,9 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         // Epic 3: voice tokens are re-minted here on role change.
         const sockets = await io.in(sessionRoom(sessionId)).fetchSockets();
         for (const member of sockets) {
-          const teamId = result.state.players[member.id]?.teamId;
+          // Resolve the roster entry by the durable playerId (Story 2.7), not the
+          // rotating socket.id — players is keyed by the durable id now.
+          const teamId = result.state.players[member.data.playerId ?? '']?.teamId;
           if (teamId !== undefined) member.join(teamRoom(sessionId, teamId));
         }
 
@@ -772,6 +1075,143 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           recoverable: true,
         });
       }
+    });
+
+    // Facilitator removes a player from the lobby roster (Story 2.7, AC 1/2).
+    // Modelled on TEAM_ASSIGN: load → facilitator-gate → race-safe mutate →
+    // persist → broadcast. No ack (frozen mutation convention): success is the
+    // SESSION_STATE broadcast + a SESSION_REMOVED notice to the target; failure
+    // is a typed ERROR to the caller.
+    socket.on('PLAYER_REMOVE', async (payload) => {
+      const parsed = parsePlayerRemovePayload(payload);
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: 'You are not in a session.',
+          recoverable: true,
+        });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_SESSION',
+            message: 'You are not in a session.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Authority: only the Facilitator may remove (resolved by durable id).
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator can remove players.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Self-target + unknown-target guard (AC 2): no writes.
+        if (parsed.playerId === socket.data.playerId || state.players[parsed.playerId] === undefined) {
+          socket.emit('ERROR', {
+            code: 'INVALID_REMOVAL',
+            message: "You can't remove that player.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        const { result } = await deps.redis.updateJSON<SessionState, RemoveOutcome>(
+          sessionKey(sessionId),
+          (current) => {
+            if (current === null || current.players[parsed.playerId] === undefined) {
+              return { commit: false, result: { kind: 'noop' } };
+            }
+            const next = removePlayerFromSession(current, parsed.playerId);
+            return { commit: true, value: next, result: { kind: 'removed', state: next } };
+          },
+        );
+
+        if (result.kind === 'noop') {
+          // Target vanished between the guard and the transaction — nothing to do.
+          return;
+        }
+
+        // A kick supersedes any pending disconnect-grace removal for this player.
+        cancelPendingRemoval(sessionId, parsed.playerId);
+        // Invalidate the kicked player's reattach token so they cannot re-attach
+        // (a kick is permanent for this session, unlike a disconnect).
+        await deleteReattachRecord(deps.redis, sessionId, parsed.playerId);
+
+        // Notify the removed player's live socket(s), then broadcast the new roster.
+        const room = io.sockets.adapter.rooms.get(sessionRoom(sessionId));
+        if (room !== undefined) {
+          for (const socketId of room) {
+            const member = io.sockets.sockets.get(socketId);
+            if (member?.data.playerId === parsed.playerId) {
+              member.emit('SESSION_REMOVED', {
+                message: 'The facilitator removed you from the session.',
+              });
+              member.leave(sessionRoom(sessionId));
+            }
+          }
+        }
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+        deps.log.info({ sessionId, removedPlayerId: parsed.playerId }, 'player removed');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'PLAYER_REMOVE failed');
+        socket.emit('ERROR', {
+          code: 'PLAYER_REMOVE_FAILED',
+          message: 'Could not remove the player. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Lobby-phase disconnect cleanup (Story 2.7, AC 3): a tab-close / network
+    // drop must not leave a ghost roster entry that counts toward capacity. But
+    // a refresh is also a disconnect, so removal is DEFERRED by a grace window —
+    // a reconnect within it cancels the removal (AC 4: role/team/seat survive a
+    // refresh). Only the lobby phase is ever cleaned; preparation/active/
+    // between-rounds/ended disconnects are Epic 8 / FR13's pause concern. The
+    // reattach record is always KEPT — disconnect frees the seat, not identity.
+    socket.on('disconnect', () => {
+      const sessionId = socket.data.sessionId;
+      const playerId = socket.data.playerId;
+      if (sessionId === undefined || playerId === undefined) return;
+      // Refresh race: a page reload's NEW socket can connect (and cancel any
+      // pending removal) BEFORE this OLD socket's disconnect fires. If another
+      // live socket already holds this durable identity, the seat is still
+      // occupied — scheduling a removal here would free an actively-connected
+      // player's seat once the grace elapses (AC 4). Skip if any other connected
+      // socket maps to the same player in this session.
+      for (const other of io.sockets.sockets.values()) {
+        if (
+          other.id !== socket.id &&
+          other.data.playerId === playerId &&
+          other.data.sessionId === sessionId
+        ) {
+          return;
+        }
+      }
+      const key = `${sessionId}:${playerId}`;
+      if (pendingRemovals.has(key)) return; // already scheduled by a prior socket
+      const timer = setTimeout(() => {
+        pendingRemovals.delete(key);
+        void removeLobbyPlayer(io, deps, sessionId, playerId);
+      }, graceMs);
+      // Don't let a pending grace timer keep the process alive (clean shutdown/tests).
+      if (typeof timer.unref === 'function') timer.unref();
+      pendingRemovals.set(key, timer);
     });
   });
 }
