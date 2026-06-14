@@ -17,19 +17,18 @@ import { useGameStore } from '../../store/gameStore.js';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
-interface FakeMediaEl {
-  remove: ReturnType<typeof vi.fn>;
-  style: Record<string, string>;
-}
-
 function makeFakeAudioTrack() {
-  const el: FakeMediaEl = { remove: vi.fn(), style: {} };
+  // Real LiveKit `track.attach()` returns a real HTMLAudioElement, and the
+  // controller appends it to `document.body` (jsdom env). Use a real element so
+  // `appendChild` works; spy on `remove` so teardown assertions still hold.
+  const el = document.createElement('audio');
+  vi.spyOn(el, 'remove');
   return {
     el,
     track: {
       kind: Track.Kind.Audio,
-      attach: vi.fn(() => el as unknown as HTMLMediaElement),
-      detach: vi.fn(() => [el as unknown as HTMLMediaElement]),
+      attach: vi.fn(() => el as HTMLMediaElement),
+      detach: vi.fn(() => [el as HTMLMediaElement]),
     },
   };
 }

@@ -8,7 +8,7 @@ context:
 
 # Story TD-1: Client Component Test Framework + Test-Debt Catch-Up
 
-Status: ready-for-dev
+Status: review
 
 <!-- Tech-debt story (not from an epic). Discovered mid-Epic 3: the client has a unit
      runner (Vitest) but no DOM/component-testing layer, so the 11 src/ui components have
@@ -40,31 +40,32 @@ so that the operator-world UI components can be tested through the DOM the way a
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Add the component-testing devDeps to the client (AC: #1)**
-  - [ ] Add `jsdom`, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom` to `apps/client/package.json` **devDependencies**, then `pnpm install` from the **repo root** (pnpm workspaces — never install into a sub-package cwd; see [[worktree-fullstack-testing-gap]]).
-  - [ ] Confirm none of the four land in `apps/server` or `packages/shared` package.json. Run `pnpm -r typecheck` — clean, no `@ts-ignore`.
+- [x] **Task 1 — Add the component-testing devDeps to the client (AC: #1)**
+  - [x] Add `jsdom`, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom` to `apps/client/package.json` **devDependencies**, then `pnpm install` from the **repo root** (pnpm workspaces — never install into a sub-package cwd; see [[worktree-fullstack-testing-gap]]). → `jsdom@^29.1.1`, `@testing-library/react@^16.3.2`, `@testing-library/user-event@^14.6.1`, `@testing-library/jest-dom@^6.9.1` (all latest, Vitest-4/React-18 compatible); root `pnpm install` ✓.
+  - [x] Confirm none of the four land in `apps/server` or `packages/shared` package.json. Run `pnpm -r typecheck` — clean, no `@ts-ignore`. → absent from server/shared ✓; `pnpm -r typecheck` clean across all 3 workspaces.
 
-- [ ] **Task 2 — Wire the jsdom environment + setup file (AC: #2)**
-  - [ ] Add a `test` block to `apps/client/vite.config.ts`: `environment: 'jsdom'`, `globals: true` (optional — decide and document), `setupFiles: ['./src/test/setup.ts']`. Reference the Vitest config types (`import { defineConfig } from 'vitest/config'` or the triple-slash reference) so `test` is type-checked.
-  - [ ] Create `apps/client/src/test/setup.ts` → `import '@testing-library/jest-dom'` + `afterEach(() => cleanup())` from `@testing-library/react`.
+- [x] **Task 2 — Wire the jsdom environment + setup file (AC: #2)**
+  - [x] Add a `test` block to `apps/client/vite.config.ts`: `environment: 'jsdom'`, `globals: true` (optional — decide and document), `setupFiles: ['./src/test/setup.ts']`. Reference the Vitest config types (`import { defineConfig } from 'vitest/config'` or the triple-slash reference) so `test` is type-checked. → added `test` block with `environment: 'jsdom'`, `globals: true`, `setupFiles`; added `/// <reference types="vitest/config" />` for typing; preserved the existing `preview.allowedHosts` block.
+  - [x] Create `apps/client/src/test/setup.ts` → `import '@testing-library/jest-dom'` + `afterEach(() => cleanup())` from `@testing-library/react`. → created; imports `@testing-library/jest-dom/vitest` (the Vitest-matcher entry) + `afterEach(cleanup)`.
 
-- [ ] **Task 3 — Regression-guard the existing 221 tests under jsdom (AC: #3)**
-  - [ ] Run `pnpm --filter @bomb-squad/client test`; confirm **221/221** still pass. jsdom is a superset, so node-only logic tests should be unaffected.
-  - [ ] **Specifically re-check `connectVoice.ts`** — it has a `typeof document !== 'undefined'` guard around attaching `<audio>` to `document.body`. Under jsdom that branch now executes in tests. Confirm `connectVoice.test.ts` / `requestVoiceToken.test.ts` still pass and don't leak audio elements between tests (the `afterEach(cleanup)` + the existing teardown should cover it; add a guard if not). Note any test that asserted DOM-absent behaviour and fix it in place.
+- [x] **Task 3 — Regression-guard the existing tests under jsdom (AC: #3)**
+  - [x] Run `pnpm --filter @bomb-squad/client test`; confirm all existing tests still pass. jsdom is a superset, so node-only logic tests should be unaffected. → **227/227 pass** (the spec's "221" predates the 2.6/2.7 merges, which added 6 tests; real pre-TD-1 baseline is 227 — AC #3/#6 "all existing pass" satisfied at 227).
+  - [x] **Specifically re-check `connectVoice.ts`** — `typeof document` guard around attaching `<audio>` to `document.body`. Under jsdom that branch now executes in tests. → it DID fail under jsdom exactly as flagged: the voice test's fake `track.attach()` returned a plain `{remove,style}` stub that jsdom's `document.body.appendChild` rejects (`parameter 1 is not of type 'Node'`). **Source is correct** (real LiveKit returns a real `HTMLAudioElement`); fixed the *test fake* in `connectVoice.test.ts` to return a real `document.createElement('audio')` with a spied `remove` — faithful to the SDK, all teardown assertions intact, no source change. `afterEach(cleanup)` handles inter-test DOM hygiene.
 
-- [ ] **Task 4 — Establish + document the mocking convention (AC: #4)**
-  - [ ] **Socket:** add a small helper (e.g. `src/test/mockSocket.ts`) that `vi.mock('../net/socket')`s `getSocket()` to return a fake with `emit`/`on`/`timeout().emit` spies, mirroring the real typed surface used by the UI (`Landing.tsx` uses `.timeout(ms).emit(EVENT, payload, ack)` — the fake must support that ack shape). Keep it typed against `ClientToServerEvents` so `socket.emit(string, any)` stays forbidden even in tests.
-  - [ ] **R3F:** document (and provide a reusable `vi.mock('@react-three/fiber', …)` snippet) the convention for any component that transitively imports the bomb scene — stub `Canvas`/hooks so the tree renders in jsdom without WebGL. (Not exercised by Task 5's pure-DOM components, but the convention must exist before anyone mounts a 3D surface — design it once here.)
-  - [ ] Write the convention down: a short `apps/client/src/test/README.md` (or top-of-file JSDoc on the helpers) so future UI stories follow one pattern, not N.
+- [x] **Task 4 — Establish + document the mocking convention (AC: #4)**
+  - [x] **Socket:** add a small helper (e.g. `src/test/mockSocket.ts`) that `vi.mock('../net/socket')`s `getSocket()` to return a fake with `emit`/`on`/`timeout().emit` spies, mirroring the real typed surface used by the UI (`Landing.tsx` uses `.timeout(ms).emit(EVENT, payload, ack)` — the fake must support that ack shape). Keep it typed against `ClientToServerEvents` so `socket.emit(string, any)` stays forbidden even in tests. → `src/test/mockSocket.ts` exports `createMockSocket()` returning `{ socket, emit, timeoutEmit, on, off, id, fire }`; `socket` is cast to the real `AppClientSocket` (`Socket<ServerToClientEvents, ClientToServerEvents>`) so event-name/payload typing is preserved at call sites. `.timeout(ms).emit(...)` lands on `timeoutEmit`; `.fire(EVENT, …)` simulates a server push (e.g. `ERROR`).
+  - [x] **R3F:** document (and provide a reusable `vi.mock('@react-three/fiber', …)` snippet) the convention for any component that transitively imports the bomb scene — stub `Canvas`/hooks so the tree renders in jsdom without WebGL. → documented in `src/test/README.md` "Pattern 2" with a copy-paste `vi.mock('@react-three/fiber', …)` snippet (stub `Canvas`→DOM, no-op `useFrame`/`useThree`, + drei note). Not exercised by the Task 5 plain-DOM components, but ready for the first 3D-mounting test.
+  - [x] Write the convention down: a short `apps/client/src/test/README.md`. → created: philosophy (behaviour-over-internals), Pattern 1 (socket mock + store seeding), Pattern 2 (R3F stub).
 
-- [ ] **Task 5 — Catch-up component tests: Landing, Lobby, Preparation (AC: #5)**
-  - [ ] `Landing.test.tsx` — renders; user types a name and clicks Join/Host; assert the correct typed socket emit (`SESSION_JOIN` / `SESSION_CREATE`) fires with the expected payload (mirror the `Landing.tsx:~150` `.timeout().emit` path). Cover the obvious validation/disabled-button state.
-  - [ ] `Lobby.test.tsx` — renders the roster from a seeded `gameStore`; assert a primary facilitator/player interaction surfaces the right emit or UI state (pick the load-bearing one — e.g. ready toggle / role pick / start gating) via accessible queries.
-  - [ ] `Preparation.test.tsx` — renders the preparation view from store state; assert the primary control's behaviour through the DOM.
-  - [ ] All three: query by **role/label/text**, drive interactions with `@testing-library/user-event`, mock the socket via the Task 4 helper, seed `gameStore` via its existing API (do not reach into internals). Assert user-visible behaviour, not props/state.
+- [x] **Task 5 — Catch-up component tests: Landing, Lobby, Preparation (AC: #5)**
+  - [x] `Landing.test.tsx` — renders; user types a name and clicks Join/Host; assert the correct typed socket emit fires. → 4 tests: render surface; **host** → `timeoutEmit('SESSION_CREATE', {}, fn)`; **join** (type name + pick role + type 6-char code auto-submits) → `emit('SESSION_JOIN', {joinCode:'ABCDEF', displayName:'Maya', role:'defuser'})`; **no-emit when role missing** (validation path).
+  - [x] `Lobby.test.tsx` — renders the roster from a seeded `gameStore`; assert a primary facilitator interaction. → 3 tests: renders null with no session; roster shows each name; facilitator clicks team `A` → `emit('TEAM_ASSIGN', {playerId:'p1', teamId:'A', role:'defuser'})`.
+  - [x] `Preparation.test.tsx` — renders the preparation view from store state; assert the primary control's behaviour. → 4 tests: null with no session; facilitator heading + upcoming defuser shown; two-step Start confirm → `emit('ROUND_START')`; Back-to-lobby → `emit('PREPARATION_CANCEL')`.
+  - [x] All three: query by **role/label/text**, drive interactions with `@testing-library/user-event`, mock the socket via the Task 4 helper, seed `gameStore` via `useGameStore.setState(...)` (no internals). Assert user-visible behaviour, not props/state. → done; 11 component tests total, all green.
+  - [x] **Added in-ticket (test-debt catch-up, post-review decision with Jay):** two more pure-DOM components that were carrying real untested logic — `ConfirmButton.test.tsx` (6 tests: resting render, arm-on-first-click, fire-on-second-click, **fire-once guard** via two synchronous clicks, Cancel disarms, Escape disarms) and `ResolutionBanner.test.tsx` (6 tests: null→nothing, the three verdict labels via `it.each`, defused 2s hold→between-rounds surface, failure 3s hold). The latter introduces the **fake-timers pattern** (`vi.useFakeTimers` + `act(advanceTimersByTime)`) into the test convention for future timer/HUD tests. `ActiveRound`/`VoiceController`/`PlatformGate`/`Button`/`AppShell`/`LoadingScreen` remain correctly out of scope (R3F-mounting, voice-story territory, already-logic-tested, or trivial).
 
-- [ ] **Task 6 — Green the full suite (AC: #6)**
-  - [ ] `pnpm -r test` green (client 221 + new; server 319; shared 136). `tsc --noEmit` clean across workspaces. New tests run inside the existing `vitest run` — no new command, no separate CI step.
+- [x] **Task 6 — Green the full suite (AC: #6)**
+  - [x] `pnpm -r test` green. `tsc --noEmit` clean across workspaces. New tests run inside the existing `vitest run` — no new command, no separate CI step. → **client 238** (227 baseline + 11 new), **server 351**, **shared 136** all green; `pnpm -r typecheck` clean across all 3 workspaces; new tests run under the existing `vitest run` (no separate command/CI step).
 
 > **No interactive human-verify gate.** Per [[human-verification-ac-rule]], that gate is for *user-visible / e2e-testable* feature stories. TD-1 is **developer-facing test infrastructure** — its "verification" is the green `pnpm -r test` + `tsc` in Task 6, not an observed Jay session. Done = AC #6 green and the convention documented.
 
@@ -125,8 +126,52 @@ Master's `node_modules` was **stale** at baseline `d4fcb50` — `livekit-client`
 - [Ref: React Testing Library] — https://testing-library.com/docs/react-testing-library/intro/ (query-by-role/label/text; behaviour over internals).
 - [Ref: Vitest jsdom environment] — https://vitest.dev/guide/environment (per-project `environment: 'jsdom'` + `// @vitest-environment` docblock fallback).
 
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-opus-4-8 (gds-dev-story workflow)
+
+### Debug Log References
+
+- `pnpm install` (root) — added `jsdom@29.1.1`, `@testing-library/react@16.3.2`, `@testing-library/user-event@14.6.1`, `@testing-library/jest-dom@6.9.1` to `apps/client` devDeps only; `pnpm -r typecheck` clean.
+- `pnpm --filter @bomb-squad/client test` — under the new jsdom env, first run was **2 failed / 225 passed**: `connectVoice.test.ts` threw `Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'` because the faked `track.attach()` returned a plain object that jsdom's `document.body.appendChild` rejects (the `typeof document` guard in `connectVoice.ts:87` now takes the DOM branch). Fixed the test fake (real `document.createElement('audio')`); re-run **227/227**.
+- New component files: `pnpm --filter @bomb-squad/client test src/ui/__tests__/{Landing,Lobby,Preparation}.test.tsx` → 11/11.
+- Full suite: `pnpm -r test` → client **238**, server **351**, shared **136**, all green. `pnpm -r typecheck` clean.
+- Benign: `Warning: --localstorage-file was provided without a valid path` — a jsdom-29/Node interaction, no effect on results.
+
+### Completion Notes List
+
+- **AC #1** — 4 test devDeps added to `apps/client` only (absent from `apps/server`/`packages/shared`); latest versions, Vitest-4/React-18 compatible; `tsc --noEmit` clean, no `@ts-ignore`.
+- **AC #2** — `vite.config.ts` gains a `test` block (`environment: 'jsdom'`, `globals: true`, `setupFiles: ['./src/test/setup.ts']`) with a `/// <reference types="vitest/config" />`; `src/test/setup.ts` wires `@testing-library/jest-dom/vitest` matchers + `afterEach(cleanup)`.
+- **AC #3** — chose the **global jsdom env** (story's recommended path; no per-file fallback was needed). All pre-existing tests pass under it: **227/227**. The spec's "221" predates the 2.6/2.7 merges (which added 6 client tests) — the real pre-TD-1 baseline is 227, and AC #3/#6's "all existing pass" is satisfied at 227. The flagged `connectVoice.ts` DOM-guard wrinkle materialized and was resolved in the **test fake** (not source — the source is correct; real LiveKit returns a real `HTMLAudioElement`).
+- **AC #4** — mocking convention written once: `src/test/mockSocket.ts` (typed socket fake) + `src/test/fixtures.ts` (session/player/team factories) + `src/test/README.md` documenting the philosophy, the socket-mock pattern, and the `@react-three/fiber` stub pattern for future 3D-mounting tests.
+- **AC #5** — 11 component tests across `Landing`/`Lobby`/`Preparation`: render-without-crash, the primary interaction per component asserted via accessible role/label/text + `user-event`, and the resulting typed socket emit (`SESSION_CREATE`/`SESSION_JOIN`/`TEAM_ASSIGN`/`ROUND_START`/`PREPARATION_CANCEL`). Plus negative/empty-state cases (no-session → renders null; missing-role → no emit).
+- **AC #5 (extended in-ticket)** — +12 tests on two more pure-DOM, logic-bearing primitives flagged as existing test debt: `ConfirmButton` (the canonical two-step destructive pattern — incl. the fire-once-per-arming guard, Escape/Cancel disarm) and `ResolutionBanner` (win/loss/time-expired verdict branching + the timed hold→between-rounds transition, using fake timers). 23 component tests total.
+- **AC #6** — full suite green inside the existing `vitest run` (no new command/CI step): client **250** / server 351 / shared 136; `pnpm -r typecheck` clean.
+- **Scope held:** no live R3F/`DefuserView`/`BombScene` mounted in a test (the stub convention exists for when one is); only the three Epic-2 plain-DOM flows were tested, as scoped.
+- **No human-verify gate** (dev-facing infra) — done = green `pnpm -r test` + `tsc`, per the story's stated exception to [[human-verification-ac-rule]].
+
+### File List
+
+- **UPDATE** `apps/client/package.json` — add `jsdom`, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom` (devDeps).
+- **UPDATE** `pnpm-lock.yaml` — lockfile for the new deps.
+- **UPDATE** `apps/client/vite.config.ts` — add the `test` block (jsdom env + globals + setupFiles) and the `vitest/config` type reference.
+- **NEW** `apps/client/src/test/setup.ts` — jest-dom matchers + `afterEach(cleanup)`.
+- **NEW** `apps/client/src/test/mockSocket.ts` — typed `getSocket()` fake (`createMockSocket`).
+- **NEW** `apps/client/src/test/fixtures.ts` — `makeSession`/`makePlayer`/`makeTeam`/`makeRoundConfig` factories.
+- **NEW** `apps/client/src/test/README.md` — the documented mocking/testing convention (socket + R3F).
+- **NEW** `apps/client/src/ui/__tests__/Landing.test.tsx` — 4 tests.
+- **NEW** `apps/client/src/ui/__tests__/Lobby.test.tsx` — 3 tests.
+- **NEW** `apps/client/src/ui/__tests__/Preparation.test.tsx` — 4 tests.
+- **NEW** `apps/client/src/ui/__tests__/ConfirmButton.test.tsx` — 6 tests (in-ticket catch-up).
+- **NEW** `apps/client/src/ui/__tests__/ResolutionBanner.test.tsx` — 6 tests (in-ticket catch-up; fake-timers pattern).
+- **UPDATE** `apps/client/src/voice/__tests__/connectVoice.test.ts` — fake `track.attach()` now returns a real `HTMLAudioElement` (jsdom-compatible); source unchanged.
+
 ## Change Log
 
 | Date       | Change                                                                 |
 |------------|------------------------------------------------------------------------|
 | 2026-06-14 | Story TD-1 created (ready-for-dev): add client component-test framework (jsdom + React Testing Library + jest-dom + user-event), establish the socket + `@react-three/fiber` mocking convention once, and pay down the most valuable test-debt slice (Landing / Lobby / Preparation component tests). Confirmed at baseline: 221 client tests, all pure-logic, zero component renders; 11 `src/ui/` components untested; no DOM-testing deps installed. |
+| 2026-06-14 | Implemented all 6 tasks (AC #1–#6): added the 4 test devDeps (client-only), wired the jsdom `test` block + `src/test/setup.ts`, established the mocking convention (`mockSocket.ts` + `fixtures.ts` + `README.md`), and added 11 component tests (Landing/Lobby/Preparation). Re-baselined existing tests 221→227 (2.6/2.7 merges); resolved the predicted `connectVoice` jsdom DOM-guard wrinkle in the test fake (source unchanged). Full suite green: client 238 / server 351 / shared 136; `tsc` clean. Status → review. |
+| 2026-06-14 | In-ticket test-debt catch-up (post-review decision): +12 tests on `ConfirmButton` (two-step destructive pattern incl. fire-once guard + Escape/Cancel disarm) and `ResolutionBanner` (verdict branching + timed hold→between-rounds, fake-timers pattern). Client 238→**250**; server 351 / shared 136 unchanged; `tsc` clean. 23 component tests total. |
