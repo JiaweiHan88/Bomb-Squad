@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-14  # story 2.7 → done: code review (3 patches applied — refresh-race seat removal, readiness/identity middleware order, RestoreOutcome discriminant + refresh-race regression test; 8 deferred, 5 dismissed); tsc + 332 server tests green
+last_updated: 2026-06-14  # stories 2.6 + 2.7 → done: code review. 2.7 (3 patches: refresh-race seat removal, readiness/identity middleware order, RestoreOutcome discriminant). 2.6 (3 patches: txConn error listener, mutate-throw unwatch, UpdateDecision union). tsc + 333 server tests green
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,7 @@ development_status:
   2-3-player-joins-via-code-and-picks-a-role: done
   2-4-team-and-per-player-role-assignment: done
   2-5-lobby-roster-ready-state-and-mic-check: backlog
-  2-6-capacity-and-join-window-guards: review
+  2-6-capacity-and-join-window-guards: done
   2-7-lobby-resilience-and-facilitator-player-controls: done
   epic-2-retrospective: optional
 

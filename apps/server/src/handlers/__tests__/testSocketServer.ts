@@ -14,7 +14,7 @@ import type {
   TeamId,
   TimerState,
 } from '@bomb-squad/shared';
-import type { RedisStore } from '../../state/redis.js';
+import type { RedisStore, UpdateDecision } from '../../state/redis.js';
 import type { SessionLog, SessionSocketData } from '../sessionHandlers.js';
 import { createTimerScheduler, type TimerScheduler } from '../../timer/timerScheduler.js';
 
@@ -65,7 +65,7 @@ export function createMemoryRedisStore(
     },
     async updateJSON<T, R>(
       key: string,
-      mutate: (current: T | null) => { commit: boolean; value?: T; result: R },
+      mutate: (current: T | null) => UpdateDecision<T, R>,
       _opts?: { maxRetries?: number },
     ): Promise<{ committed: boolean; result: R }> {
       // Re-read → mutate, looping if the one-shot hook (or anything) changed the

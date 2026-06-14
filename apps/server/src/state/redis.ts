@@ -24,7 +24,19 @@ export interface RedisLike {
   multi(): RedisMultiLike;
   duplicate(): RedisLike;
   status: string;
+  /** EventEmitter hook — needed to attach an 'error' listener on a duplicated
+   * connection so an emitted error can't crash the process. */
+  on(event: string, listener: (...args: unknown[]) => void): unknown;
 }
+
+/**
+ * The decision a `mutate` returns. A discriminated union so `commit: true`
+ * structurally REQUIRES `value` — without this, `commit: true` with an undefined
+ * `value` would `JSON.stringify(undefined)` and write a corrupt key.
+ */
+export type UpdateDecision<T, R> =
+  | { commit: true; value: T; result: R }
+  | { commit: false; result: R };
 
 export interface RedisStore {
   getJSON<T>(key: string): Promise<T | null>;
@@ -46,7 +58,7 @@ export interface RedisStore {
    */
   updateJSON<T, R>(
     key: string,
-    mutate: (current: T | null) => { commit: boolean; value?: T; result: R },
+    mutate: (current: T | null) => UpdateDecision<T, R>,
     opts?: { maxRetries?: number },
   ): Promise<{ committed: boolean; result: R }>;
 }
@@ -80,13 +92,28 @@ export function createRedisStore(client: RedisLike): RedisStore {
   let txQueueTail: Promise<unknown> = Promise.resolve();
 
   function transactionConnection(): RedisLike {
-    if (txConn === null) txConn = client.duplicate();
+    if (txConn === null) {
+      const conn = client.duplicate();
+      // A duplicated ioredis connection is a fresh EventEmitter with NO 'error'
+      // listener of its own (the main client's listener in connectRedis does not
+      // catch this separate socket's events). An unhandled 'error' on an
+      // EventEmitter throws — i.e. crashes the process. Attach one. ioredis
+      // auto-reconnects, so per-command failures still surface as rejected awaits
+      // below (→ *_FAILED); this listener only prevents the process-level crash.
+      conn.on('error', () => {});
+      // On a terminal close, drop the cache so the next call re-duplicates a
+      // fresh connection rather than reusing a dead one.
+      conn.on('close', () => {
+        if (txConn === conn) txConn = null;
+      });
+      txConn = conn;
+    }
     return txConn;
   }
 
   async function runTransaction<T, R>(
     key: string,
-    mutate: (current: T | null) => { commit: boolean; value?: T; result: R },
+    mutate: (current: T | null) => UpdateDecision<T, R>,
     maxRetries: number,
   ): Promise<{ committed: boolean; result: R }> {
     const conn = transactionConnection();
@@ -102,7 +129,17 @@ export function createRedisStore(client: RedisLike): RedisStore {
         throw err;
       }
 
-      const decision = mutate(current);
+      // `mutate` is caller-supplied; if it throws, release the WATCH first so it
+      // can't poison the next transaction on this shared connection.
+      // `mutate` is caller-supplied; if it throws, release the WATCH first so it
+      // can't poison the next transaction on this shared connection.
+      let decision: UpdateDecision<T, R>;
+      try {
+        decision = mutate(current);
+      } catch (err) {
+        await conn.unwatch();
+        throw err;
+      }
       if (!decision.commit) {
         await conn.unwatch();
         return { committed: false, result: decision.result };
@@ -136,7 +173,7 @@ export function createRedisStore(client: RedisLike): RedisStore {
 
     updateJSON<T, R>(
       key: string,
-      mutate: (current: T | null) => { commit: boolean; value?: T; result: R },
+      mutate: (current: T | null) => UpdateDecision<T, R>,
       opts?: { maxRetries?: number },
     ): Promise<{ committed: boolean; result: R }> {
       const maxRetries = opts?.maxRetries ?? 5;

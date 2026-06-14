@@ -76,6 +76,12 @@ class FakeRedis implements RedisLike {
     return this;
   }
 
+  /** EventEmitter hook — no-op in the fake; the real store attaches an 'error'
+   * listener on the duplicated connection. */
+  on(_event: string, _listener: (...args: unknown[]) => void): this {
+    return this;
+  }
+
   /** Test helper: read raw stored bytes for assertions. */
   raw(key: string): string | undefined {
     return this.store.get(key);
@@ -242,6 +248,23 @@ describe('createRedisStore', () => {
       ).rejects.toThrow('malformed JSON at key "corrupt"');
       // The WATCH must be released even on the throw path.
       expect(fake.commandLog).toContain('unwatch');
+    });
+
+    it('unwatches and surfaces an error thrown by mutate (no leaked WATCH on the shared connection)', async () => {
+      const store = createRedisStore(fake);
+      await store.setJSON('k', { v: 1 });
+      fake.commandLog.length = 0;
+
+      await expect(
+        store.updateJSON('k', () => {
+          throw new Error('mutate boom');
+        }),
+      ).rejects.toThrow('mutate boom');
+      // A throwing mutate must release the WATCH so it can't poison the next
+      // transaction on the shared dedicated connection — and must never commit.
+      expect(fake.commandLog).toContain('unwatch');
+      expect(fake.commandLog).not.toContain('multi');
+      expect(fake.raw('k')).toBe(JSON.stringify({ v: 1 })); // unchanged
     });
 
     it('serializes concurrent updateJSON calls (no interleave) into the final value', async () => {

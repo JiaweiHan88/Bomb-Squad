@@ -4,7 +4,7 @@ baseline_commit: d17df0c (master; clean worktree at story-creation time)
 
 # Story 2.6: Capacity & Join-Window Guards
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -94,6 +94,19 @@ so that sessions stay within the 2–16 cap and no one joins mid-round.
   - [x] `pnpm -r test` → all green: shared untouched; client untouched (no client changes — confirm count unchanged); server existing + new `redis.test.ts` `updateJSON` cases + the SESSION_JOIN capacity/race/window/between-rounds/failure suites.
   - [x] `pnpm --filter @bomb-squad/client build` → succeeds (sanity; no client change expected to move it).
   - [x] **Live smoke against real Redis (document results in Completion Notes):** boot the worktree server (`tsx`, no `watch` — see the worktree gotcha note) against a throwaway `redis:7-alpine` + `postgres:16-alpine` so the WATCH/MULTI path runs against **real** ioredis, not just the fake. (1) Fill a session to 16 via headless `socket.io-client`s, then attempt a 17th → `SESSION_FULL`; `grep` server stdout for the join code → 0 (AR15). (2) Concurrency: at 15 occupancy fire two joins in the same tick (`Promise.all`) → assert the final `GET session:<id>` roster length is exactly 16 and exactly one socket got `SESSION_FULL`. (3) Seed/flip a session to `between-rounds`, join → admitted, joiner in no `relayOrder`; flip to `active`, join → `SESSION_NOT_JOINABLE`. Tear down containers after. If a browser pass isn't possible, say exactly what was verified headlessly.
+
+## Review Findings
+
+_Code review 2026-06-14 (gds-code-review: Blind Hunter + Edge Case Hunter + Acceptance Auditor). All 3 ACs verified fully satisfied; the WATCH/MULTI race-safety, queue-choice reasoning, and WATCH hygiene are correct. Findings are operational hardening of the new `updateJSON` primitive. 3 patch (all fixed) · 4 deferred · 3 dismissed._
+
+- [x] [Review][Patch] Dedicated `txConn` (`client.duplicate()`) had no `'error'` listener — an emitted connection error on this separate EventEmitter crashes the Node process [apps/server/src/state/redis.ts] — **FIXED 2026-06-14:** `transactionConnection` now attaches an `'error'` listener (prevents the process crash; ioredis auto-reconnects, per-command failures still surface as `*_FAILED`) and a `'close'` listener that drops the cache so the next call re-duplicates a fresh connection.
+- [x] [Review][Patch] A throwing `mutate(current)` leaked a WATCH onto the shared dedicated connection [apps/server/src/state/redis.ts] — **FIXED 2026-06-14:** `mutate` is now wrapped in try/unwatch/throw (mirrors the malformed-JSON read path). New regression test "thrown by mutate" — verified red without the guard (only `watch`,`get` logged), green with it.
+- [x] [Review][Patch] `updateJSON` decision type allowed `commit: true` with `value` undefined → `JSON.stringify(undefined)` corrupts the key [apps/server/src/state/redis.ts] — **FIXED 2026-06-14:** introduced an exported `UpdateDecision<T,R>` discriminated union (`commit: true` structurally requires `value`); applied across the interface, `runTransaction`, the method, and both fakes. tsc confirms all call sites already supply `value`.
+
+- [x] [Review][Defer] Global serialization queue is a liveness coupling — one slow/hung transaction blocks every session's join/cleanup (now 4+ call sites share the one queue + one connection). Bounded in practice by the main client's `commandTimeout: 2000` (inherited by `duplicate()`), so a hung command rejects in ~2 s and the queue advances [apps/server/src/state/redis.ts:146-156] — deferred (V1 human-speed rates; spec explicitly accepted the global queue)
+- [x] [Review][Defer] `txConn` is never `quit()`/torn down and has no explicit reconnect/health handling; relies on ioredis auto-reconnect [apps/server/src/state/redis.ts:82-85] — deferred (auto-reconnect + the P1 listener cover the common case; full reset-on-close is extra hardening)
+- [x] [Review][Defer] `rejoin` reload via `getJSON` can return `null` (session evicted between commit-read and reload) → joins room + sets `socket.data` for a vanished session with no snapshot [apps/server/src/handlers/sessionHandlers.ts rejoin branch] — deferred (narrow window, benign convergence)
+- [x] [Review][Defer] The headline AC1 race test exercises the in-memory fake's `updateJSON`, a different code path from the real WATCH/MULTI adapter; only the (now-deleted) live-smoke harness exercised real ioredis concurrency — no standing CI integration test for the real race [apps/server/src/handlers/__tests__/sessionHandlers.test.ts] — deferred (add a real-Redis integration test when CI Redis infra lands)
 
 ## Dev Notes
 
