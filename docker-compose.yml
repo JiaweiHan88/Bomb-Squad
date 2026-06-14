@@ -35,7 +35,12 @@ services:
   # ── Voice infrastructure ─────────────────────────────────────────────────────
 
   livekit:
-    image: livekit/livekit-server:v1.8
+    # v1.13.x speaks the same protocol generation (17) as the browser SDK
+    # livekit-client@2.19.x — the old v1.8 SFU (protocol 15) made the modern
+    # client probe a missing /rtc/v1 path and reconnect-loop every ~15s. Tokens
+    # minted by livekit-server-sdk@2.15 are accepted unchanged across these
+    # versions (JWT format is stable).
+    image: livekit/livekit-server:v1.13.1
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     environment:
@@ -111,7 +116,12 @@ services:
       # network each service is reachable by its service name.
       REDIS_URL: "redis://redis:6379"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/bombsquad"
-      LIVEKIT_URL: "ws://livekit:7880"
+      # LIVEKIT_URL is NOT an internal dial target — the server never connects to
+      # LiveKit (it only signs JWTs locally). This value is handed verbatim to the
+      # BROWSER in the VOICE_TOKEN grant, so it must be reachable FROM THE CLIENT.
+      # The compose service name `livekit` is unresolvable in a browser
+      # (ERR_NAME_NOT_RESOLVED) — use the published host URL from .env instead.
+      LIVEKIT_URL: "${LIVEKIT_URL:-ws://localhost:7880}"
     ports:
       # Publish server port to host for smoke-test health probing and debugging.
       # Production may remove this and route everything through Caddy (port 443).

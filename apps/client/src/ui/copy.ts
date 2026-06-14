@@ -72,3 +72,12 @@ export const RESULT_TIME_EXPIRED = 'TIME EXPIRED.';
 // Interim post-round surface — Story 8.6 (between-rounds + scoreboard preview)
 // replaces this. Deliberately NOT a scoreboard (AC-3: no mid-round scoreboard).
 export const BETWEEN_ROUNDS_PLACEHOLDER = 'Round over. Stand by for the next one.';
+
+// Bomb Room voice (Story 3.2) — the join affordance + EXPERIENCE.md voice
+// microcopy. The speaker pill + mute toggle are Story 3.4, not here.
+export const VOICE_CONNECT_CTA = 'Connect to Bomb Room voice';
+export const VOICE_CONNECTING = 'Connecting to Bomb Room…';
+export const VOICE_CONNECTED = 'Bomb Room voice connected.';
+// Non-blocking failure microcopy — the game keeps running (AC #4); dismissible.
+export const VOICE_UNAVAILABLE = 'Voice unavailable — game continues without it';
+export const VOICE_DISMISS = 'Dismiss';

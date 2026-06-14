@@ -10,9 +10,19 @@
   admin localhost:2019
 }
 
-# Redirect HTTP → HTTPS
+# HTTP (port 80).
+# Production redirects to HTTPS; for the LOCALHOST voice check we serve over
+# plain http so the page origin (http://localhost) can open the LiveKit
+# `ws://localhost:7880` socket without a mixed-content block. localhost is a
+# secure context even over http, so getUserMedia (mic) still works. wss/TLS
+# termination for LiveKit is Story 10-3, out of scope here.
 :80 {
-  redir https://{host}{uri} permanent
+  @socketio {
+    path /socket.io/*
+  }
+  reverse_proxy @socketio server:{$PORT:3001}
+  reverse_proxy /health server:{$PORT:3001}
+  reverse_proxy /* client:5173
 }
 
 :443 {

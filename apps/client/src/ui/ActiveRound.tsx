@@ -7,6 +7,7 @@ import ManualViewer from '../manual/ManualViewer.js';
 import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
 import ResolutionBanner from './ResolutionBanner.js';
+import VoiceController from './VoiceController.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
 
 /**
@@ -59,6 +60,9 @@ export default function ActiveRound() {
     <div className="relative flex flex-1 flex-col">
       {surface}
       <ResolutionBanner />
+      {/* Bomb Room voice join (Story 3.2) — non-blocking, unmount-safe. Self-hides
+          for non-Bomb-Room roles. Speaker pill + mute are Story 3.4. */}
+      <VoiceController />
     </div>
   );
 }
