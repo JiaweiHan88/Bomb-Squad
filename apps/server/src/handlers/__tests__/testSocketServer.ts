@@ -30,10 +30,27 @@ export interface MemoryRedisStore extends RedisStore {
   data: Map<string, string>;
 }
 
-/** Map-backed RedisStore fake. Pass `overrides` to inject failures. */
-export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryRedisStore {
+export interface MemoryRedisStoreOptions {
+  /**
+   * One-shot interleave hook for updateJSON. Fires ONCE, between this store's
+   * read of `key` and its write, then disarms — modelling "another client wrote
+   * between my load and my commit". A test arms it to mutate `data`; the fake
+   * notices `data` changed since its read and re-runs `mutate` against the new
+   * value, exercising the real adapter's WATCH/EXEC-null → retry path (which a
+   * single-threaded Map is otherwise too atomic to surface).
+   */
+  onBeforeCommit?: (key: string) => void | Promise<void>;
+}
+
+/** Map-backed RedisStore fake. Pass `overrides` to inject failures, `options` to arm the race hook. */
+export function createMemoryRedisStore(
+  overrides?: Partial<RedisStore>,
+  options?: MemoryRedisStoreOptions,
+): MemoryRedisStore {
   const data = new Map<string, string>();
-  return {
+  let onBeforeCommit = options?.onBeforeCommit;
+
+  const store: MemoryRedisStore = {
     data,
     async getJSON<T>(key: string): Promise<T | null> {
       const raw = data.get(key);
@@ -45,6 +62,34 @@ export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryR
     async del(key: string): Promise<void> {
       data.delete(key);
     },
+    async updateJSON<T, R>(
+      key: string,
+      mutate: (current: T | null) => { commit: boolean; value?: T; result: R },
+      _opts?: { maxRetries?: number },
+    ): Promise<{ committed: boolean; result: R }> {
+      // Re-read → mutate, looping if the one-shot hook (or anything) changed the
+      // raw bytes between read and write. Models the optimistic retry: a fresh
+      // read on every attempt, so the guard inside `mutate` re-evaluates.
+      for (;;) {
+        const before = data.get(key);
+        const current = before === undefined ? null : (JSON.parse(before) as T);
+        const decision = mutate(current);
+
+        if (onBeforeCommit) {
+          const hook = onBeforeCommit;
+          onBeforeCommit = undefined; // self-clearing: fire exactly once
+          await hook(key);
+        }
+
+        // If the raw bytes moved since our read, retry from a fresh load — this
+        // is the "WATCHed key changed, EXEC returned null" branch.
+        if (data.get(key) !== before) continue;
+
+        if (!decision.commit) return { committed: false, result: decision.result };
+        data.set(key, JSON.stringify(decision.value));
+        return { committed: true, result: decision.result };
+      }
+    },
     async ping(): Promise<boolean> {
       return true;
     },
@@ -53,6 +98,7 @@ export function createMemoryRedisStore(overrides?: Partial<RedisStore>): MemoryR
     },
     ...overrides,
   };
+  return store;
 }
 
 /** No-op pino-shaped logger for handler deps. */

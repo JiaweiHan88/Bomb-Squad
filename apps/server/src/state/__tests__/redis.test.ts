@@ -1,13 +1,17 @@
 import { createRedisStore } from '../redis.js';
-import type { RedisLike } from '../redis.js';
+import type { RedisLike, RedisMultiLike } from '../redis.js';
 
-type CommandName = 'get' | 'set' | 'del' | 'ping' | 'quit' | 'keys' | 'scan';
+type CommandName =
+  | 'get' | 'set' | 'del' | 'ping' | 'quit' | 'keys' | 'scan'
+  | 'watch' | 'unwatch' | 'multi' | 'exec';
 
 /** In-memory fake that records commands issued against it. */
 class FakeRedis implements RedisLike {
   private readonly store = new Map<string, string>();
   readonly commandLog: CommandName[] = [];
   status = 'ready';
+  /** When true, the next MULTI/EXEC returns null once (models a WATCHed-key change). */
+  failNextExec = false;
 
   async get(key: string): Promise<string | null> {
     this.commandLog.push('get');
@@ -34,6 +38,47 @@ class FakeRedis implements RedisLike {
 
   async quit(): Promise<'OK'> {
     return 'OK';
+  }
+
+  async watch(_key: string): Promise<'OK'> {
+    this.commandLog.push('watch');
+    return 'OK';
+  }
+
+  async unwatch(): Promise<'OK'> {
+    this.commandLog.push('unwatch');
+    return 'OK';
+  }
+
+  multi(): RedisMultiLike {
+    this.commandLog.push('multi');
+    const ops: Array<[string, string]> = [];
+    const builder: RedisMultiLike = {
+      set: (key: string, value: string) => {
+        ops.push([key, value]);
+        return builder;
+      },
+      exec: async () => {
+        this.commandLog.push('exec');
+        if (this.failNextExec) {
+          this.failNextExec = false;
+          return null; // WATCHed key changed mid-transaction — aborted.
+        }
+        for (const [k, v] of ops) this.store.set(k, v);
+        return ops.map(() => [null, 'OK'] as [Error | null, unknown]);
+      },
+    };
+    return builder;
+  }
+
+  /** The dedicated tx connection shares this fake's store, mirroring duplicate(). */
+  duplicate(): RedisLike {
+    return this;
+  }
+
+  /** Test helper: read raw stored bytes for assertions. */
+  raw(key: string): string | undefined {
+    return this.store.get(key);
   }
 }
 
@@ -113,5 +158,107 @@ describe('createRedisStore', () => {
     await store.ping();
     const forbidden = fake.commandLog.filter((c) => c === 'keys' || c === 'scan');
     expect(forbidden).toHaveLength(0);
+  });
+
+  describe('updateJSON (optimistic compare-and-set)', () => {
+    it('commit path: writes the serialized value and returns committed:true', async () => {
+      const store = createRedisStore(fake);
+      await store.setJSON('counter', { n: 1 });
+
+      const res = await store.updateJSON<{ n: number }, string>('counter', (current) => ({
+        commit: true,
+        value: { n: (current?.n ?? 0) + 1 },
+        result: 'bumped',
+      }));
+
+      expect(res).toEqual({ committed: true, result: 'bumped' });
+      expect(fake.raw('counter')).toBe(JSON.stringify({ n: 2 }));
+      // WATCH → GET → MULTI/EXEC, exactly once.
+      expect(fake.commandLog).toEqual(['set', 'watch', 'get', 'multi', 'exec']);
+    });
+
+    it('commit:false writes nothing, never calls multi, and unwatches', async () => {
+      const store = createRedisStore(fake);
+      await store.setJSON('counter', { n: 7 });
+      fake.commandLog.length = 0;
+
+      const res = await store.updateJSON<{ n: number }, string>('counter', () => ({
+        commit: false,
+        result: 'rejected',
+      }));
+
+      expect(res).toEqual({ committed: false, result: 'rejected' });
+      expect(fake.raw('counter')).toBe(JSON.stringify({ n: 7 })); // unchanged
+      expect(fake.commandLog).toContain('unwatch');
+      expect(fake.commandLog).not.toContain('multi');
+      expect(fake.commandLog).not.toContain('exec');
+    });
+
+    it('a one-time null EXEC reply triggers exactly one retry, then commits', async () => {
+      const store = createRedisStore(fake);
+      await store.setJSON('counter', { n: 0 });
+      fake.failNextExec = true; // first EXEC aborts (WATCHed key changed)
+      fake.commandLog.length = 0;
+
+      let mutateCalls = 0;
+      const res = await store.updateJSON<{ n: number }, number>('counter', (current) => {
+        mutateCalls++;
+        return { commit: true, value: { n: (current?.n ?? 0) + 1 }, result: mutateCalls };
+      });
+
+      expect(res.committed).toBe(true);
+      expect(mutateCalls).toBe(2); // re-evaluated after the abort
+      expect(fake.commandLog.filter((c) => c === 'watch')).toHaveLength(2);
+      expect(fake.commandLog.filter((c) => c === 'exec')).toHaveLength(2);
+      expect(fake.raw('counter')).toBe(JSON.stringify({ n: 1 }));
+    });
+
+    it('throws the contention error after maxRetries exhaustion', async () => {
+      // A fake whose EXEC always aborts: every attempt loops back to watch.
+      const alwaysAbort = new FakeRedis();
+      alwaysAbort.multi = () => ({
+        set() { return this; },
+        async exec() { return null; },
+      });
+      const store = createRedisStore(alwaysAbort);
+      await store.setJSON('hot', { n: 0 });
+
+      await expect(
+        store.updateJSON<{ n: number }, void>(
+          'hot',
+          (current) => ({ commit: true, value: { n: (current?.n ?? 0) + 1 }, result: undefined }),
+          { maxRetries: 3 },
+        ),
+      ).rejects.toThrow('RedisStore.updateJSON: contention retry limit exceeded for key "hot"');
+    });
+
+    it('unwatches and surfaces malformed JSON read inside the transaction', async () => {
+      const store = createRedisStore(fake);
+      await fake.set('corrupt', 'not-json');
+      fake.commandLog.length = 0;
+
+      await expect(
+        store.updateJSON('corrupt', () => ({ commit: true, value: {}, result: null })),
+      ).rejects.toThrow('malformed JSON at key "corrupt"');
+      // The WATCH must be released even on the throw path.
+      expect(fake.commandLog).toContain('unwatch');
+    });
+
+    it('serializes concurrent updateJSON calls (no interleave) into the final value', async () => {
+      const store = createRedisStore(fake);
+      await store.setJSON('counter', { n: 0 });
+
+      await Promise.all(
+        Array.from({ length: 5 }, () =>
+          store.updateJSON<{ n: number }, void>('counter', (current) => ({
+            commit: true,
+            value: { n: (current?.n ?? 0) + 1 },
+            result: undefined,
+          })),
+        ),
+      );
+
+      expect(fake.raw('counter')).toBe(JSON.stringify({ n: 5 }));
+    });
   });
 });

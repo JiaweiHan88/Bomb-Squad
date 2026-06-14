@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-13  # story 4.7 code-reviewed (7 patches applied + tested; 2 deferred to 8-7/follow-up, 1 dismissed); stays done
+last_updated: 2026-06-14  # story 2.6 → review: capacity race-fix via Redis optimistic CAS + between-rounds join-window refinement (all gates incl. live-Redis smoke green)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,7 @@ development_status:
   2-3-player-joins-via-code-and-picks-a-role: done
   2-4-team-and-per-player-role-assignment: done
   2-5-lobby-roster-ready-state-and-mic-check: backlog
-  2-6-capacity-and-join-window-guards: backlog
+  2-6-capacity-and-join-window-guards: review
   2-7-lobby-resilience-and-facilitator-player-controls: backlog
   epic-2-retrospective: optional
 

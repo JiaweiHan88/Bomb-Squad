@@ -163,6 +163,19 @@ type JoinParseResult =
   | { ok: false; message: string };
 
 /**
+ * Outcome of the atomic SESSION_JOIN transaction. The store owns the WATCH/MULTI
+ * mechanics; this carries the accept/reject/no-op *meaning* back out (the only
+ * side-channel from the pure `mutate`), with the committed snapshot threaded on
+ * 'added' so the broadcast uses the post-commit state, never a racy re-read.
+ */
+type JoinOutcome =
+  | { kind: 'vanished' }
+  | { kind: 'rejoin' }
+  | { kind: 'not-joinable' }
+  | { kind: 'full' }
+  | { kind: 'added'; state: SessionState };
+
+/**
  * Boundary validation for the untrusted SESSION_JOIN payload. Normalizes the
  * code (trim + uppercase) and the name (trim), whitelists the role, and
  * rebuilds a fresh object — unknown extra keys are inert, never forwarded.
@@ -349,7 +362,60 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        if (Object.keys(state.players).length >= MAX_PLAYERS) {
+        // Capacity (AC 1) and the join-window (AC 2/3) are now evaluated
+        // ATOMICALLY against the WATCHed state inside updateJSON — a plain
+        // read-check ahead of a separate write let two joins at 15 occupancy
+        // both pass and reach 17 (deferred-work.md:65). The mutate is pure and
+        // may run once per retry; per-attempt meaning rides out on `result`.
+        // 'between-rounds' now admits (the deliberate refinement of 2.3's
+        // lobby-only blanket); Epic 8 (8.6/8.9) owns relay eligibility for a
+        // late joiner — they land in no team's relayOrder, so are inherently
+        // ineligible to defuse the established rotation (AC 3).
+        const { result } = await deps.redis.updateJSON<SessionState, JoinOutcome>(
+          sessionKey(sessionId),
+          (current) => {
+            if (current === null) return { commit: false, result: { kind: 'vanished' } };
+            if (current.players[socket.id] !== undefined) {
+              return { commit: false, result: { kind: 'rejoin' } };
+            }
+            if (current.status !== 'lobby' && current.status !== 'between-rounds') {
+              return { commit: false, result: { kind: 'not-joinable' } };
+            }
+            if (Object.keys(current.players).length >= MAX_PLAYERS) {
+              return { commit: false, result: { kind: 'full' } };
+            }
+            const next = addPlayerToSession(current, {
+              playerId: socket.id,
+              displayName: parsed.displayName,
+              role: parsed.role,
+            });
+            return { commit: true, value: next, result: { kind: 'added', state: next } };
+          },
+        );
+
+        if (result.kind === 'vanished') {
+          // Session evicted between the pre-read and the transaction.
+          notFound();
+          return;
+        }
+        if (result.kind === 'rejoin') {
+          // Became a rejoin between the fast-path read and the transaction —
+          // converge as the fast path would; reload for the freshest snapshot.
+          const fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+          await socket.join(sessionRoom(sessionId));
+          socket.data.sessionId = sessionId;
+          if (fresh !== null) socket.emit('SESSION_STATE', fresh);
+          return;
+        }
+        if (result.kind === 'not-joinable') {
+          socket.emit('ERROR', {
+            code: 'SESSION_NOT_JOINABLE',
+            message: 'That session has already started.',
+            recoverable: true,
+          });
+          return;
+        }
+        if (result.kind === 'full') {
           socket.emit('ERROR', {
             code: 'SESSION_FULL',
             message: 'That session is full — 16 is the limit.',
@@ -358,32 +424,13 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Defensive join-window guard; Story 2.6 refines it (between-rounds admits).
-        if (state.status !== 'lobby') {
-          socket.emit('ERROR', {
-            code: 'SESSION_NOT_JOINABLE',
-            message: 'That session has already started.',
-            recoverable: true,
-          });
-          return;
-        }
-
-        const next = addPlayerToSession(state, {
-          playerId: socket.id,
-          displayName: parsed.displayName,
-          role: parsed.role,
-        });
-
-        // Persist then emit. Single-key write — nothing partial to roll back.
-        // Known accepted race (V1 single process): two concurrent joins can
-        // interleave load→modify→store and drop one player; human-speed lobby
-        // joins make this theoretical. No locks/WATCH for this.
-        await deps.redis.setJSON(sessionKey(sessionId), next);
-
-        // Join the room BEFORE broadcasting so the joiner receives their own join.
+        // result.kind === 'added' — broadcast the committed snapshot the store
+        // threaded back (not a re-read), so the broadcast can't reflect a later
+        // interleaving write. Join the room BEFORE broadcasting so the joiner
+        // receives their own join.
         await socket.join(sessionRoom(sessionId));
         socket.data.sessionId = sessionId;
-        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
         deps.log.info({ sessionId, playerId: socket.id, role: parsed.role }, 'player joined');
       } catch (err) {
         deps.log.error({ err, socketId: socket.id }, 'SESSION_JOIN failed');

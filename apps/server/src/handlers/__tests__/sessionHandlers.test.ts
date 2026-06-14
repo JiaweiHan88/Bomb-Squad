@@ -15,6 +15,7 @@ import {
   parseTeamAssignPayload,
   teamRoom,
   MAX_PLAYERS,
+  type SessionLog,
 } from '../sessionHandlers.js';
 import { createSessionState } from '../../session/createSession.js';
 import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../../state/keys.js';
@@ -341,18 +342,127 @@ describe('SESSION_JOIN handler', () => {
     expect(Object.keys(stored.players)).toHaveLength(MAX_PLAYERS);
   });
 
-  it('non-lobby session → SESSION_NOT_JOINABLE', async () => {
-    const state = createSessionState({
-      sessionId: 'sess-live',
-      joinCode: 'LIVE99',
-      facilitatorId: 'sock-fac',
-    });
-    await seedSession({ ...state, status: 'active' });
+  // AC 2: a round is in flight (preparation/active/ended) — refuse, change nothing.
+  it.each(['preparation', 'active', 'ended'] as const)(
+    'mid-round status %s → SESSION_NOT_JOINABLE, zero writes',
+    async (status) => {
+      const base = createSessionState({
+        sessionId: 'sess-live',
+        joinCode: 'LIVE99',
+        facilitatorId: 'sock-fac',
+      });
+      await seedSession({ ...base, status });
+      const bytesBefore = store.data.get(sessionKey('sess-live'));
 
-    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
-    joiner.emit('SESSION_JOIN', { joinCode: 'LIVE99', displayName: 'Maya', role: 'expert' });
-    const error = await errorPromise;
-    expect(error.code).toBe('SESSION_NOT_JOINABLE');
+      const facSpy = jest.fn();
+      facilitator.on('SESSION_STATE', facSpy);
+      const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+      joiner.emit('SESSION_JOIN', { joinCode: 'LIVE99', displayName: 'Maya', role: 'expert' });
+      const error = await errorPromise;
+
+      expect(error.code).toBe('SESSION_NOT_JOINABLE');
+      // commit:false performs no write — the stored bytes are byte-identical.
+      expect(store.data.get(sessionKey('sess-live'))).toBe(bytesBefore);
+      expect(facSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  // AC 3: between-rounds admits, but the late joiner is in NO team's relayOrder
+  // (emergent ineligibility — Epic 8 owns the actual relay slotting).
+  it('between-rounds → joiner admitted, in NO relayOrder, teams untouched; both sockets get SESSION_STATE', async () => {
+    const ack = await createSession(facilitator);
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    // Flip the live session to between-rounds with an established relay rotation.
+    const seeded: SessionState = {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: 1,
+      players: {
+        ...live.players,
+        'sock-d1': { playerId: 'sock-d1', displayName: 'Dee', role: 'defuser', isReady: true, teamId: 'A' },
+      },
+      teams: {
+        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000 },
+      },
+    };
+    await store.setJSON(sessionKey(ack.sessionId), seeded);
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Late', role: 'expert' });
+    const [facState, joinerState] = await Promise.all([facStatePromise, joinerStatePromise]);
+
+    for (const s of [facState, joinerState]) {
+      const late = Object.values(s.players).find((p) => p.displayName === 'Late');
+      expect(late).toBeDefined();
+      expect(late!.teamId).toBeUndefined(); // not slotted into any team
+      // Emergent ineligibility: present in NO team's relayOrder.
+      for (const team of Object.values(s.teams)) {
+        expect(team!.relayOrder).not.toContain(late!.playerId);
+      }
+      // The established rotation is untouched.
+      expect(s.teams.A!.relayOrder).toEqual(['sock-d1']);
+    }
+  });
+
+  // AC 1 (the headline): prove the guard re-evaluates AFTER a concurrent write.
+  // A plain read-check would push the roster to 17; updateJSON re-runs the
+  // capacity guard against the interleaved state and rejects the loser.
+  it('race: a concurrent join landing mid-transaction → loser gets SESSION_FULL, roster capped at 16', async () => {
+    // Seed at 15 (facilitator + 14).
+    let state = createSessionState({ sessionId: 'sess-race', joinCode: 'RACER1', facilitatorId: 'sock-fac' });
+    for (let i = 1; i < 15; i++) {
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          [`sock-${i}`]: { playerId: `sock-${i}`, displayName: `P${i}`, role: 'spectator', isReady: false },
+        },
+      };
+    }
+    expect(Object.keys(state.players)).toHaveLength(15);
+
+    // One-shot hook: a 16th player lands during the first join's transaction
+    // (15 → 16), forcing the retry where the capacity guard re-evaluates.
+    const raceStore = createMemoryRedisStore(undefined, {
+      onBeforeCommit: (key) => {
+        const cur = JSON.parse(raceStore.data.get(key)!) as SessionState;
+        raceStore.data.set(
+          key,
+          JSON.stringify({
+            ...cur,
+            players: {
+              ...cur.players,
+              'sock-interloper': { playerId: 'sock-interloper', displayName: 'Sneak', role: 'spectator', isReady: false },
+            },
+          }),
+        );
+      },
+    });
+    await raceStore.setJSON(sessionKey('sess-race'), state);
+    await raceStore.setJSON(joinCodeKey('RACER1'), 'sess-race');
+
+    const raceServer = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: raceStore,
+        log: noopLog,
+        timer: createTestScheduler({ redis: raceStore, io, log: noopLog }),
+      }),
+    );
+    try {
+      const raceJoiner = await raceServer.connectClient();
+      const errorPromise = nextEvent<ErrorPayload>(raceJoiner, 'ERROR');
+      raceJoiner.emit('SESSION_JOIN', { joinCode: 'RACER1', displayName: 'Late', role: 'expert' });
+      const error = await errorPromise;
+
+      expect(error.code).toBe('SESSION_FULL');
+      const stored = JSON.parse(raceStore.data.get(sessionKey('sess-race'))!) as SessionState;
+      expect(Object.keys(stored.players)).toHaveLength(16); // capped — never 17
+      expect(stored.players['sock-interloper']).toBeDefined();
+      expect(Object.values(stored.players).some((p) => p.displayName === 'Late')).toBe(false);
+    } finally {
+      await raceServer.close();
+    }
   });
 
   it('idempotent re-join: converges the joiner, no growth, no extra broadcast to others', async () => {
@@ -374,13 +484,12 @@ describe('SESSION_JOIN handler', () => {
     expect(facSpy).not.toHaveBeenCalled();
   });
 
-  it('persist failure → SESSION_JOIN_FAILED to joiner, no broadcast to the room', async () => {
+  it('updateJSON failure (incl. retry-limit) → SESSION_JOIN_FAILED to joiner, no broadcast to the room', async () => {
     const ack = await createSession(facilitator);
-    // Fail only the join's session write — reads keep working.
-    const realSet = store.setJSON.bind(store);
-    store.setJSON = async (key, value) => {
-      if (key === sessionKey(ack.sessionId)) throw new Error('redis down');
-      return realSet(key, value);
+    // The atomic CAS now owns the write; failing it (e.g. contention-limit
+    // throw) must surface as SESSION_JOIN_FAILED with no broadcast.
+    store.updateJSON = async () => {
+      throw new Error('RedisStore.updateJSON: contention retry limit exceeded for key "x"');
     };
 
     const facSpy = jest.fn();
@@ -401,6 +510,66 @@ describe('SESSION_JOIN handler', () => {
     joiner.emit('SESSION_JOIN', { joinCode: 'GHOST1', displayName: 'Maya', role: 'expert' });
     const error = await errorPromise;
     expect(error.code).toBe('SESSION_NOT_FOUND');
+  });
+
+  // AR15: the join code is the session's only secret — it must never reach a log
+  // line on ANY path (admitted, full, refused).
+  it('AR15: the join code never appears in a log line (admitted / full / refused)', async () => {
+    const lines: string[] = [];
+    const capturingLog: SessionLog = {
+      info: (obj, msg) => lines.push(`${JSON.stringify(obj)} ${msg ?? ''}`),
+      error: (obj, msg) => lines.push(`${JSON.stringify(obj)} ${msg ?? ''}`),
+    };
+    const logStore = createMemoryRedisStore();
+    const logServer = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: logStore,
+        log: capturingLog,
+        timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+      }),
+    );
+    try {
+      const fac = await logServer.connectClient();
+      const ack = await new Promise<SessionCreatedPayload>((resolve) =>
+        fac.emit('SESSION_CREATE', {}, resolve),
+      );
+
+      // Admitted path.
+      const okJoiner = await logServer.connectClient();
+      const okState = nextEvent<SessionState>(okJoiner, 'SESSION_STATE');
+      okJoiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+      await okState;
+
+      // Full path: cram the session to capacity, then a refused join.
+      const live = JSON.parse(logStore.data.get(sessionKey(ack.sessionId))!) as SessionState;
+      let crammed = live;
+      for (let i = Object.keys(crammed.players).length; i < MAX_PLAYERS; i++) {
+        crammed = {
+          ...crammed,
+          players: {
+            ...crammed.players,
+            [`sock-${i}`]: { playerId: `sock-${i}`, displayName: `P${i}`, role: 'spectator', isReady: false },
+          },
+        };
+      }
+      await logStore.setJSON(sessionKey(ack.sessionId), crammed);
+      const fullJoiner = await logServer.connectClient();
+      const fullErr = nextEvent<ErrorPayload>(fullJoiner, 'ERROR');
+      fullJoiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Late', role: 'expert' });
+      expect((await fullErr).code).toBe('SESSION_FULL');
+
+      // Refused (unknown code) path.
+      const badJoiner = await logServer.connectClient();
+      const badErr = nextEvent<ErrorPayload>(badJoiner, 'ERROR');
+      badJoiner.emit('SESSION_JOIN', { joinCode: 'ZZZZZZ', displayName: 'Nope', role: 'expert' });
+      await badErr;
+
+      const blob = lines.join('\n');
+      expect(blob).not.toContain(ack.joinCode);
+      expect(blob).not.toContain('ZZZZZZ');
+    } finally {
+      await logServer.close();
+    }
   });
 });
 
