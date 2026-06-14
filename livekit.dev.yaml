@@ -1,0 +1,24 @@
+# LiveKit DEV override for the WSL2/Docker-Desktop localhost voice check.
+# Mounted over /etc/livekit.yaml by docker-compose.override.yml (auto-applied by
+# a bare `docker compose up`). Production uses the base `livekit.yaml` (UDP mux
+# 7882, routable node_ip) — a prod deploy runs `docker compose -f docker-compose.yml`
+# explicitly so this override is NOT picked up. Robust NAT/TURN is Story 10-3.
+#
+# API keys are still injected via LIVEKIT_KEYS env var in docker-compose.yml.
+port: 7880
+rtc:
+  tcp_port: 7881
+  # LOCALHOST DEV: UDP mux disabled (0) to force ICE/TCP over tcp_port 7881.
+  # Docker-Desktop/WSL2 drops/expires the single-port UDP mux NAT mapping, which
+  # makes the media PeerConnection flap (connected→reconnecting loop) and no
+  # audio sustains. TCP (7881) is forwarded reliably by WSL2.
+  udp_port: 0
+  use_external_ip: false
+  # LOCALHOST DEV ONLY: without this, LiveKit advertises its container-internal
+  # IP (172.18.x.x) as the ICE media candidate, which a host browser can't reach
+  # → "negotiation timed out". Forcing 127.0.0.1 makes media flow over the
+  # published 7881/tcp (and 7882/udp) ports.
+  node_ip: "127.0.0.1"
+logging:
+  json: false
+  level: info

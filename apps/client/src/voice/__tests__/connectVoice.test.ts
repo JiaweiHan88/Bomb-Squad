@@ -222,6 +222,64 @@ describe('teardown leaves no leaked tracks, elements, or listeners', () => {
   });
 });
 
+// ── Teardown DURING an in-flight connect must not orphan a live Room (AC #5) ──
+// Regression guard: `connect()` re-checks its epoch after each await, so a
+// disconnect()/unmount that races the token request or the room connect aborts
+// and disposes the room instead of leaving a live SFU connection + hot mic.
+
+describe('a teardown during an in-flight connect never leaks a live room', () => {
+  it('disconnect during the TOKEN request aborts before a room is ever created', async () => {
+    let resolveToken!: (r: TokenResult) => void;
+    const requestToken = vi.fn(
+      () => new Promise<TokenResult>((res) => { resolveToken = res; }),
+    );
+    const createRoom = vi.fn(() => makeFakeRoom().room);
+    const controller = createVoiceController({ createRoom, requestToken });
+
+    const pending = controller.connect();
+    expect(useVoiceStore.getState().status).toBe('connecting');
+
+    // Teardown wins the race while the token is still in flight.
+    await controller.disconnect();
+    resolveToken(okToken());
+    await pending;
+
+    expect(createRoom).not.toHaveBeenCalled(); // no room → nothing to leak
+    expect(useVoiceStore.getState().status).toBe('idle'); // not resurrected to 'connected'
+  });
+
+  it('disconnect during room.connect() disposes the now-live room (no orphan)', async () => {
+    const before = useGameStore.getState();
+    const { room, disconnect: roomDisconnect, setMicrophoneEnabled } = makeFakeRoom();
+    let resolveConnect!: () => void;
+    room.connect = vi.fn(() => new Promise<void>((res) => { resolveConnect = res; }));
+
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okToken(),
+    });
+
+    const pending = controller.connect();
+    // Flush past the token await so we are parked inside room.connect().
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Teardown races in while room.connect() is still pending.
+    const tearing = controller.disconnect();
+    resolveConnect();
+    await Promise.all([pending, tearing]);
+
+    expect(roomDisconnect).toHaveBeenCalled(); // the live room was disposed, not leaked
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false); // mic released
+    expect(useVoiceStore.getState().status).toBe('idle'); // never flipped to 'connected'
+    // gameStore stayed byte-identical throughout the race (AR12 / ADR-007).
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+});
+
 // ── Fresh token per connect (AC #6) ──────────────────────────────────────────
 
 describe('a fresh token is requested per connect (never cached/reused)', () => {

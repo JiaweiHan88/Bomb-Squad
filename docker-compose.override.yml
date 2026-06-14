@@ -1,0 +1,21 @@
+# DEV-ONLY override for the WSL2/Docker-Desktop localhost voice check (Story 3.2).
+#
+# A bare `docker compose up` auto-merges this file on top of docker-compose.yml,
+# swapping the production LiveKit/Caddy configs for their localhost-dev variants
+# (force ICE/TCP + loopback node_ip; serve the app over plain http so the page
+# can open the ws:// LiveKit socket without a mixed-content block).
+#
+# IMPORTANT: production deploys MUST bypass this file by passing the base compose
+# file explicitly, e.g.  `docker compose -f docker-compose.yml up -d`.
+# That keeps the HTTPS redirect (Caddyfile) and the UDP mux (livekit.yaml).
+# Restoring proper wss/TLS + routable IP for prod is Story 10-3.
+services:
+  livekit:
+    volumes:
+      - ./livekit.dev.yaml:/etc/livekit.yaml:ro
+
+  caddy:
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

@@ -10,19 +10,13 @@
   admin localhost:2019
 }
 
-# HTTP (port 80).
-# Production redirects to HTTPS; for the LOCALHOST voice check we serve over
-# plain http so the page origin (http://localhost) can open the LiveKit
-# `ws://localhost:7880` socket without a mixed-content block. localhost is a
-# secure context even over http, so getUserMedia (mic) still works. wss/TLS
-# termination for LiveKit is Story 10-3, out of scope here.
+# Redirect HTTP → HTTPS.
+# The LOCALHOST voice check needs a plain-http origin (so the page can open the
+# `ws://localhost:7880` LiveKit socket without a mixed-content block); that is
+# provided by `Caddyfile.dev` via `docker-compose.override.yml`, NOT here — this
+# production file keeps the HTTPS redirect so a deploy is secure by default.
 :80 {
-  @socketio {
-    path /socket.io/*
-  }
-  reverse_proxy @socketio server:{$PORT:3001}
-  reverse_proxy /health server:{$PORT:3001}
-  reverse_proxy /* client:5173
+  redir https://{host}{uri} permanent
 }
 
 :443 {

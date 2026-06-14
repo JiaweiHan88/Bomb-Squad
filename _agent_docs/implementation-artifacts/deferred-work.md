@@ -173,3 +173,7 @@ A coherent class of deferrals the dev harness **structurally cannot reach** — 
 | `socket.id`-as-identity breaks on reconnect (authority gate, team delivery, mid-round Defuser restore) | reconnect | _2.2/2.3/2.4/5.2/8.3/4.7_ → **2-7** durable id (widened, retro AI2), consumed by **8-7** |
 
 **Also operational, same flavour (env, not code — captured in agent-memory, not fixable by tests):** `tsx watch` restart drops the in-memory `setTimeout` expiry wake (single-process V1); worktree host-port collision lands on the wrong passworded Redis/Postgres. Apply hard to the Sprint 3 voice worktrees — verify voice only against real LiveKit + coturn containers.
+
+## Deferred from: code review of story-3.2 (2026-06-14)
+
+- **Blocked-autoplay remote audio has no recovery affordance** (`apps/client/src/voice/connectVoice.ts:178`) — `room.startAudio()` rejection is intentionally swallowed (best-effort, inside the gesture chain), so if the browser blocks autoplay the participant shows `connected` but hears nothing, with no retry UI. The full "click to enable audio" affordance is explicitly Story 3.6 (graceful-degradation polish) per 3.2's Dev Notes. Deferred — out of 3.2 scope by spec.

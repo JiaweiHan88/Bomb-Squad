@@ -1,0 +1,25 @@
+# Bomb Squad reverse proxy — DEV override for the LOCALHOST voice check.
+# Mounted over /etc/caddy/Caddyfile by docker-compose.override.yml. The base
+# `Caddyfile` keeps the production HTTP→HTTPS redirect; this dev file serves the
+# app over plain http on :80 so the page origin (http://localhost) can open the
+# `ws://localhost:7880` LiveKit socket without a mixed-content block. localhost
+# is a secure context even over http, so getUserMedia (mic) still works.
+# wss/TLS termination for LiveKit is Story 10-3. Prod deploys run
+# `docker compose -f docker-compose.yml` so this override is NOT applied.
+
+{
+  # Caddy admin API on 2019 (HTTP only) — used by the in-container health check.
+  # Bound to localhost so other containers on the compose network can't reach
+  # the (unauthenticated) admin API and reconfigure the proxy.
+  admin localhost:2019
+}
+
+# Serve the app over plain http on :80 (no HTTPS redirect — dev only).
+:80 {
+  @socketio {
+    path /socket.io/*
+  }
+  reverse_proxy @socketio server:{$PORT:3001}
+  reverse_proxy /health server:{$PORT:3001}
+  reverse_proxy /* client:5173
+}

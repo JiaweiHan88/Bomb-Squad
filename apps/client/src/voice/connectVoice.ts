@@ -96,6 +96,10 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   let room: VoiceRoom | null = null;
   // Guards re-entrant connect/disconnect (double-click, unmount-during-connect).
   let phase: 'idle' | 'connecting' | 'connected' = 'idle';
+  // Bumped by every disconnect/teardown (and superseded by any newer connect) so
+  // an in-flight connect can detect, after each await, that it was torn down and
+  // abort+dispose its room instead of leaking a live SFU connection + hot mic.
+  let connectEpoch = 0;
   // Every audio element we appended, so teardown can detach + remove them all.
   const audioEls = new Set<HTMLMediaElement>();
   // Listener handles kept so teardown can remove exactly what it added.
@@ -119,14 +123,32 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     detachAll();
   }
 
+  /** Dispose a room we brought up but must NOT keep (superseded by a teardown
+   * mid-connect): drop listeners + media, release the mic, disconnect. Never
+   * touches the store — the disconnect() that superseded us already set it. */
+  async function abandonRoom(r: VoiceRoom): Promise<void> {
+    clearRoomBindings(r);
+    try {
+      await r.localParticipant.setMicrophoneEnabled(false);
+    } catch {
+      // Mic may never have been acquired; teardown must not throw.
+    }
+    await r.disconnect().catch(() => undefined);
+  }
+
   async function connect(): Promise<void> {
     // Double-connect guard (AC #5): ignore while already connecting/connected.
     if (phase !== 'idle') return;
     phase = 'connecting';
+    const epoch = ++connectEpoch;
     useVoiceStore.getState().setConnecting();
 
     // Fresh token per connect — never cached/reused (AC #6, sets up 3.5).
     const result = await deps.requestToken();
+    // A disconnect/unmount (or newer connect) ran during the token request — it
+    // owns the store state now; abort silently so we don't resurrect a torn-down
+    // connect. No room exists yet, so nothing to dispose.
+    if (epoch !== connectEpoch) return;
     if (!result.ok) {
       phase = 'idle';
       useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
@@ -160,10 +182,24 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       await r.localParticipant.setMicrophoneEnabled(true);
     } catch {
       // Connect/publish rejected → clean up the half-open room, go unavailable.
+      // (Floating disconnect is .catch()-guarded so a rejected teardown of an
+      // already-dead transport never becomes an unhandled rejection.)
       clearRoomBindings(r);
-      void r.disconnect();
-      phase = 'idle';
-      useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
+      void r.disconnect().catch(() => undefined);
+      // Only own the store state if no teardown/newer connect superseded us.
+      if (epoch === connectEpoch) {
+        phase = 'idle';
+        useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
+      }
+      return;
+    }
+
+    // A disconnect()/unmount ran while we were connecting (it saw room === null
+    // and could not tear this room down). Dispose the now-live room ourselves so
+    // we never leak an SFU connection + published mic. The teardown already set
+    // the store, so abandonRoom() leaves it untouched.
+    if (epoch !== connectEpoch) {
+      await abandonRoom(r);
       return;
     }
 
@@ -185,6 +221,9 @@ export function createVoiceController(deps: VoiceControllerDeps) {
    * disconnect → `idle`; a dropped transport → `unavailable`.
    */
   async function disconnect(reason: 'idle' | 'unavailable' = 'idle'): Promise<void> {
+    // Supersede any in-flight connect: after its next await it will see the
+    // epoch changed and abort+dispose its room instead of going `connected`.
+    connectEpoch++;
     const r = room;
     room = null;
     phase = 'idle';
@@ -205,7 +244,10 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     } catch {
       // Mic may already be released; teardown must not throw into the UI.
     }
-    await r.disconnect();
+    // Swallow a rejected disconnect (already-dead transport) — teardown often
+    // runs from a fire-and-forget `void disconnectVoice()` on unmount, so it must
+    // never produce an unhandled rejection.
+    await r.disconnect().catch(() => undefined);
   }
 
   return { connect, disconnect };
