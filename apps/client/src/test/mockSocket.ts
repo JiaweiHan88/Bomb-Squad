@@ -10,6 +10,13 @@ import type { AppClientSocket } from '../net/socket.js';
  *   - `on(EVENT, handler)` / `off(...)` — server-pushed events (e.g. ERROR)
  *   - `id`, `connected`
  *
+ * Type-safety note: `socket` is cast (`as unknown as AppClientSocket`), so the
+ * component-under-test that calls `getSocket().emit(...)` is still fully typed — it
+ * cannot emit an unknown event. The `.emit` / `.timeoutEmit` SPIES, however, are bare
+ * `vi.fn()`, so assertion sites (`mock.emit.toHaveBeenCalledWith('SESSION_JOIN', …)`)
+ * are NOT compile-checked — a typo'd event name there will not fail typecheck. Keep
+ * assertion event names/payloads accurate by reading them off the component.
+ *
  * Assert outgoing events on `.emit` / `.timeoutEmit`; simulate a server push with
  * `.fire(EVENT, ...args)`. Wire it into a test with `vi.mock` (see src/test/README.md):
  *

@@ -41,10 +41,16 @@ beforeEach(() => {
 
 it('emits SESSION_JOIN when a player joins', async () => {
   const user = userEvent.setup();
-  render(<Landing /* …props… */ />);
-  await user.type(screen.getByLabelText(/name/i), 'Maya');
-  await user.click(screen.getByRole('button', { name: /join/i }));
-  expect(mock.emit).toHaveBeenCalledWith('SESSION_JOIN', expect.objectContaining({ name: 'Maya' }));
+  render(<Landing />);
+  await user.type(screen.getByLabelText('Your name'), 'Maya');
+  await user.click(screen.getByRole('button', { name: 'Defuser' }));
+  // Landing auto-submits when the 6th code cell is filled — there is no Join button.
+  const cells = screen.getAllByLabelText(/Join code character/i);
+  for (let i = 0; i < cells.length; i++) await user.type(cells[i]!, 'ABCDEF'[i]!);
+  expect(mock.emit).toHaveBeenCalledWith(
+    'SESSION_JOIN',
+    expect.objectContaining({ joinCode: 'ABCDEF', displayName: 'Maya', role: 'defuser' }),
+  );
 });
 ```
 

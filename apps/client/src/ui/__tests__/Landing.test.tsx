@@ -66,6 +66,9 @@ describe('Landing', () => {
     }
 
     // Complete code + name but no role → tryJoin shows a hint, never emits.
+    // Assert the hint positively so the test can't pass vacuously (e.g. if the
+    // handler silently never emitted under any condition).
+    expect(screen.getByText(/then it sends itself/i)).toBeInTheDocument();
     expect(mock.emit).not.toHaveBeenCalledWith('SESSION_JOIN', expect.anything());
   });
 });

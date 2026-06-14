@@ -19,5 +19,11 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Mock/stub hygiene for the project-wide convention: restore spies and undo
+    // vi.stubGlobal between tests so e.g. identity.test.ts's sessionStorage stub
+    // and connectVoice.test.ts's spies can't leak within a file. (Vitest per-file
+    // isolation already prevents cross-file leakage; this covers within-file.)
+    restoreMocks: true,
+    unstubGlobals: true,
   },
 });
