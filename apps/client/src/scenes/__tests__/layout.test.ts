@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeModuleLayout, formatBayTag } from '../layout.js';
+import { computeModuleLayout, formatBayTag, formatModuleType } from '../layout.js';
 
 describe('computeModuleLayout', () => {
   it('returns one slot per module', () => {
@@ -61,5 +61,13 @@ describe('formatBayTag', () => {
     for (let i = 0; i < 13; i++) {
       expect(formatBayTag(i)).toMatch(/^MOD-\d{2}$/);
     }
+  });
+});
+
+describe('formatModuleType (Story 4.6 prep type label)', () => {
+  it('renders a kebab-case moduleId as upper-case words', () => {
+    expect(formatModuleType('wires')).toBe('WIRES');
+    expect(formatModuleType('the-button')).toBe('THE BUTTON');
+    expect(formatModuleType('whos-on-first')).toBe('WHOS ON FIRST');
   });
 });

@@ -74,10 +74,10 @@ export const PREP_GUIDANCE =
   'Walk them through the manual — two to five minutes is the sweet spot. Start when they stop arguing.';
 export const ON_THE_BOMB_NEXT = 'On the bomb next';
 export const START_THE_ROUND = 'Start the round';
-export const PREP_DEFUSER_LINE = "You're defusing this round.";
 export const PREP_MANUAL_LINE = "You're on the manual. Read fast.";
-export const PREP_DEFUSER_PLACEHOLDER =
-  'Your bomb is on the bench. Module types appear here once the armourer is done.';
+// Story 4.6: the upcoming Defuser's prep surface is now the placeholder bomb
+// itself (PrepBombView), not a text line — the former PREP_DEFUSER_LINE /
+// PREP_DEFUSER_PLACEHOLDER copy is retired.
 
 // Active round (Story 8.3) — interim non-defuser surfaces; 8.5+/Epic 9 own the real ones.
 export const ROUND_IN_PROGRESS = 'Round in progress.';

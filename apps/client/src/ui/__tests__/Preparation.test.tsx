@@ -1,13 +1,23 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RoundConfig } from '@bomb-squad/shared';
 import { createMockSocket, type MockSocket } from '../../test/mockSocket.js';
-import { makePlayer, makeSession, makeTeam } from '../../test/fixtures.js';
+import { makePlayer, makeRoundConfig, makeSession, makeTeam } from '../../test/fixtures.js';
 import { useGameStore } from '../../store/gameStore.js';
 
 vi.mock('../../net/socket.js', () => ({ getSocket: vi.fn(), createSocket: vi.fn() }));
 import { getSocket } from '../../net/socket.js';
+
+// PrepBombView mounts the R3F BombStage/BombScene — out of scope for a jsdom
+// component test (R3F is rendering-only, covered by visual/smoke). Stub it with
+// a DOM sentinel so we can assert the upcoming-Defuser branch routes to it.
+vi.mock('../PrepBombView.js', () => ({
+  default: () => <div data-testid="prep-bomb-view" />,
+}));
+
 import Preparation from '../Preparation.js';
+import { PREP_MANUAL_LINE } from '../copy.js';
 
 let mock: MockSocket;
 
@@ -22,6 +32,26 @@ function seedFacilitatorPrep() {
     teams: { A: makeTeam('A', ['p1']) },
   });
   useGameStore.setState({ session, myPlayerId: 'fac' });
+}
+
+/**
+ * Preparation seeded with an upcoming Defuser (Maya/p1) and an Expert (Eli/e1)
+ * on the same team — the two role surfaces the AC contrasts. `viewer` picks
+ * whose eyes we render through.
+ */
+function seedDefuserVsExpertPrep(viewer: 'p1' | 'e1' | 'spec', overrides: Partial<RoundConfig> = {}) {
+  const session = makeSession({
+    status: 'preparation',
+    config: makeRoundConfig(overrides),
+    players: {
+      p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+      e1: makePlayer({ playerId: 'e1', displayName: 'Eli', role: 'expert', teamId: 'A' }),
+      spec: makePlayer({ playerId: 'spec', displayName: 'Sam', role: 'spectator' }),
+    },
+    // relayOrder defuser at index 0 → upcomingDefuserId(team) === 'p1'.
+    teams: { A: makeTeam('A', ['p1', 'e1']) },
+  });
+  useGameStore.setState({ session, myPlayerId: viewer });
 }
 
 beforeEach(() => {
@@ -64,5 +94,33 @@ describe('Preparation', () => {
     await user.click(screen.getByRole('button', { name: 'Back to lobby' }));
 
     expect(mock.emit).toHaveBeenCalledWith('PREPARATION_CANCEL');
+  });
+
+  // Story 4.6 — role-gated prep surfaces (AC1 + AC2).
+  it('shows the upcoming Defuser the placeholder bomb, not the manual (AC1)', () => {
+    seedDefuserVsExpertPrep('p1');
+    render(<Preparation />);
+    expect(screen.getByTestId('prep-bomb-view')).toBeInTheDocument();
+    expect(screen.queryByText(PREP_MANUAL_LINE)).not.toBeInTheDocument();
+  });
+
+  it('keeps the Expert on the manual during prep — never the bomb (AC2 regression)', () => {
+    seedDefuserVsExpertPrep('e1');
+    render(<Preparation />);
+    expect(screen.getByText(PREP_MANUAL_LINE)).toBeInTheDocument();
+    expect(screen.queryByTestId('prep-bomb-view')).not.toBeInTheDocument();
+  });
+
+  it('keeps a Spectator on the manual surface — sees no bomb (AC2)', () => {
+    seedDefuserVsExpertPrep('spec');
+    render(<Preparation />);
+    expect(screen.getByText(PREP_MANUAL_LINE)).toBeInTheDocument();
+    expect(screen.queryByTestId('prep-bomb-view')).not.toBeInTheDocument();
+  });
+
+  it('shows the facilitator no bomb surface (role gating holds)', () => {
+    seedFacilitatorPrep();
+    render(<Preparation />);
+    expect(screen.queryByTestId('prep-bomb-view')).not.toBeInTheDocument();
   });
 });

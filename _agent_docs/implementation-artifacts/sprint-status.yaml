@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-15  # story 2.5 (lobby roster/ready/mic-check) → review (impl + tests + live smoke + Jay interactive all pass)
+last_updated: 2026-06-16  # story 4.6 (preparation placeholder bomb view) → review (impl + tests + tsc/build gates green; Jay interactive verified — prep solve-LED leak found & fixed)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -82,7 +82,7 @@ development_status:
   4-3-module-slots-and-solve-leds: done
   4-4-diegetic-timer-lcd-with-client-extrapolation: done
   4-5-strike-indicator-and-strike-roll-up: done
-  4-6-preparation-placeholder-bomb-view: backlog
+  4-6-preparation-placeholder-bomb-view: review
   4-7-snapshot-sync-and-optimistic-render-at-60fps: done
   epic-4-retrospective: optional
 
