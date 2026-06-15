@@ -1,8 +1,10 @@
 import {
   DEV_DEMO_MODULE_ID,
   WIRES_MODULE_ID,
+  BUTTON_MODULE_ID,
   devDemoReducer,
   wiresReducer,
+  buttonReducer,
   type ModuleState,
   type Reducer,
 } from '@bomb-squad/shared';
@@ -26,4 +28,6 @@ export const MODULE_REDUCERS: Record<string, ModuleReducer> = {
   [DEV_DEMO_MODULE_ID]: devDemoReducer as ModuleReducer,
   // wires: Story 5.3 walking skeleton — first real module.
   [WIRES_MODULE_ID]: wiresReducer as ModuleReducer,
+  // the-button: Story 5.4 — press/hold with a timed release.
+  [BUTTON_MODULE_ID]: buttonReducer as ModuleReducer,
 };

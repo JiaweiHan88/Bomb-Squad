@@ -8,6 +8,8 @@ import { getModuleRenderer } from '../modules/registry.js';
 import { dispatchModuleAction, setModuleActionDispatch } from '../modules/dispatch.js';
 import { createDevModuleDispatch } from './devDispatch.js';
 import { buildSandboxBomb, parseSeed } from './sandbox.js';
+import { serverNow } from '../net/serverClock.js';
+import { formatTimerDisplay, timerRemainingMs } from '../scenes/timerLcd.js';
 
 /**
  * /dev/sandbox — isolated module development workbench (AC3).
@@ -29,6 +31,10 @@ export default function SandboxHarness() {
   const [seedError, setSeedError] = useState(false);
   /** Seed of the currently generated instance (inspector echo). */
   const [activeSeed, setActiveSeed] = useState<number | null>(null);
+  /** Frozen clock value (seconds) for The Button's timed release — the bare
+   *  sandbox has no running timer, so this sets a paused TimerState whose
+   *  displayed digits feed the RELEASE action (Story 5.4 Task 6). */
+  const [clockInput, setClockInput] = useState('4');
 
   // Install the local dispatch backend for the lifetime of the sandbox.
   // (Idempotent under StrictMode's mount→unmount→mount.)
@@ -55,9 +61,25 @@ export default function SandboxHarness() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Freeze the clock at a chosen number of seconds (paused segment) so The
+   *  Button's RELEASE reads deterministic, visible digits. */
+  const setClock = (input: string) => {
+    const seconds = Number(input);
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    const now = serverNow();
+    useGameStore.getState().setTimer({
+      startedAt: now,
+      remainingAtStart: Math.round(seconds) * 1000,
+      speedMultiplier: 1,
+      pausedAt: now, // frozen: timerRemainingMs returns remainingAtStart
+    });
+  };
+
   const bomb = useGameStore((s) => s.bomb);
+  const timer = useGameStore((s) => s.timer);
   const mod = bomb?.modules[0];
   const Renderer = mod ? getModuleRenderer(mod.moduleId) : null;
+  const clockDisplay = timer ? formatTimerDisplay(timerRemainingMs(timer, serverNow())) : '—';
 
   return (
     <div className="relative h-screen w-screen">
@@ -117,6 +139,32 @@ export default function SandboxHarness() {
             Reset module
           </button>
         </div>
+
+        {/* Clock control — The Button's held release reads the displayed timer
+            digits. The bare sandbox has no running clock, so freeze it here. */}
+        <label className="flex flex-col gap-1">
+          <span className="text-zinc-400">Clock seconds (The Button release)</span>
+          <div className="flex gap-2">
+            <input
+              className="w-20 rounded border border-zinc-600 bg-zinc-900 px-2 py-1"
+              value={clockInput}
+              onChange={(e) => setClockInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setClock(clockInput);
+              }}
+            />
+            <button
+              type="button"
+              className="rounded border border-zinc-500 px-3 py-1 active:translate-y-px"
+              onClick={() => setClock(clockInput)}
+            >
+              Set clock
+            </button>
+          </div>
+          <span className="text-zinc-500">
+            shows {clockDisplay} → digits [{clockDisplay === '—' ? '' : clockDisplay.replace(/\D/g, '').split('').join(', ')}]
+          </span>
+        </label>
 
         {mod ? (
           <dl className="space-y-1 border-t border-zinc-700 pt-3">

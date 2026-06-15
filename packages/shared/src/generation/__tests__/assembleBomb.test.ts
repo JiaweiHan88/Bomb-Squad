@@ -87,8 +87,9 @@ describe('generateRoundBombs — AC2 frozen context flows through module generat
 
 describe('generateRoundBombs — fail-loud config guards (no partial writes)', () => {
   it('rejects an unregistered pool id before producing any bomb', () => {
-    // 'the-button' (Story 5.4) has no registered generator yet.
-    expect(() => generateRoundBombs('s', 1, config({ modulePool: ['the-button'] }), TEAMS)).toThrow(
+    // 'simon-says' (Epic 7) has no registered generator yet — 'wires' (5.3) and
+    // 'the-button' (5.4) are now registered, so they no longer fail loud.
+    expect(() => generateRoundBombs('s', 1, config({ modulePool: ['simon-says'] }), TEAMS)).toThrow(
       /unregistered id/,
     );
   });
@@ -102,11 +103,11 @@ describe('generateRoundBombs — fail-loud config guards (no partial writes)', (
   });
 
   it('falls back to the difficulty tier pool when modulePool is undefined', () => {
-    // Interim tier pools are all ['wires'] (Story 4.7), so a no-override round
-    // generates a real wires bomb rather than failing loud.
+    // Interim Easy tier pool is ['wires', 'the-button'] (Story 5.4), so a
+    // no-override round draws real modules from that set rather than failing loud.
     const bombs = generateRoundBombs('s', 1, config({ modulePool: undefined }), TEAMS);
     expect(bombs.A.modules).toHaveLength(4);
-    for (const m of bombs.A.modules) expect(m.moduleId).toBe('wires');
+    for (const m of bombs.A.modules) expect(['wires', 'the-button']).toContain(m.moduleId);
   });
 
   it('rejects an empty teamIds array', () => {

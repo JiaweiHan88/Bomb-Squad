@@ -2,11 +2,13 @@ import type { BombContext } from '../types/bomb.js';
 import type { DifficultyTier } from '../types/session.js';
 import { DEV_DEMO_MODULE_ID } from './dev-demo/types.js';
 import { WIRES_MODULE_ID } from './wires/types.js';
+import { BUTTON_MODULE_ID } from './the-button/types.js';
 // Import each generator directly from its own file, NOT via the module barrel
 // (./<mod>/index.js → ../index.js), so the registry never depends on the barrel
 // that parallel module stories edit.
 import { generateDevDemo } from './dev-demo/generate.js';
 import { generateWires } from './wires/generate.js';
+import { generateButton } from './the-button/generate.js';
 
 /**
  * A module's seeded instance generator. `seed` is the per-(team,slot) moduleSeed
@@ -38,6 +40,10 @@ export const MODULE_GENERATORS: Record<string, ModuleGenerator> = {
   // (passwords) land. Registered here (Story 4.7 closed the gap 5.3 left) so a
   // default-config round can actually build a bomb for snapshot sync to ride.
   [WIRES_MODULE_ID]: generateWires as ModuleGenerator,
+  // the-button: Story 5.4 — second Easy module. Generator + reducer + an Easy
+  // tier-pool entry land together (a pool may only list modules with both, or
+  // generateLayout throws at ROUND_START).
+  [BUTTON_MODULE_ID]: generateButton as ModuleGenerator,
 };
 
 /**
@@ -67,20 +73,19 @@ export type ModuleId = (typeof MODULE_IDS)[number];
  * easier one (harder rounds can still draw easy modules). Generation resolves
  * `config.modulePool ?? TIER_POOLS[config.difficulty]`.
  *
- * INTERIM COMPOSITION (Story 4.7): every pool ID must have a registered
- * generator in MODULE_GENERATORS (generateLayout enforces this and fails loud),
- * and `'wires'` (5.3) is currently the only real generatable module. So all
- * three tiers are `['wires']` for now — a default-config round must build a real
- * bomb for snapshot sync, and a pool listing not-yet-implemented modules would
- * throw at ROUND_START. RE-EXPAND these as modules land: 5.4 the-button, 5.5
- * passwords, then keypads/whos-on-first/wire-sequences/mazes (medium) and the
- * full MODULE_IDS set (hard). The canonical target composition is preserved in
- * `MODULE_IDS` + the per-story backlog; widen each tier when its modules are
- * registered. A Facilitator can still override with an explicit `modulePool`
- * (e.g. `['dev-demo']`).
+ * INTERIM COMPOSITION (Story 5.4): every pool ID must have a registered
+ * generator in MODULE_GENERATORS (generateLayout enforces this and fails loud).
+ * The real generatable Easy modules are `'wires'` (5.3) and now `'the-button'`
+ * (5.4); `'passwords'` (5.5) is added when it lands. RE-EXPAND further as
+ * modules land: keypads/whos-on-first/wire-sequences/mazes (medium) and the full
+ * MODULE_IDS set (hard). The authoritative tier GATING (Easy/Medium/Hard supersets
+ * surfaced in the dashboard) is owned by Story 8.1 — these defaults feed it; 8.1
+ * reconciles this map. The canonical target composition is preserved in
+ * `MODULE_IDS` + the per-story backlog. A Facilitator can still override with an
+ * explicit `modulePool` (e.g. `['dev-demo']`).
  */
 export const TIER_POOLS: Record<DifficultyTier, readonly string[]> = {
-  easy: ['wires'],
-  medium: ['wires'],
-  hard: ['wires'],
+  easy: ['wires', 'the-button'],
+  medium: ['wires', 'the-button'],
+  hard: ['wires', 'the-button'],
 };
