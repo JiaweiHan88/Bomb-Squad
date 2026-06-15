@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-14  # merged stories 2.6 + 2.7 (lobby capacity/join-window + resilience & durable identity, incl. code-review fixes) into master alongside story 3.2
+last_updated: 2026-06-15  # TD-2 dep bumps → review; tech-debt section added (TD-1 done, TD-3/TD-4 ready-for-dev)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -60,7 +60,7 @@ development_status:
   2-2-facilitator-hosts-a-session: done
   2-3-player-joins-via-code-and-picks-a-role: done
   2-4-team-and-per-player-role-assignment: done
-  2-5-lobby-roster-ready-state-and-mic-check: backlog
+  2-5-lobby-roster-ready-state-and-mic-check: in-progress
   2-6-capacity-and-join-window-guards: done
   2-7-lobby-resilience-and-facilitator-player-controls: done
   epic-2-retrospective: optional
@@ -141,3 +141,9 @@ development_status:
   10-4-accessibility-gate-sign-off: backlog
   10-5-playtest-instrumentation-and-desync-hardening: backlog
   epic-10-retrospective: optional
+
+  # ---- Tech Debt (cross-epic, not from an epic) ----
+  td-1-client-component-test-framework: done
+  td-2-safe-dependency-bumps-and-node-engine: review
+  td-3-react-19-and-r3f-upgrade: ready-for-dev
+  td-4-tooling-vite-typescript-jest: ready-for-dev
