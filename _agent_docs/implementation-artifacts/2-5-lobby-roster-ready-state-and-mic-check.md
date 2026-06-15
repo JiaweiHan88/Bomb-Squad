@@ -4,7 +4,7 @@ baseline_commit: e9de0d6 (master; + uncommitted TD-1 client component-test harne
 
 # Story 2.5: Lobby Roster, Ready State & Mic Check
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -328,3 +328,17 @@ claude-opus-4-8 (Claude Code, gds-dev-story workflow)
 ### Change Log
 
 - 2026-06-15 — Story 2.5 implemented (Tasks 1–8 + automated gates): `PLAYER_READY` self-toggle (shared event + pure reducer + race-safe handler), the two latent 2.7 voice regressions fixed (server durable-id resolve/identity; client `VoiceController` self-resolution), lobby `lobby:{sessionId}` mic-check room scope, client active-speaker presence with 150ms stop-grace, and the Lobby ready/dots/empty-state UI. Live smoke + Jay's interactive verification pending the Docker stack.
+
+## Review Findings
+
+_Code review 2026-06-15 (gds-code-review, 3 layers: Blind Hunter / Edge Case Hunter / Acceptance Auditor). All 3 ACs verified satisfied; the items below are refinements, not AC blockers. All 4 patches applied + 1 deferred — `tsc --noEmit` 0 errors, client 271/271 (+2 new), `pnpm --filter @bomb-squad/client build` green._
+
+_⚠️ Two patches are user-visible (mic-check microcopy text; mic-check button hidden while solo). Jay's prior interactive PASS predates them — recommend a 30-second re-confirm of the lobby mic-check surface before final sign-off._
+
+_**Jay re-confirmed interactively (2026-06-16):** the two user-visible patches (lobby-neutral mic-check microcopy; mic-check button hidden while solo) observed working as intended. Story flipped to `done`._
+
+- [x] [Review][Patch] Hide the mic-check affordance when solo (resolves the solo-no-dot tension) — `Lobby.tsx` now renders `LobbyMicCheck` only when `roster.length > 1` (decided 2026-06-15, Jay). Keeps AC 3's empty state and avoids the dead-end "Join mic check → no dot" path. [apps/client/src/ui/Lobby.tsx]
+- [x] [Review][Patch] Lobby mic-check shows Bomb-Room connect microcopy — added lobby-neutral `MIC_CHECK_CONNECTING` ('Joining mic check…') / `MIC_CHECK_CONNECTED` ('Mic check connected.'); `LobbyMicCheck` now uses them instead of the Bomb-Room `VOICE_*` strings; Lobby test updated. [apps/client/src/ui/LobbyMicCheck.tsx, apps/client/src/ui/copy.ts]
+- [x] [Review][Patch] Stale green speaker dot on ungraceful voice drop — `connectVoice` now binds `RoomEvent.ParticipantDisconnected` to evict the id from `displayedSpeakers` (and cancel its pending stop-grace timer) + republish; unbound in `clearRoomBindings`. Two tests added. [apps/client/src/voice/connectVoice.ts]
+- [x] [Review][Patch] Empty-roster boundary renders a blank panel — empty-state guard changed from strict `=== 1` to `<= 1`. [apps/client/src/ui/Lobby.tsx]
+- [x] [Review][Defer] Duplicate display names collide in speaker-dot aria-labels [apps/client/src/ui/Lobby.tsx:230] — deferred, pre-existing (name uniqueness is a join-validation concern, not introduced by 2.5)

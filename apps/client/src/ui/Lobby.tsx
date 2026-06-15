@@ -202,11 +202,13 @@ export default function Lobby() {
             {assignError}
           </p>
         )}
-        {roster.length === 1 ? (
+        {roster.length <= 1 ? (
           // Empty state (AC 3): the viewer is alone. Show the message in place of
           // a lonely one-row roster; the share panel stays so they can invite the
           // team. Count the roster (not "players minus me") — a solo facilitator
-          // and a solo joiner both see it. (EXPERIENCE.md §Empty states.)
+          // and a solo joiner both see it. (EXPERIENCE.md §Empty states.) `<= 1`
+          // (not `=== 1`) so an unexpected empty-players snapshot can't fall
+          // through to a blank roster `<ul>` with no message.
           <p className="rounded-md bg-surface px-4 py-6 text-center text-sm text-ink-muted">
             {WAITING_FOR_TEAM}
           </p>
@@ -357,8 +359,11 @@ export default function Lobby() {
         </div>
 
         {/* Mic check (Story 2.5): a gesture-driven join into the shared lobby
-            voice room. Non-blocking — a voice failure never gates the lobby. */}
-        <LobbyMicCheck />
+            voice room. Non-blocking — a voice failure never gates the lobby.
+            Hidden while the viewer is alone (`roster.length <= 1`): a solo player
+            has no one to check against and would see no dot, so the affordance
+            only appears once a second player arrives (review decision 2026-06-15). */}
+        {roster.length > 1 && <LobbyMicCheck />}
 
         {isFacilitator && (
           // Two-step confirm: opening prep moves every player off the lobby —

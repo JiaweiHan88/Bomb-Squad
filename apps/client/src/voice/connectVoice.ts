@@ -44,7 +44,7 @@ interface SpeakingParticipant {
  * real `Room` satisfies it; tests supply a fake so no real SFU is needed. The
  * `on`/`off` surface carries every RoomEvent this controller binds —
  * TrackSubscribed/TrackUnsubscribed/Disconnected and (Story 2.5)
- * ActiveSpeakersChanged. */
+ * ActiveSpeakersChanged + ParticipantDisconnected. */
 export interface VoiceRoom {
   on(event: RoomEvent, listener: (...args: never[]) => void): this;
   off(event: RoomEvent, listener: (...args: never[]) => void): this;
@@ -123,6 +123,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   let onUnsubscribed: ((track: RemoteTrack) => void) | null = null;
   let onDisconnected: (() => void) | null = null;
   let onActiveSpeakers: ((participants: SpeakingParticipant[]) => void) | null = null;
+  let onParticipantDisconnected: ((participant: SpeakingParticipant) => void) | null = null;
 
   // Speaker-presence bookkeeping (Story 2.5). `displayed` is the set the roster
   // dots reflect (mirrored into voiceStore.activeSpeakers); per-identity timers
@@ -154,10 +155,16 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     if (onDisconnected) r.off(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
     if (onActiveSpeakers)
       r.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
+    if (onParticipantDisconnected)
+      r.off(
+        RoomEvent.ParticipantDisconnected,
+        onParticipantDisconnected as (...args: never[]) => void,
+      );
     onSubscribed = null;
     onUnsubscribed = null;
     onDisconnected = null;
     onActiveSpeakers = null;
+    onParticipantDisconnected = null;
     clearSpeakerState();
     detachAll();
   }
@@ -242,10 +249,24 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       }
       if (changed) publishSpeakers();
     };
+    // A participant who drops ungracefully (crash / network loss) may never emit
+    // a fresh ActiveSpeakersChanged that excludes them — so a green dot could
+    // stick forever. Evict them immediately on ParticipantDisconnected (and drop
+    // any pending stop-grace timer for them — they're gone, no flicker to grace).
+    onParticipantDisconnected = (participant: SpeakingParticipant) => {
+      const { identity } = participant;
+      const pending = speakerClearTimers.get(identity);
+      if (pending !== undefined) {
+        clearTimeout(pending);
+        speakerClearTimers.delete(identity);
+      }
+      if (displayedSpeakers.delete(identity)) publishSpeakers();
+    };
     r.on(RoomEvent.TrackSubscribed, onSubscribed as (...args: never[]) => void);
     r.on(RoomEvent.TrackUnsubscribed, onUnsubscribed as (...args: never[]) => void);
     r.on(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
     r.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
+    r.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected as (...args: never[]) => void);
 
     try {
       // url + token from the ack; never logged.

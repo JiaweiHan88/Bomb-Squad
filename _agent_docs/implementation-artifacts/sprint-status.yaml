@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-16  # TD-3 React 19/R3F 9 upgrade → done (Jay verified interactive 60fps render; client image rebuilt, all suites green)
+last_updated: 2026-06-16  # story 2.5 → done (code review: 4 patches applied + 1 deferred; Jay re-confirmed the 2 user-visible patches interactively; tsc/build green, client 271/271)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -60,7 +60,7 @@ development_status:
   2-2-facilitator-hosts-a-session: done
   2-3-player-joins-via-code-and-picks-a-role: done
   2-4-team-and-per-player-role-assignment: done
-  2-5-lobby-roster-ready-state-and-mic-check: review
+  2-5-lobby-roster-ready-state-and-mic-check: done
   2-6-capacity-and-join-window-guards: done
   2-7-lobby-resilience-and-facilitator-player-controls: done
   epic-2-retrospective: optional

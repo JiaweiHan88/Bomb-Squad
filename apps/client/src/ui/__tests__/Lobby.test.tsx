@@ -180,11 +180,11 @@ describe('Lobby — mic-check affordance', () => {
 
     useVoiceStore.setState({ status: 'connecting' });
     const { rerender } = render(<Lobby />);
-    expect(screen.getByText('Connecting to Bomb Room…')).toBeInTheDocument();
+    expect(screen.getByText('Joining mic check…')).toBeInTheDocument();
 
     useVoiceStore.setState({ status: 'connected' });
     rerender(<Lobby />);
-    expect(screen.getByText('Bomb Room voice connected.')).toBeInTheDocument();
+    expect(screen.getByText('Mic check connected.')).toBeInTheDocument();
 
     useVoiceStore.setState({ status: 'unavailable' });
     rerender(<Lobby />);

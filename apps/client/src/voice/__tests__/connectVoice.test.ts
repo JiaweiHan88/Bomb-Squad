@@ -346,6 +346,40 @@ describe('active-speaker tracking', () => {
     }
   });
 
+  it('evicts a speaker immediately when they disconnect ungracefully (no fresh ActiveSpeakers)', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'p2' }]);
+    expect(useVoiceStore.getState().activeSpeakers.sort()).toEqual(['p1', 'p2']);
+
+    // p2 crashes/drops — LiveKit may never emit a fresh ActiveSpeakers excluding
+    // them, so the dot would stick. ParticipantDisconnected clears it at once.
+    room.emit(RoomEvent.ParticipantDisconnected, { identity: 'p2' });
+    expect(useVoiceStore.getState().activeSpeakers).toEqual(['p1']);
+  });
+
+  it('a participant disconnect cancels that identity’s pending stop-grace timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { room } = makeFakeRoom();
+      const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+      await controller.connect();
+
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]);
+      room.emit(RoomEvent.ActiveSpeakersChanged, []); // p1 stops → grace timer scheduled
+      room.emit(RoomEvent.ParticipantDisconnected, { identity: 'p1' }); // gone before grace fires
+      expect(useVoiceStore.getState().activeSpeakers).toEqual([]);
+
+      // The cancelled grace timer must not fire a redundant clear later.
+      vi.advanceTimersByTime(500);
+      expect(useVoiceStore.getState().activeSpeakers).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('teardown clears activeSpeakers and cancels pending grace timers', async () => {
     vi.useFakeTimers();
     try {

@@ -4,8 +4,8 @@ import { connectVoice, disconnectVoice } from '../voice/connectVoice.js';
 import Button from './Button.js';
 import {
   MIC_CHECK_CTA,
-  VOICE_CONNECTING,
-  VOICE_CONNECTED,
+  MIC_CHECK_CONNECTING,
+  MIC_CHECK_CONNECTED,
   VOICE_UNAVAILABLE,
   VOICE_DISMISS,
 } from './copy.js';
@@ -56,13 +56,13 @@ export default function LobbyMicCheck() {
 
       {status === 'connecting' && (
         <p className="rounded-md bg-surface px-3 py-2 font-mono text-xs uppercase tracking-widest text-ink-muted">
-          {VOICE_CONNECTING}
+          {MIC_CHECK_CONNECTING}
         </p>
       )}
 
       {status === 'connected' && (
         <p className="rounded-md bg-surface px-3 py-2 font-mono text-xs uppercase tracking-widest text-ink-muted">
-          {VOICE_CONNECTED}
+          {MIC_CHECK_CONNECTED}
         </p>
       )}
 

@@ -47,6 +47,10 @@ export const READY = 'Ready';
 export const MARK_READY = 'Mark ready';
 export const READY_INDICATOR = 'Ready';
 export const MIC_CHECK_CTA = 'Join mic check';
+// Mic-check connect microcopy — lobby-surface variants (the VOICE_* strings name
+// the Bomb Room, which is the wrong surface for the pre-game lobby mic check).
+export const MIC_CHECK_CONNECTING = 'Joining mic check…';
+export const MIC_CHECK_CONNECTED = 'Mic check connected.';
 export const WAITING_FOR_TEAM = 'Waiting for your team.';
 // Accessible labels for the per-row speaker dot (never icon-only).
 export const SPEAKING = 'speaking';
