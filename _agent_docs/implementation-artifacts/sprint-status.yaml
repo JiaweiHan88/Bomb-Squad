@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-15  # story 2.5 (lobby roster/ready/mic-check) → review (impl + tests + live smoke + Jay interactive all pass)
+last_updated: 2026-06-16  # TD-3 React 19/R3F 9 upgrade → done (Jay verified interactive 60fps render; client image rebuilt, all suites green)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -145,5 +145,5 @@ development_status:
   # ---- Tech Debt (cross-epic, not from an epic) ----
   td-1-client-component-test-framework: done
   td-2-safe-dependency-bumps-and-node-engine: done
-  td-3-react-19-and-r3f-upgrade: ready-for-dev
+  td-3-react-19-and-r3f-upgrade: done
   td-4-tooling-vite-typescript-jest: ready-for-dev

@@ -36,7 +36,7 @@ This document does **not** re-decide the technology stack. Those decisions were 
 
 | Category | Decision | Version | Affects Epics | Rationale |
 | -------- | -------- | ------- | ------------- | --------- |
-| Client framework | React + React Three Fiber + Three.js | React 18 | 4–10 | Settled in project-context; 3D bomb in-browser, no native build |
+| Client framework | React + React Three Fiber + Three.js | React 19 (R3F 9) | 4–10 | Settled in project-context ("React 18+"); upgraded 18→19 + R3F 8→9 in TD-3 (R3F 9 requires React 19); 3D bomb in-browser, no native build |
 | Client state | Zustand (`getState()` in render loop) | latest | 4–10 | Avoids React re-render storms in `useFrame` |
 | Server runtime | Node.js + Fastify (`@fastify/type-provider-typebox`) | Node 20 LTS | 1–10 | Settled; typed HTTP + WS host process |
 | Realtime transport | Socket.IO | latest | 1–10 | Settled; rooms model maps cleanly to sessions/teams |
@@ -147,7 +147,7 @@ bomb-squad/
 
 Authoritative versions and rules live in `project-context.md`. Summary:
 
-- **Client:** React 18, React Three Fiber + Three.js (3D bomb), Zustand (client state — `getState()` in render loop, never `useState` for tick-rate data), LiveKit Client SDK (voice), Tailwind CSS, TypeScript throughout, Vite bundler.
+- **Client:** React 19 (React Three Fiber 9 + Three.js, 3D bomb), Zustand (client state — `getState()` in render loop, never `useState` for tick-rate data), LiveKit Client SDK (voice), Tailwind CSS, TypeScript throughout, Vite bundler.
 - **Server:** Node.js + Fastify (`@fastify/type-provider-typebox`), Socket.IO (game state sync), LiveKit Server SDK (SFU routing), Redis (in-flight session state), PostgreSQL (session-end archive), TypeScript throughout.
 - **Shared:** pnpm-workspace monorepo with `packages/shared` for all event types, game-state types, and module interfaces. **Zero runtime dependency on react/socket.io/any framework.**
 - **Infra:** Docker Compose; LiveKit Server container; coturn (TURN fallback, own HMAC-SHA1 credential generation); Caddy (reverse proxy + TLS).

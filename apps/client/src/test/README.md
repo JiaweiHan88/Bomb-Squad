@@ -67,7 +67,8 @@ Seed Zustand state via the store's own API (e.g. `useGameStore.setState(...)` / 
 jsdom has **no WebGL/canvas**, so any component tree that transitively reaches the 3D bomb
 scene (`<Canvas>`, `useFrame`, `useThree`, drei helpers) will throw. The plain-DOM `src/ui/`
 components don't need this, but anything that renders a `DefuserView` / `BombScene` does. Stub
-the module at the top of the test file:
+the module at the top of the test file (the `Canvas`/`useFrame`/`useThree` import surface below
+is unchanged on **R3F v9** — verified during the TD-3 React 19 / R3F 9 upgrade):
 
 ```ts
 // Render R3F children as plain DOM and no-op the hooks so jsdom doesn't touch WebGL.
