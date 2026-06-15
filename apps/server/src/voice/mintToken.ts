@@ -11,7 +11,7 @@
  * mapping below is the single place the voice topology rule lives (AR12).
  */
 import { AccessToken, type VideoGrant } from 'livekit-server-sdk';
-import type { PlayerRole, TeamId } from '@bomb-squad/shared';
+import type { PlayerRole, SessionState, TeamId } from '@bomb-squad/shared';
 
 /**
  * Roles that belong in a team's bidirectional Bomb Room (AR12). The facilitator
@@ -41,6 +41,12 @@ export interface VoiceParticipant {
   sessionId: string;
   /** Required for Bomb Room roles; absent for spectators. */
   teamId?: TeamId;
+  /**
+   * Current session phase (Story 2.5). When `'lobby'`, EVERY participant is
+   * scoped to the shared lobby mic-check room regardless of role/team — see
+   * {@link resolveVoiceScope}. Absent/other phases keep the role-scoped routing.
+   */
+  phase?: SessionState['status'];
 }
 
 export interface VoiceCredentials {
@@ -63,6 +69,11 @@ export const bombRoomName = (sessionId: string, teamId: TeamId): string =>
 export const spectatorLoungeName = (sessionId: string): string =>
   `spectator-lounge:${sessionId}`;
 
+/** LiveKit room name for the session's pre-game lobby mic check (Story 2.5).
+ * A single shared, bidirectional room every participant joins while the session
+ * is in `lobby` status. */
+export const lobbyRoomName = (sessionId: string): string => `lobby:${sessionId}`;
+
 /**
  * Resolve a participant's single room + grant from their role. Pure and
  * total over valid inputs; throws {@link VoiceScopeError} for the one
@@ -79,7 +90,24 @@ export const spectatorLoungeName = (sessionId: string): string =>
  *   story — never minted here.
  */
 export function resolveVoiceScope(participant: VoiceParticipant): ResolvedVoiceScope {
-  const { role, sessionId, teamId } = participant;
+  const { role, sessionId, teamId, phase } = participant;
+
+  // Lobby mic check (Story 2.5): while the session is in `lobby` status EVERY
+  // participant — defuser / expert / spectator / facilitator — shares one
+  // bidirectional room. This branch runs BEFORE the role checks so an un-teamed
+  // Bomb Room role in the lobby no longer throws VoiceScopeError (today a
+  // teamless defuser does): in the lobby they belong in the lobby room regardless
+  // of team. Deliberate FR39 exception: spectators get `canPublish: true` HERE
+  // ONLY. FR39's spectator-listen-only rule governs the in-game Spectator Lounge
+  // (Story 3.3) — a pre-game mic check is not the lounge; every participant must
+  // be able to verify their own mic, so do NOT "fix" this into listen-only.
+  if (phase === 'lobby') {
+    const room = lobbyRoomName(sessionId);
+    return {
+      room,
+      grant: { roomJoin: true, room, canPublish: true, canSubscribe: true },
+    };
+  }
 
   // Spectators and the facilitator share the Spectator Lounge as their baseline
   // room; only the facilitator may publish into it (host narration). Spectators

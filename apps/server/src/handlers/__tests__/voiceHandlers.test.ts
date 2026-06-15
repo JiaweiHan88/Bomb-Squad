@@ -1,10 +1,14 @@
 /**
- * Integration tests for the VOICE_TOKEN handler (Story 3.1), driven through a
- * real socket round-trip against an in-memory RedisStore (AR16). We register
- * the session handlers too so a real SESSION_CREATE sets `socket.data.sessionId`
- * exactly as production does; the player's role/team is then crafted directly in
- * the store to exercise each scope. Tokens are decoded (never asserted as opaque
- * strings) and a log-leak guard enforces that the JWT is never logged.
+ * Integration tests for the VOICE_TOKEN handler (Story 3.1, migrated to the
+ * durable-id model in Story 2.5). Driven through a real socket round-trip
+ * against an in-memory RedisStore (AR16). A real SESSION_CREATE sets
+ * `socket.data.playerId` to the durable id and keys `state.players` by it —
+ * exactly as production does — so we resolve that durable id from the store and
+ * craft each player's role/team/status against it. The pre-2.5 suite seeded
+ * `players` keyed by `socket.id`, which masked the production bug where
+ * `state.players[socket.id]` is always undefined (the roster key is a UUID, not
+ * socket.id) → NOT_IN_SESSION for everyone. Tokens are decoded (never asserted
+ * as opaque strings) and a log-leak guard enforces that the JWT is never logged.
  */
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import type {
@@ -59,17 +63,29 @@ function requestVoiceToken(socket: TestClientSocket): Promise<VoiceAck> {
   return new Promise((resolve) => socket.emit('VOICE_TOKEN', {}, resolve as never));
 }
 
-/** Overwrite the player row for `playerId` in the stored session state. */
+/** The durable playerId the server minted for the (sole) facilitator on create —
+ * the production roster key (a UUID), NOT socket.id. */
+async function facilitatorId(store: MemoryRedisStore, sessionId: string): Promise<string> {
+  const state = await store.getJSON<SessionState>(sessionKey(sessionId));
+  if (state === null) throw new Error('session not found in test store');
+  const ids = Object.keys(state.players);
+  if (ids.length !== 1) throw new Error(`expected exactly one player, got ${ids.length}`);
+  return ids[0] as string;
+}
+
+/** Overwrite a player row (keyed by the DURABLE playerId) and optionally the
+ * session status, so each test exercises the desired role/phase scope. */
 async function setPlayer(
   store: MemoryRedisStore,
   sessionId: string,
   playerId: string,
   role: PlayerRole,
-  teamId?: TeamId,
+  opts: { teamId?: TeamId; status?: SessionState['status'] } = {},
 ): Promise<void> {
   const state = await store.getJSON<SessionState>(sessionKey(sessionId));
   if (state === null) throw new Error('session not found in test store');
-  state.players[playerId] = { playerId, displayName: 'tester', role, teamId, isReady: false };
+  state.players[playerId] = { playerId, displayName: 'tester', role, teamId: opts.teamId, isReady: false };
+  if (opts.status !== undefined) state.status = opts.status;
   await store.setJSON(sessionKey(sessionId), state);
 }
 
@@ -109,9 +125,10 @@ describe('VOICE_TOKEN handler', () => {
     await server.close();
   });
 
-  it('mints a Bomb Room token for a defuser with a team', async () => {
+  it('mints a Bomb Room token for a defuser with a team (active phase)', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'defuser', 'A');
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
 
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(true);
@@ -119,18 +136,39 @@ describe('VOICE_TOKEN handler', () => {
 
     expect(res.url).toBe(CONFIG.LIVEKIT_URL);
     expect(res.room).toBe(`bomb-room:${sessionId}:A`);
-    expect(res.identity).toBe(client.id);
+    // Identity is the DURABLE playerId, never socket.id (Story 2.5 regression fix).
+    expect(res.identity).toBe(playerId);
+    expect(res.identity).not.toBe(client.id);
 
     const claims = decodeJwt(res.token);
-    expect(claims.sub).toBe(client.id);
+    expect(claims.sub).toBe(playerId);
     expect(claims.video?.room).toBe(`bomb-room:${sessionId}:A`);
     expect(claims.video?.canPublish).toBe(true);
     expect(claims.video?.canSubscribe).toBe(true);
   });
 
-  it('mints a listen-only Spectator Lounge token (canPublish:false)', async () => {
+  // The exact production case the pre-2.5 socket.id-keyed seeding masked: a
+  // socket whose durable playerId IS a roster key but whose socket.id is NOT.
+  it('regression: a player keyed by durable id (not socket.id) gets a grant', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'spectator');
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
+
+    // Sanity: the roster key is the durable id, and socket.id is absent from it.
+    const state = await store.getJSON<SessionState>(sessionKey(sessionId));
+    expect(Object.keys(state!.players)).toContain(playerId);
+    expect(Object.keys(state!.players)).not.toContain(client.id);
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true); // pre-fix this was NOT_IN_SESSION for everyone
+    if (!isGrant(res)) return;
+    expect(res.identity).toBe(playerId);
+  });
+
+  it('mints a listen-only Spectator Lounge token (canPublish:false) in a non-lobby phase', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'spectator', { status: 'active' });
 
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(true);
@@ -143,20 +181,54 @@ describe('VOICE_TOKEN handler', () => {
     expect(claims.video?.canSubscribe).toBe(true);
   });
 
-  it('mints a Spectator Lounge token with publish for a facilitator (no team needed)', async () => {
+  it('mints a Spectator Lounge token with publish for a facilitator in a non-lobby phase', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'facilitator'); // no teamId
+    const playerId = await facilitatorId(store, sessionId);
+    // Already a facilitator on create; just move out of lobby phase.
+    await setPlayer(store, sessionId, playerId, 'facilitator', { status: 'active' });
 
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(true);
     if (!isGrant(res)) return;
 
-    // Facilitator baselines into the lounge alongside spectators, but may publish
-    // (host narration); the on-demand Bomb Room PTT bridge is a later story.
     expect(res.room).toBe(`spectator-lounge:${sessionId}`);
     const claims = decodeJwt(res.token);
     expect(claims.video?.room).toBe(`spectator-lounge:${sessionId}`);
     expect(claims.video?.canPublish).toBe(true);
+    expect(claims.video?.canSubscribe).toBe(true);
+  });
+
+  // ── Lobby mic-check scope (Story 2.5) ──────────────────────────────────────
+
+  it('scopes a teamless defuser in the LOBBY to the shared lobby room (no scope error)', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    // Status stays 'lobby' (create default); a Bomb Room role with NO team.
+    await setPlayer(store, sessionId, playerId, 'defuser');
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true); // would be VOICE_SCOPE_UNAVAILABLE outside the lobby
+    if (!isGrant(res)) return;
+
+    expect(res.room).toBe(`lobby:${sessionId}`);
+    const claims = decodeJwt(res.token);
+    expect(claims.video?.room).toBe(`lobby:${sessionId}`);
+    expect(claims.video?.canPublish).toBe(true);
+    expect(claims.video?.canSubscribe).toBe(true);
+  });
+
+  it('scopes a spectator in the LOBBY to the shared lobby room with publish (mic-check exception)', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'spectator'); // lobby phase
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true);
+    if (!isGrant(res)) return;
+
+    expect(res.room).toBe(`lobby:${sessionId}`);
+    const claims = decodeJwt(res.token);
+    expect(claims.video?.canPublish).toBe(true); // lobby-only FR39 exception
     expect(claims.video?.canSubscribe).toBe(true);
   });
 
@@ -168,8 +240,9 @@ describe('VOICE_TOKEN handler', () => {
 
   it('denies a socket whose player row is absent from session state', async () => {
     const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
     const state = await store.getJSON<SessionState>(sessionKey(sessionId));
-    delete state!.players[client.id as string];
+    delete state!.players[playerId];
     await store.setJSON(sessionKey(sessionId), state);
 
     const res = await requestVoiceToken(client);
@@ -177,9 +250,10 @@ describe('VOICE_TOKEN handler', () => {
     expect((res as VoiceTokenErrorPayload).error).toBe('NOT_IN_SESSION');
   });
 
-  it('denies a Bomb Room role with no team assigned (no token minted)', async () => {
+  it('denies a Bomb Room role with no team in a non-lobby phase (no token minted)', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'defuser'); // no teamId
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { status: 'active' }); // no teamId, not lobby
 
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(false);
@@ -188,7 +262,8 @@ describe('VOICE_TOKEN handler', () => {
 
   it('never trusts the client: an empty payload still yields the server-derived scope', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'spectator');
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'spectator', { status: 'active' });
 
     // Even if a client tried to smuggle fields, the handler ignores the payload.
     const res = await new Promise<VoiceAck>((resolve) =>
@@ -202,7 +277,8 @@ describe('VOICE_TOKEN handler', () => {
 
   it('never logs the minted token (AC #2 secret-leak guard)', async () => {
     const { sessionId } = await createSession(client);
-    await setPlayer(store, sessionId, client.id as string, 'defuser', 'A');
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
 
     const res = await requestVoiceToken(client);
     expect(isGrant(res)).toBe(true);

@@ -40,6 +40,18 @@ export const REMOVE_CONFIRM = 'Remove';
 // Share-link Join button (Story 2.7) — shown when a prefilled code is complete.
 export const JOIN_NOW = 'Join';
 
+// Lobby ready + mic check (Story 2.5). Ready is informational/self-toggle; the
+// speaker dot is the lobby's only sanctioned green ("audible"). Names always
+// shown beside the dot (colorblind floor). Connect microcopy reuses VOICE_*.
+export const READY = 'Ready';
+export const MARK_READY = 'Mark ready';
+export const READY_INDICATOR = 'Ready';
+export const MIC_CHECK_CTA = 'Join mic check';
+export const WAITING_FOR_TEAM = 'Waiting for your team.';
+// Accessible labels for the per-row speaker dot (never icon-only).
+export const SPEAKING = 'speaking';
+export const MIC_QUIET = 'quiet';
+
 // Team assignment (Story 2.4) — mockup "6. Facilitator Dashboard" team badges.
 export const TEAM_A = 'Team A';
 export const TEAM_B = 'Team B';

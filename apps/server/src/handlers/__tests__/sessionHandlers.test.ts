@@ -1886,3 +1886,192 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
     }
   });
 });
+
+describe('PLAYER_READY handler (Story 2.5)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let joiner: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+      }),
+    );
+    facilitator = await server.connectClient();
+    joiner = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  /** Join a socket and drain both broadcasts; resolve with the joiner's snapshot. */
+  async function joinAs(
+    socket: TestClientSocket,
+    joinCode: string,
+    displayName: string,
+  ): Promise<SessionState> {
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
+    const [state] = await Promise.all([statePromise, facStatePromise]);
+    return state;
+  }
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  it('happy path: a joiner sets ready; BOTH sockets receive SESSION_STATE with isReady true; persisted', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya');
+    const mayaId = idOf(joined, 'Maya');
+
+    const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerStatePromise = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('PLAYER_READY', { isReady: true });
+
+    const [facState, joinerState] = await Promise.all([facStatePromise, joinerStatePromise]);
+    for (const state of [facState, joinerState]) {
+      expect(state.players[mayaId].isReady).toBe(true);
+    }
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.players[mayaId].isReady).toBe(true);
+  });
+
+  it('toggles back to false', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya');
+    const mayaId = idOf(joined, 'Maya');
+
+    let next = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('PLAYER_READY', { isReady: true });
+    expect((await next).players[mayaId].isReady).toBe(true);
+
+    next = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('PLAYER_READY', { isReady: false });
+    expect((await next).players[mayaId].isReady).toBe(false);
+  });
+
+  it('idempotent repeat of the same value → no second broadcast, no persist', async () => {
+    const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya');
+
+    const first = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('PLAYER_READY', { isReady: true });
+    await first;
+    const storedAfterFirst = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    joiner.emit('PLAYER_READY', { isReady: true }); // same value → noop
+    // Fence: an invalid emit produces an ERROR; per-socket ordering guarantees the
+    // idempotent toggle above was processed by then.
+    const fence = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PLAYER_READY', 'nope' as never);
+    await fence;
+
+    expect(facSpy).not.toHaveBeenCalled();
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedAfterFirst);
+  });
+
+  it.each([
+    ['string isReady', { isReady: 'yes' }],
+    ['missing isReady', {}],
+    ['non-object', 'ready'],
+    ['null', null],
+  ])('invalid payload (%s) → INVALID_PAYLOAD', async (_label, payload) => {
+    const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya');
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PLAYER_READY', payload as never);
+    expect((await errorPromise).code).toBe('INVALID_PAYLOAD');
+  });
+
+  it('a connected socket that never entered a session → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('PLAYER_READY', { isReady: true });
+    expect((await errorPromise).code).toBe('NOT_IN_SESSION');
+  });
+
+  it('non-lobby (active) session → no mutation, no broadcast (lobby-phase guard)', async () => {
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya');
+    const mayaId = idOf(joined, 'Maya');
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    joiner.emit('PLAYER_READY', { isReady: true }); // inert in non-lobby
+    // Fence on the joiner's own ERROR (invalid payload) to order past the noop.
+    const fence = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PLAYER_READY', 'x' as never);
+    await fence;
+
+    expect(facSpy).not.toHaveBeenCalled();
+    const after = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(after.players[mayaId].isReady).toBe(false);
+  });
+
+  it('updateJSON throw → PLAYER_READY_FAILED to the caller, no broadcast', async () => {
+    const ack = await createSession(facilitator);
+    await joinAs(joiner, ack.joinCode, 'Maya');
+
+    store.updateJSON = async () => {
+      throw new Error('redis down');
+    };
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PLAYER_READY', { isReady: true });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('PLAYER_READY_FAILED');
+    expect(error.recoverable).toBe(true);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('AR15: the join code never appears in any log line', async () => {
+    const lines: string[] = [];
+    const record = (obj: object, msg?: string): void => {
+      lines.push(JSON.stringify(obj) + (msg ? ` ${msg}` : ''));
+    };
+    const capturingLog: SessionLog = { info: record, error: record };
+    const logStore = createMemoryRedisStore();
+    const logServer = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: logStore,
+        log: capturingLog,
+        timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+      }),
+    );
+    try {
+      const fac = await logServer.connectClient();
+      const j = await logServer.connectClient();
+      const ack = await new Promise<SessionCreatedPayload>((resolve) =>
+        fac.emit('SESSION_CREATE', {}, resolve),
+      );
+      const jState = nextEvent<SessionState>(j, 'SESSION_STATE');
+      j.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+      await jState;
+
+      const broadcast = nextEvent<SessionState>(fac, 'SESSION_STATE');
+      j.emit('PLAYER_READY', { isReady: true });
+      await broadcast;
+
+      const blob = lines.join('\n');
+      expect(blob).toContain('player ready set'); // it did log
+      expect(blob).not.toContain(ack.joinCode);
+    } finally {
+      await logServer.close();
+    }
+  });
+});

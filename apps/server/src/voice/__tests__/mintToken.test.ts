@@ -103,6 +103,58 @@ describe('resolveVoiceScope', () => {
       resolveVoiceScope({ identity: 'p6', role: 'expert', sessionId: 'sess1' }),
     ).toThrow(VoiceScopeError);
   });
+
+  // ── Lobby mic-check phase (Story 2.5) ──────────────────────────────────────
+  // While `phase === 'lobby'` EVERY participant is scoped to one shared,
+  // bidirectional room — before the role checks, so an un-teamed Bomb Room role
+  // no longer throws and a spectator gets publish (the lobby-only FR39 exception).
+
+  it('lobby phase scopes a teamless defuser to the shared lobby room (no throw)', () => {
+    const { room, grant } = resolveVoiceScope({
+      identity: 'p1',
+      role: 'defuser',
+      sessionId: 'sess1',
+      phase: 'lobby',
+    });
+    expect(room).toBe('lobby:sess1');
+    expect(grant).toMatchObject({
+      roomJoin: true,
+      room: 'lobby:sess1',
+      canPublish: true,
+      canSubscribe: true,
+    });
+  });
+
+  it('lobby phase scopes a spectator to the shared lobby room WITH publish (mic-check exception)', () => {
+    const { room, grant } = resolveVoiceScope({
+      identity: 'p3',
+      role: 'spectator',
+      sessionId: 'sess1',
+      phase: 'lobby',
+    });
+    expect(room).toBe('lobby:sess1');
+    expect(grant.canPublish).toBe(true);
+    expect(grant.canSubscribe).toBe(true);
+  });
+
+  it('lobby phase scopes the facilitator to the shared lobby room', () => {
+    const { room } = resolveVoiceScope({
+      identity: 'p-fac',
+      role: 'facilitator',
+      sessionId: 'sess1',
+      phase: 'lobby',
+    });
+    expect(room).toBe('lobby:sess1');
+  });
+
+  it('the SAME spectator outside the lobby reverts to the listen-only lounge (path unchanged)', () => {
+    const lobby = resolveVoiceScope({ identity: 'p3', role: 'spectator', sessionId: 'sess1', phase: 'lobby' });
+    const active = resolveVoiceScope({ identity: 'p3', role: 'spectator', sessionId: 'sess1', phase: 'active' });
+    expect(lobby.room).toBe('lobby:sess1');
+    expect(lobby.grant.canPublish).toBe(true);
+    expect(active.room).toBe('spectator-lounge:sess1');
+    expect(active.grant.canPublish).toBe(false);
+  });
 });
 
 describe('mintVoiceToken', () => {

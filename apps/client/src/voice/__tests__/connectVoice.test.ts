@@ -82,13 +82,13 @@ beforeEach(() => {
     bomb: { strikes: 0 } as never,
     connection: 'connected',
   });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useGameStore.setState({ session: null, bomb: null, timer: null, connection: 'disconnected' });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
 });
 
 // ── The load-bearing independence test (AC #3) ───────────────────────────────
@@ -276,6 +276,95 @@ describe('a teardown during an in-flight connect never leaks a live room', () =>
     expect(after.session).toBe(before.session);
     expect(after.bomb).toBe(before.bomb);
     expect(after.connection).toBe(before.connection);
+  });
+});
+
+// ── Active-speaker presence (Story 2.5) ──────────────────────────────────────
+// LiveKit ActiveSpeakersChanged → voiceStore.activeSpeakers, mapped by the
+// participant identity (== durable playerId). New speakers light immediately;
+// a stop is held for the 150ms grace before the dot clears; teardown cancels
+// every pending grace timer and clears the set.
+
+describe('active-speaker tracking', () => {
+  it('writes speaking participant identities to voiceStore.activeSpeakers', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'p2' }]);
+    expect(useVoiceStore.getState().activeSpeakers.sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('lights a newly-speaking identity immediately', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]);
+    expect(useVoiceStore.getState().activeSpeakers).toEqual(['p1']);
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'p2' }]);
+    expect(useVoiceStore.getState().activeSpeakers.sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('holds a stopped speaker for the 150ms grace, then clears it', async () => {
+    vi.useFakeTimers();
+    try {
+      const { room } = makeFakeRoom();
+      const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+      await controller.connect();
+
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'p2' }]);
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]); // p2 stops
+
+      // Still shown during the grace.
+      vi.advanceTimersByTime(149);
+      expect(useVoiceStore.getState().activeSpeakers.sort()).toEqual(['p1', 'p2']);
+
+      // Cleared once the grace elapses.
+      vi.advanceTimersByTime(1);
+      expect(useVoiceStore.getState().activeSpeakers).toEqual(['p1']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a speaker that resumes within the grace keeps its dot (timer cancelled)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { room } = makeFakeRoom();
+      const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+      await controller.connect();
+
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]);
+      room.emit(RoomEvent.ActiveSpeakersChanged, []); // stops
+      vi.advanceTimersByTime(100);
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]); // resumes
+      vi.advanceTimersByTime(100); // past where the original clear would have fired
+      expect(useVoiceStore.getState().activeSpeakers).toEqual(['p1']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('teardown clears activeSpeakers and cancels pending grace timers', async () => {
+    vi.useFakeTimers();
+    try {
+      const { room } = makeFakeRoom();
+      const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+      await controller.connect();
+
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'p2' }]);
+      room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]); // schedule p2 clear
+
+      await controller.disconnect();
+      expect(useVoiceStore.getState().activeSpeakers).toEqual([]); // reset cleared it
+
+      // The pending grace timer must not fire after teardown.
+      vi.advanceTimersByTime(500);
+      expect(useVoiceStore.getState().activeSpeakers).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

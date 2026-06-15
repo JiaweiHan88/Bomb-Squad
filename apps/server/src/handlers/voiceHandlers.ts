@@ -90,8 +90,12 @@ export function registerVoiceHandlers(io: VoiceIOServer, deps: VoiceHandlerDeps)
           return;
         }
 
-        // Authority: resolve role + team from loaded state, never the payload.
-        const player = state.players[socket.id];
+        // Authority: resolve role + team from loaded state by the DURABLE
+        // playerId (Story 2.7 re-keyed `players` from socket.id), never the
+        // payload. `?? ''` keeps a never-joined socket (no socket.data.playerId)
+        // a guaranteed miss → NOT_IN_SESSION, rather than an accidental match.
+        const playerId = socket.data.playerId ?? '';
+        const player = state.players[playerId];
         if (player === undefined) {
           fail('NOT_IN_SESSION', 'socket not a player in session');
           return;
@@ -99,10 +103,16 @@ export function registerVoiceHandlers(io: VoiceIOServer, deps: VoiceHandlerDeps)
 
         const { token, room } = await mintVoiceToken(
           {
-            identity: socket.id,
+            // Identity MUST be the durable playerId so the LiveKit participant
+            // identity equals the roster playerId — the client maps
+            // ActiveSpeakersChanged participants back to roster rows by it (2.5).
+            identity: playerId,
             role: player.role,
             sessionId,
             teamId: player.teamId,
+            // Thread the phase so the lobby mic check scopes everyone to the
+            // shared lobby room (Story 2.5); non-lobby keeps role-scoped routing.
+            phase: state.status,
           },
           {
             apiKey: deps.config.LIVEKIT_API_KEY,
@@ -115,11 +125,11 @@ export function registerVoiceHandlers(io: VoiceIOServer, deps: VoiceHandlerDeps)
           url: deps.config.LIVEKIT_URL,
           token,
           room,
-          identity: socket.id,
+          identity: playerId,
         };
         // Log only non-secret facts — NEVER the token (project-context Security).
         deps.log.info(
-          { sessionId, playerId: socket.id, role: player.role, room },
+          { sessionId, playerId, role: player.role, room },
           'VOICE_TOKEN minted',
         );
         ack(grant);

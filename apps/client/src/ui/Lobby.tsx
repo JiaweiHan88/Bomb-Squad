@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ErrorPayload, PlayerInfo, PlayerRole, TeamId } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
+import { useVoiceStore } from '../store/voiceStore.js';
 import { getSocket } from '../net/socket.js';
 import Button from './Button.js';
 import ConfirmButton from './ConfirmButton.js';
+import LobbyMicCheck from './LobbyMicCheck.js';
 import { buildShareLink } from './shareLink.js';
 import {
   OPEN_PREPARATION,
@@ -23,6 +25,12 @@ import {
   UNASSIGNED,
   REMOVE_PLAYER,
   REMOVE_CONFIRM,
+  READY,
+  MARK_READY,
+  READY_INDICATOR,
+  WAITING_FOR_TEAM,
+  SPEAKING,
+  MIC_QUIET,
 } from './copy.js';
 
 const ROLE_LABELS: Record<PlayerInfo['role'], string> = {
@@ -59,6 +67,8 @@ const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
   // PLAYER_REMOVE rejections (Story 2.7) — facilitator-only control on this surface.
   'INVALID_REMOVAL',
   'PLAYER_REMOVE_FAILED',
+  // PLAYER_READY rejection (Story 2.5) — the self-toggle shares this banner.
+  'PLAYER_READY_FAILED',
 ]);
 
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
@@ -79,14 +89,23 @@ function sortRoster(players: Record<string, PlayerInfo>): PlayerInfo[] {
  * Facilitators additionally get per-row assignment controls (Story 2.4):
  * Team A/B toggle chips and a role select that emit TEAM_ASSIGN. Controls are
  * server-truth-driven — their state derives from the snapshot and the emit's
- * effect arrives via the room broadcast; no optimistic flips. Ready state,
- * mic check, and the empty-state message are Story 2.5 — intentionally absent.
+ * effect arrives via the room broadcast; no optimistic flips.
+ *
+ * Story 2.5 adds the last lobby pieces: a self-toggle Ready control + per-row
+ * ready indicators (PLAYER_READY → SESSION_STATE; informational, no start gate),
+ * per-row speaker dots driven by `voiceStore.activeSpeakers` (the LobbyMicCheck
+ * affordance joins the shared lobby voice room), and the single-player empty
+ * state. Ready/indicators/dots derive purely from snapshots — no optimistic flips.
  */
 export default function Lobby() {
   const session = useGameStore((s) => s.session);
   // Reactive self-id (Story 2.7) — updates the moment SESSION_IDENTITY lands, so
   // the "You" tag appears on first join, not only after a refresh.
   const selfId = useGameStore((s) => s.myPlayerId);
+  // Speaker presence (Story 2.5) — reactive so a dot lights/clears live. Empty
+  // until this client joins the mic check (you can't see speakers in a room you
+  // haven't joined); voice-only, never game-authoritative.
+  const activeSpeakers = useVoiceStore((s) => s.activeSpeakers);
   // Presentation state only — never Zustand (2.1 rule).
   const [copied, setCopied] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -145,6 +164,14 @@ export default function Lobby() {
     getSocket().emit('PLAYER_REMOVE', { playerId });
   };
 
+  // Story 2.5: a player toggles their OWN ready (no playerId on the wire — the
+  // server resolves the caller). Server-truth-driven: the button's label and
+  // aria-pressed derive from the snapshot, never an optimistic flip.
+  const toggleReady = (currentIsReady: boolean) => {
+    setAssignError(null);
+    getSocket().emit('PLAYER_READY', { isReady: !currentIsReady });
+  };
+
   // Story 8.3: the facilitator ends the lobby by opening preparation. Server
   // truth drives the surface change — the SESSION_STATE broadcast flips
   // status to 'preparation' and App.tsx swaps Lobby out; no optimistic flip.
@@ -175,6 +202,15 @@ export default function Lobby() {
             {assignError}
           </p>
         )}
+        {roster.length === 1 ? (
+          // Empty state (AC 3): the viewer is alone. Show the message in place of
+          // a lonely one-row roster; the share panel stays so they can invite the
+          // team. Count the roster (not "players minus me") — a solo facilitator
+          // and a solo joiner both see it. (EXPERIENCE.md §Empty states.)
+          <p className="rounded-md bg-surface px-4 py-6 text-center text-sm text-ink-muted">
+            {WAITING_FOR_TEAM}
+          </p>
+        ) : (
         <ul className="flex flex-col gap-3" data-testid="roster">
           {roster.map((player) => (
             <li
@@ -182,6 +218,22 @@ export default function Lobby() {
               className="flex items-center justify-between gap-4 rounded-md bg-surface px-4 py-3"
             >
               <span className="flex items-center gap-2.5 font-semibold">
+                {/* Speaker dot (AC 2): green when this player is transmitting in
+                    the mic check, gray otherwise. Name is ALWAYS shown beside it
+                    (colorblind floor — never icon-only). Green is the lobby's only
+                    sanctioned LED use ("audible"); under reduced motion it's a
+                    solid green with no pulse (motion-safe gates the pulse). */}
+                {(() => {
+                  const isSpeaking = activeSpeakers.includes(player.playerId);
+                  return (
+                    <span
+                      aria-label={`${player.displayName} ${isSpeaking ? SPEAKING : MIC_QUIET}`}
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                        isSpeaking ? 'bg-speaker-active motion-safe:animate-pulse' : 'bg-ink-muted/40'
+                      }`}
+                    />
+                  );
+                })()}
                 {player.displayName}
                 {player.playerId === selfId && (
                   // speaker-self cool blue is reserved for "this is you" — identity,
@@ -257,10 +309,36 @@ export default function Lobby() {
                     {ROLE_LABELS[player.role]}
                   </span>
                 )}
+                {/* Ready (AC 1). On the viewer's OWN row: a self-toggle whose
+                    label + aria-pressed derive from the snapshot (server-truth,
+                    no optimistic flip). On every other row: a read-only indicator
+                    when ready. Neutral ink, never LED green/red (those are
+                    reserved; the speaker dot is the only green here). */}
+                {player.playerId === selfId ? (
+                  <button
+                    type="button"
+                    aria-pressed={player.isReady}
+                    onClick={() => toggleReady(player.isReady)}
+                    className={`cursor-pointer rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+                      player.isReady
+                        ? 'border-brass text-ink-primary'
+                        : 'border-ink-muted text-ink-muted hover:text-ink-primary'
+                    }`}
+                  >
+                    {player.isReady ? READY : MARK_READY}
+                  </button>
+                ) : (
+                  player.isReady && (
+                    <span className="rounded-md border border-ink-muted px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-muted">
+                      {READY_INDICATOR}
+                    </span>
+                  )
+                )}
               </span>
             </li>
           ))}
         </ul>
+        )}
       </section>
 
       <section className="w-full max-w-md rounded-lg bg-surface-raised p-8">
@@ -277,6 +355,10 @@ export default function Lobby() {
           </span>
           <Button onClick={() => void copyLink()}>{copied ? COPIED : COPY_LINK}</Button>
         </div>
+
+        {/* Mic check (Story 2.5): a gesture-driven join into the shared lobby
+            voice room. Non-blocking — a voice failure never gates the lobby. */}
+        <LobbyMicCheck />
 
         {isFacilitator && (
           // Two-step confirm: opening prep moves every player off the lobby —

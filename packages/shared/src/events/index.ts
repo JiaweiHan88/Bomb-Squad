@@ -22,6 +22,7 @@ export type {
   VoiceTokenGrantPayload,
   VoiceTokenErrorPayload,
   PlayerRemovePayload,
+  PlayerReadyPayload,
   SessionIdentityPayload,
   SessionRemovedPayload,
 } from './payloads.js';

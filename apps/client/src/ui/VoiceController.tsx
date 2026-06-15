@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore.js';
 import { useVoiceStore } from '../store/voiceStore.js';
-import { getSocket } from '../net/socket.js';
 import { connectVoice, disconnectVoice } from '../voice/connectVoice.js';
 import Button from './Button.js';
 import {
@@ -27,6 +26,10 @@ import {
  */
 export default function VoiceController() {
   const session = useGameStore((s) => s.session);
+  // Resolve self via the reactive durable id (Story 2.7), NOT getSocket().id —
+  // `players` is keyed by the durable playerId, so the socket.id lookup always
+  // missed post-2.7 and the bomb-room CTA never rendered (Story 2.5 fix).
+  const selfId = useGameStore((s) => s.myPlayerId);
   const status = useVoiceStore((s) => s.status);
   const [dismissed, setDismissed] = useState(false);
 
@@ -47,8 +50,7 @@ export default function VoiceController() {
   // room-agnostic (it trusts the token's room), but the affordance only shows
   // for someone who actually has a Bomb Room seat. Spectators/facilitators and
   // un-teamed players get nothing here (their channels are 3.3 / a later story).
-  const selfId = getSocket().id;
-  const self = selfId !== undefined ? session?.players[selfId] : undefined;
+  const self = selfId !== null ? session?.players[selfId] : undefined;
   const isBombRoomParticipant =
     self !== undefined && (self.role === 'defuser' || self.role === 'expert') && self.teamId !== undefined;
   if (!isBombRoomParticipant) return null;

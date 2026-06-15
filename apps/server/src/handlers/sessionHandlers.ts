@@ -24,6 +24,7 @@ import {
   resolveReattachRecord,
 } from '../session/identity.js';
 import { assignPlayerToTeam } from '../session/assignTeam.js';
+import { setPlayerReady } from '../session/setPlayerReady.js';
 import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
@@ -225,6 +226,16 @@ type RestoreOutcome =
   | { kind: 'skipped' };
 
 /**
+ * Outcome of a race-safe ready toggle (Story 2.5). 'ready' carries the committed
+ * post-toggle snapshot so the broadcast uses the post-commit state, never a racy
+ * re-read; 'noop' covers every inert branch (vanished / non-lobby / unknown
+ * player / value already set).
+ */
+type ReadyOutcome =
+  | { kind: 'ready'; state: SessionState }
+  | { kind: 'noop' };
+
+/**
  * Boundary validation for the untrusted SESSION_JOIN payload. Normalizes the
  * code (trim + uppercase) and the name (trim), whitelists the role, and
  * rebuilds a fresh object — unknown extra keys are inert, never forwarded.
@@ -317,6 +328,27 @@ export function parsePlayerRemovePayload(payload: unknown): PlayerRemoveParseRes
     return { ok: false, message: 'playerId must be a 1–128 character string' };
   }
   return { ok: true, playerId };
+}
+
+type PlayerReadyParseResult =
+  | { ok: true; isReady: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Boundary validation for the untrusted PLAYER_READY payload (Story 2.5).
+ * `isReady` MUST be a strict boolean; rebuilds a fresh object so unknown extra
+ * keys are inert. No playerId on the wire — the handler resolves the caller from
+ * socket.data.playerId (a player only sets their own ready).
+ */
+export function parsePlayerReadyPayload(payload: unknown): PlayerReadyParseResult {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'payload must be an object' };
+  }
+  const { isReady } = payload as { isReady?: unknown };
+  if (typeof isReady !== 'boolean') {
+    return { ok: false, message: 'isReady must be a boolean' };
+  }
+  return { ok: true, isReady };
 }
 
 /** Retry cap for join-code collisions (36^6 codes — collisions are theoretical). */
@@ -1172,6 +1204,75 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'PLAYER_REMOVE_FAILED',
           message: 'Could not remove the player. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // A player toggles their OWN ready state (Story 2.5). The first self-service
+    // mutation in the codebase: no facilitator gate (any player sets their own
+    // ready), and no playerId on the wire — the caller is resolved from
+    // socket.data.playerId, the same "never trust a client-supplied identity"
+    // rule every other mutation follows. No ack (frozen mutation convention):
+    // success is the SESSION_STATE broadcast, failure a typed ERROR to the caller.
+    socket.on('PLAYER_READY', async (payload) => {
+      const parsed = parsePlayerReadyPayload(payload);
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      const sessionId = socket.data.sessionId;
+      const playerId = socket.data.playerId;
+      const notInSession = () =>
+        socket.emit('ERROR', {
+          code: 'NOT_IN_SESSION',
+          message: 'You are not in a session.',
+          recoverable: true,
+        });
+      // A resolved player always has both pointers; defend the unresolved socket.
+      if (sessionId === undefined || playerId === undefined) {
+        notInSession();
+        return;
+      }
+
+      try {
+        // Race-safe via the 2.6 updateJSON primitive (same posture as the 2.7
+        // removals) — never a hand-rolled load-modify-store. The mutate is pure
+        // and may run once per retry; per-attempt meaning rides out on `result`.
+        const { result } = await deps.redis.updateJSON<SessionState, ReadyOutcome>(
+          sessionKey(sessionId),
+          (current) => {
+            // Lobby-phase guard inside the mutate: ready is a pre-round affordance
+            // (EXPERIENCE.md — ready buttons are gone once the round starts), so a
+            // stray PLAYER_READY after prep opens is inert, not a mutation of a
+            // started session. Unknown/absent player → noop. Between-round ready
+            // gating is Story 8.6, deliberately out of scope.
+            if (
+              current === null ||
+              current.status !== 'lobby' ||
+              current.players[playerId] === undefined
+            ) {
+              return { commit: false, result: { kind: 'noop' } };
+            }
+            const next = setPlayerReady(current, playerId, parsed.isReady);
+            // Idempotent same-value toggle → same reference → nothing to commit.
+            return next === current
+              ? { commit: false, result: { kind: 'noop' } }
+              : { commit: true, value: next, result: { kind: 'ready', state: next } };
+          },
+        );
+
+        // 'noop' → return silently; the roster already shows the truth.
+        if (result.kind === 'ready') {
+          io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+          deps.log.info({ sessionId, playerId, isReady: parsed.isReady }, 'player ready set');
+        }
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'PLAYER_READY failed');
+        socket.emit('ERROR', {
+          code: 'PLAYER_READY_FAILED',
+          message: 'Could not update ready state. Try again.',
           recoverable: true,
         });
       }

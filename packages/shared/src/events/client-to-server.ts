@@ -12,6 +12,7 @@ import type {
   VoiceTokenGrantPayload,
   VoiceTokenErrorPayload,
   PlayerRemovePayload,
+  PlayerReadyPayload,
 } from './payloads.js';
 
 /**
@@ -37,6 +38,11 @@ export interface ClientToServerEvents {
    * to the target; failure = typed ERROR to the caller. */
   PLAYER_REMOVE: (payload: PlayerRemovePayload) => void;
   TEAM_ASSIGN: (payload: TeamAssignPayload) => void;
+  /** A player toggles their OWN ready state (Story 2.5). The first self-service
+   * mutation — no facilitator gate, no playerId on the wire (the server resolves
+   * the caller from socket.data.playerId). No ack: success = SESSION_STATE
+   * broadcast, failure = typed ERROR to the caller. */
+  PLAYER_READY: (payload: PlayerReadyPayload) => void;
   ROUND_CONFIGURE: (payload: RoundConfigurePayload) => void;
   /** Facilitator-only. Opens the Preparation phase for the next round (Story 8.3).
    * No ack: success is the SESSION_STATE broadcast, failure a typed ERROR. */

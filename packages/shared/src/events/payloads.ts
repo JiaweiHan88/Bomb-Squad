@@ -44,6 +44,18 @@ export interface TeamAssignPayload {
   role: PlayerRole;
 }
 
+/**
+ * A player toggling their OWN ready state in the lobby (Story 2.5). Carries no
+ * `playerId`: a player may only set their own ready, so the server resolves the
+ * caller from `socket.data.playerId` (the durable-id model, Story 2.7) — the
+ * same "server resolves the identity, never trust a client-supplied one" rule
+ * TEAM_ASSIGN follows for its target, applied here to the self. No ack: success
+ * is the SESSION_STATE broadcast; failure is a typed ERROR to the caller.
+ */
+export interface PlayerReadyPayload {
+  isReady: boolean;
+}
+
 export interface RoundConfigurePayload {
   config: RoundConfig;
 }

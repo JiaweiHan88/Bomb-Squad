@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-15  # TD-2 dep bumps → done; tech-debt section added (TD-1 done, TD-3/TD-4 ready-for-dev)
+last_updated: 2026-06-15  # story 2.5 (lobby roster/ready/mic-check) → review (impl + tests + live smoke + Jay interactive all pass)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -60,7 +60,7 @@ development_status:
   2-2-facilitator-hosts-a-session: done
   2-3-player-joins-via-code-and-picks-a-role: done
   2-4-team-and-per-player-role-assignment: done
-  2-5-lobby-roster-ready-state-and-mic-check: in-progress
+  2-5-lobby-roster-ready-state-and-mic-check: review
   2-6-capacity-and-join-window-guards: done
   2-7-lobby-resilience-and-facilitator-player-controls: done
   epic-2-retrospective: optional

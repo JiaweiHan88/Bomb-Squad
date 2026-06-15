@@ -25,13 +25,24 @@ interface VoiceState {
   identity?: string;
   /** Optional failure detail for microcopy. Never holds a secret (never the token). */
   error?: string;
+  /**
+   * Durable player ids currently transmitting audio (Story 2.5). Written ONLY by
+   * `connectVoice` from LiveKit `ActiveSpeakersChanged`; read by the lobby roster
+   * to light per-row speaker dots. The speaker-presence primitive Story 3.4 will
+   * reuse for the in-round pill. Still voice-only presentation state — never
+   * game-authoritative. Cleared to `[]` on any non-connected transition so no
+   * stale dots survive a drop.
+   */
+  activeSpeakers: string[];
 
-  /** idle/unavailable → connecting. Clears any prior room/identity/error. */
+  /** idle/unavailable → connecting. Clears any prior room/identity/error + speakers. */
   setConnecting: () => void;
   /** connecting → connected. Records the room + identity from the token grant. */
   setConnected: (info: { room: string; identity: string }) => void;
-  /** any → unavailable. Drops room/identity; keeps an optional non-secret error string. */
+  /** any → unavailable. Drops room/identity/speakers; keeps an optional non-secret error string. */
   setUnavailable: (error?: string) => void;
+  /** Replace the set of currently-speaking durable player ids. */
+  setActiveSpeakers: (ids: string[]) => void;
   /** back to idle (clean disconnect / teardown). */
   reset: () => void;
 }
@@ -41,9 +52,13 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   room: undefined,
   identity: undefined,
   error: undefined,
+  activeSpeakers: [],
 
-  setConnecting: () => set({ status: 'connecting', room: undefined, identity: undefined, error: undefined }),
+  setConnecting: () =>
+    set({ status: 'connecting', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] }),
   setConnected: ({ room, identity }) => set({ status: 'connected', room, identity, error: undefined }),
-  setUnavailable: (error) => set({ status: 'unavailable', room: undefined, identity: undefined, error }),
-  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined }),
+  setUnavailable: (error) =>
+    set({ status: 'unavailable', room: undefined, identity: undefined, error, activeSpeakers: [] }),
+  setActiveSpeakers: (ids) => set({ activeSpeakers: ids }),
+  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] }),
 }));

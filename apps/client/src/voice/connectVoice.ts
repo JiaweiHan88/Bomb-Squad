@@ -27,8 +27,24 @@ import { useVoiceStore } from '../store/voiceStore.js';
 /** Per-connect token request timeout — NFR3 connect-within-10s budget. */
 const TOKEN_TIMEOUT_MS = 10_000;
 
+/**
+ * Stop-grace for the speaker indicator (EXPERIENCE.md: "150ms grace to suppress
+ * flicker on stop"). A newly-speaking identity lights immediately; only its STOP
+ * is deferred, so a brief pause between syllables doesn't blink the dot.
+ */
+const SPEAKER_STOP_GRACE_MS = 150;
+
+/** The shape of a LiveKit participant this controller reads — just the identity
+ * (which IS the durable roster playerId, per the server's identity minting). */
+interface SpeakingParticipant {
+  identity: string;
+}
+
 /** Structural view of the bits of a LiveKit `Room` this controller drives. The
- * real `Room` satisfies it; tests supply a fake so no real SFU is needed. */
+ * real `Room` satisfies it; tests supply a fake so no real SFU is needed. The
+ * `on`/`off` surface carries every RoomEvent this controller binds —
+ * TrackSubscribed/TrackUnsubscribed/Disconnected and (Story 2.5)
+ * ActiveSpeakersChanged. */
 export interface VoiceRoom {
   on(event: RoomEvent, listener: (...args: never[]) => void): this;
   off(event: RoomEvent, listener: (...args: never[]) => void): this;
@@ -106,6 +122,25 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   let onSubscribed: ((track: RemoteTrack) => void) | null = null;
   let onUnsubscribed: ((track: RemoteTrack) => void) | null = null;
   let onDisconnected: (() => void) | null = null;
+  let onActiveSpeakers: ((participants: SpeakingParticipant[]) => void) | null = null;
+
+  // Speaker-presence bookkeeping (Story 2.5). `displayed` is the set the roster
+  // dots reflect (mirrored into voiceStore.activeSpeakers); per-identity timers
+  // hold a stopped speaker's dot for the 150ms grace before clearing it.
+  const displayedSpeakers = new Set<string>();
+  const speakerClearTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function publishSpeakers(): void {
+    useVoiceStore.getState().setActiveSpeakers([...displayedSpeakers]);
+  }
+
+  /** Cancel every pending stop-grace timer and forget the displayed set, so a
+   * stopped-speaker timer can never fire after teardown / a later connect. */
+  function clearSpeakerState(): void {
+    for (const timer of speakerClearTimers.values()) clearTimeout(timer);
+    speakerClearTimers.clear();
+    displayedSpeakers.clear();
+  }
 
   function detachAll(): void {
     for (const el of audioEls) el.remove();
@@ -117,9 +152,13 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     if (onSubscribed) r.off(RoomEvent.TrackSubscribed, onSubscribed as (...args: never[]) => void);
     if (onUnsubscribed) r.off(RoomEvent.TrackUnsubscribed, onUnsubscribed as (...args: never[]) => void);
     if (onDisconnected) r.off(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
+    if (onActiveSpeakers)
+      r.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
     onSubscribed = null;
     onUnsubscribed = null;
     onDisconnected = null;
+    onActiveSpeakers = null;
+    clearSpeakerState();
     detachAll();
   }
 
@@ -170,9 +209,43 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       // Transport dropped mid-session → unavailable, game keeps running (AC #4).
       void disconnect('unavailable');
     };
+    // Speaker presence (Story 2.5): LiveKit delivers the CURRENT speaking set on
+    // each change. Map to durable playerId (== participant.identity, set by the
+    // server) and mirror into voiceStore. New speakers light immediately; a
+    // speaker that drops out is held for SPEAKER_STOP_GRACE_MS before its dot
+    // clears (flicker suppression). The dot is the lobby's only green (DESIGN.md).
+    onActiveSpeakers = (participants: SpeakingParticipant[]) => {
+      const speaking = new Set(participants.map((p) => p.identity));
+      let changed = false;
+      // Newly (or still) speaking → light immediately + cancel any pending clear.
+      for (const id of speaking) {
+        const pending = speakerClearTimers.get(id);
+        if (pending !== undefined) {
+          clearTimeout(pending);
+          speakerClearTimers.delete(id);
+        }
+        if (!displayedSpeakers.has(id)) {
+          displayedSpeakers.add(id);
+          changed = true;
+        }
+      }
+      // Stopped speaking → schedule a graced clear (only the stop is graced).
+      for (const id of displayedSpeakers) {
+        if (!speaking.has(id) && !speakerClearTimers.has(id)) {
+          const timer = setTimeout(() => {
+            speakerClearTimers.delete(id);
+            displayedSpeakers.delete(id);
+            publishSpeakers();
+          }, SPEAKER_STOP_GRACE_MS);
+          speakerClearTimers.set(id, timer);
+        }
+      }
+      if (changed) publishSpeakers();
+    };
     r.on(RoomEvent.TrackSubscribed, onSubscribed as (...args: never[]) => void);
     r.on(RoomEvent.TrackUnsubscribed, onUnsubscribed as (...args: never[]) => void);
     r.on(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
+    r.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
 
     try {
       // url + token from the ack; never logged.
