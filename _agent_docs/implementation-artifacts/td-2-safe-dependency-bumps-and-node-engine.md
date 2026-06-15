@@ -7,7 +7,7 @@ context:
 
 # Story TD-2: Safe Dependency Bumps + Node Engine Alignment
 
-Status: review
+Status: done
 
 <!-- Tech-debt story (not from an epic). The low-risk slice of the dependency-refresh
      batch (TD-2 safe / TD-3 React+R3F / TD-4 tooling). Patch/minor bumps only + fixing
