@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { RoundConfig, TeamId, BombState } from '@bomb-squad/shared';
 import { initializeRoundBombs } from '../initializeRoundBombs.js';
 import { bombKey } from '../../state/keys.js';

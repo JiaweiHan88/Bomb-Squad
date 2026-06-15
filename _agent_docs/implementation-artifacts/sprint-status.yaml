@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-16  # story 2.5 → done (code review: 4 patches applied + 1 deferred; Jay re-confirmed the 2 user-visible patches interactively; tsc/build green, client 271/271)
+last_updated: 2026-06-16  # TD-4 tooling upgrade (Vite 8 / TS 6 / Jest 30) → done; dependency-refresh batch (TD-1..4) complete
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -146,4 +146,4 @@ development_status:
   td-1-client-component-test-framework: done
   td-2-safe-dependency-bumps-and-node-engine: done
   td-3-react-19-and-r3f-upgrade: done
-  td-4-tooling-vite-typescript-jest: ready-for-dev
+  td-4-tooling-vite-typescript-jest: done

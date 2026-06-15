@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { generateLayout } from '../layout.js';
 import { MODULE_GENERATORS } from '../../modules/registry.js';
 

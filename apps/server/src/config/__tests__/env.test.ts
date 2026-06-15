@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { parseEnv, EnvValidationError } from '../env.js';
 
 const validEnv = {

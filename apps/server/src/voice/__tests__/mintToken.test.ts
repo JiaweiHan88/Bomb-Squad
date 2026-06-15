@@ -1,10 +1,10 @@
+import { describe, expect, it } from '@jest/globals';
 /**
  * Unit tests for role-scoped token minting (Story 3.1, AR16: pure logic, zero
  * infra). We decode the JWT's claims and assert the embedded video grant — we
  * never assert the opaque token string. The spectator `canPublish: false`
  * invariant is the security core of FR39 and is asserted explicitly.
  */
-import { describe, it, expect } from '@jest/globals';
 import {
   mintVoiceToken,
   resolveVoiceScope,

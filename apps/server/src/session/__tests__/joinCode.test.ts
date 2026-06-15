@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { generateJoinCode, type RandomBytesFn } from '../joinCode.js';
 
 /** Builds a fake randomBytes that serves the given byte values in order. */

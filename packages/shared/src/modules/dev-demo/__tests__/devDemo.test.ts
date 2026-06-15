@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { BombContext, ModuleState } from '../../../types/index.js';
 import {
   DEV_DEMO_MODULE_ID,

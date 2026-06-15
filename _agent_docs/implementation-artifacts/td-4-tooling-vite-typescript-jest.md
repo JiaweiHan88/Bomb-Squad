@@ -7,7 +7,7 @@ context:
 
 # Story TD-4: Build & Test Tooling Upgrade — Vite 8, TypeScript 6, Jest 30
 
-Status: ready-for-dev
+Status: done
 
 <!-- Tech-debt story (not from an epic). The build/test-tooling slice of the dependency
      refresh batch (TD-2 safe / TD-3 React+R3F / TD-4 tooling). Major-version dev-tooling
@@ -42,23 +42,23 @@ Three independent sub-upgrades, all **dev-tooling only** (no runtime dependency 
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Vite 8 + plugin-react 6 (client) (AC: #1)**
-  - [ ] Bump `vite` → `^8` and `@vitejs/plugin-react` → `^6` in `apps/client/package.json`; root `pnpm install`.
-  - [ ] Confirm **Vitest** (currently 4) is compatible with Vite 8; bump Vitest if its peer range requires it (note it in Completion Notes — Vitest rides on Vite).
-  - [ ] Migrate `apps/client/vite.config.ts` for any Vite 8 breaking config change (preserve `allowedHosts: true` + the `preview` behind-Caddy comment; preserve the TD-1 `test`/jsdom block if merged).
-  - [ ] Verify: `build` succeeds, `dev` starts, client Vitest suite green.
+- [x] **Task 1 — Vite 8 + plugin-react 6 (client) (AC: #1)**
+  - [x] Bumped `vite` → `^8.0.16` and `@vitejs/plugin-react` → `^6.0.2` in `apps/client/package.json`; root `pnpm install` clean. (plugin-react 6 peers `vite: ^8`.)
+  - [x] **Vitest** bumped 4.1.8 → `^4.1.9` (latest 4.x) — vitest 4.1.9 peers `vite: ^6 || ^7 || ^8`, so Vitest 4 stays compatible with Vite 8 (no major Vitest bump needed; it rides on Vite).
+  - [x] `apps/client/vite.config.ts` needed **no migration** — `allowedHosts: true`, the `preview` behind-Caddy block, and the TD-1 `test`/jsdom block (now incl. `restoreMocks`/`unstubGlobals` from the TD-1 review) all valid under Vite 8.
+  - [x] Verify: `build` succeeds (693 modules, `built in 411ms`), `dev` starts (`VITE v8.0.16 ready in 231ms`, HTTP 200, serves `<title>Bomb Squad</title>`), client Vitest suite **271** green.
 
-- [ ] **Task 2 — TypeScript 6 (all workspaces) (AC: #2)**
-  - [ ] Bump `typescript` → `^6` everywhere it's declared; root `pnpm install`.
-  - [ ] Run `pnpm -r typecheck`; resolve TS 6 breakages in source (stricter inference, removed flags, lib changes). No `@ts-ignore`, no new `as any`. Each workspace's `tsconfig.json` stays per-workspace.
+- [x] **Task 2 — TypeScript 6 (all workspaces) (AC: #2)**
+  - [x] Bumped `typescript` → `^6.0.3` in all 3 workspaces (client/server/shared); root `pnpm install`. Per-workspace `tsconfig.json` unchanged.
+  - [x] `pnpm -r typecheck` clean across all 3. **TS 6 surfaced no genuine new type errors in source** — the only breakage was that `@types/jest` 30 + TS 6 no longer auto-injects the **bare** Jest globals (`describe`/`it`/`expect`/…). Resolved in source by adding explicit `import { … } from '@jest/globals'` to the test files that relied on ambient globals — **matching the project's existing dominant convention** (most server tests already imported from `@jest/globals`). **No `@ts-ignore`, no new `as any`** (verified via `git diff`). The transient TS7006 implicit-any noise (sessionHandlers callback params) was a cascade from the unresolved globals and cleared once the typed imports resolved.
 
-- [ ] **Task 3 — Jest 30 (server + shared) (AC: #3)**
-  - [ ] Bump `jest` + `@jest/globals` + `@types/jest` → `^30` in `apps/server` and `apps/shared` as applicable; root `pnpm install`.
-  - [ ] Migrate the Jest config (ESM/VM-modules setup — suites run under `--experimental-vm-modules`; Jest 30 changed some defaults). Do **not** touch `apps/client` (Vitest).
-  - [ ] Verify server `319` + shared `136` green.
+- [x] **Task 3 — Jest 30 (server + shared) (AC: #3)**
+  - [x] Bumped `jest`/`@jest/globals`/`@types/jest` → `^30` in `apps/server`; `jest`/`@types/jest` → `^30` + **added `@jest/globals` ^30.4.1** to `packages/shared` (it had none — needed for the explicit-import convention above). Bumped `ts-jest` `^29.2.0` → `^29.4.11` in both (latest 29.x; peers `jest: ^29||^30` and `typescript: >=4.3 <7`, so it spans both Jest 30 and TS 6 — there is no ts-jest 30).
+  - [x] Jest config (`jest.config.cjs` ESM/VM-modules `ts-jest/presets/default-esm`) needed **no migration** — green under Jest 30 with `--experimental-vm-modules`. `apps/client` (Vitest) untouched by the Jest bump.
+  - [x] Verify server **375** + shared **136** green under Jest 30.
 
-- [ ] **Task 4 — Full-suite green (AC: #4, #5)**
-  - [ ] `pnpm -r test` + `pnpm -r typecheck` green across all workspaces. Confirm the diff is config + type-fixups only (no feature behavior change). Record final counts in Completion Notes.
+- [x] **Task 4 — Full-suite green (AC: #4, #5)**
+  - [x] `pnpm -r test` → client **271** / server **375** / shared **136**, all green; `pnpm -r typecheck` clean across all 3. The diff is **config + test-file import fixups only** — zero production/feature source changed, no behavior change (AC #5 held). Final counts recorded in Completion Notes. (Baselines 221/319 are pre-2.5/2.6/2.7-merge, superseded — as in TD-1/2/3.)
 
 ## Dev Notes
 
@@ -83,8 +83,41 @@ Three independent sub-upgrades, all **dev-tooling only** (no runtime dependency 
 - [Ref] Vite 6→8 migration; @vitejs/plugin-react v6; TypeScript 6 release notes; Jest 30 migration (ESM/VM-modules defaults). Confirm latest at implementation time.
 - Related: [[td-1-client-component-test-framework]] (preserve its jsdom `test` block under Vite 8), [[td-2-safe-dependency-bumps-and-node-engine]], [[td-3-react-19-and-r3f-upgrade]] (keep on a separate branch).
 
+## Dev Agent Record
+
+### Agent Model Used
+
+claude-opus-4-8 (gds-dev-story workflow)
+
+### Debug Log References
+
+- `npm view` (2026-06-16) confirmed stable `latest`: vite 8.0.16, @vitejs/plugin-react 6.0.2, typescript 6.0.3, jest 30.4.2, @jest/globals 30.4.1, @types/jest 30.0.0, vitest 4.1.9, ts-jest 29.4.11.
+- Peer-compat pre-check: vitest 4.1.9 peers `vite ^6||^7||^8` ✓; plugin-react 6 peers `vite ^8` ✓; ts-jest 29.4.11 peers `jest ^29||^30` + `typescript >=4.3 <7` ✓ (spans Jest 30 + TS 6).
+- Root `pnpm install` clean (`+101 -96`); no peer warnings.
+- First `pnpm -r typecheck`: shared failed — `Cannot find name 'expect'/'it'/'describe'` (bare globals). Root cause: `@types/jest` 30 + TS 6 no longer ambient-injects Jest globals. Fix: explicit `@jest/globals` imports (project's existing server convention). Iterated server (21 no-import files) + 4 partial-import files (`jest`-only) + 6 shared → all globals resolved.
+- `pnpm -r typecheck` clean; client `build` (693 modules, 411ms); `vite` dev `ready in 231ms` HTTP 200; `pnpm -r test` → client 271 / server 375 / shared 136.
+
+### Completion Notes List
+
+- **AC #1 (Vite 8)** — `vite ^8.0.16` + `@vitejs/plugin-react ^6.0.2` (client); Vitest bumped to `^4.1.9` (rides Vite, peer `^8` OK). `vite.config.ts` unchanged — `allowedHosts`/`preview`/TD-1 `test` block all valid on Vite 8. Build + dev-server + Vitest 271 all green.
+- **AC #2 (TS 6)** — `typescript ^6.0.3` in all 3 workspaces; `pnpm -r typecheck` clean, no `@ts-ignore`/`as any`. TS 6 itself raised **no genuine source type errors**; the only breakage was the `@types/jest` 30 + TS 6 ambient-globals regression, fixed with explicit `@jest/globals` imports (see below).
+- **AC #3 (Jest 30)** — `jest`/`@jest/globals`/`@types/jest ^30` (server), `jest`/`@types/jest ^30` + new `@jest/globals ^30.4.1` (shared); `ts-jest ^29.4.11` (spans Jest 30 + TS 6). `jest.config.cjs` ESM/VM-modules setup unchanged. server 375 + shared 136 green; client (Vitest) untouched.
+- **AC #4/#5** — full suite green (271/375/136), typecheck clean. Diff is **config + test-import fixups only**: zero production/feature code changed, no runtime behavior change. Nothing had to be split-out/re-filed — all three sub-upgrades went green.
+- **The one real migration cost** — `@types/jest` 30 dropped the auto-injected ambient test globals under TS 6, so 31 test files (25 server + 6 shared) that used bare `describe`/`it`/`expect` needed explicit `import { … } from '@jest/globals'`. This is the modern ESM-recommended pattern and **matches the convention the project already used** in most server tests — a consistency win, not a workaround. Done via a deterministic, idempotent normalizer (computes the used-globals set per file). `@jest/globals` was added to `packages/shared` (it previously had none).
+- **No human-verify gate** (per story Dev Notes — pure dev tooling; the automated `build` + Vitest/Jest green is the proof). The Vite 8 dev-server smoke (boots, HTTP 200, serves the app) was done automatically as the optional extra glance.
+
+### File List
+
+- **UPDATE** `apps/client/package.json` — `vite ^8.0.16`, `@vitejs/plugin-react ^6.0.2`, `vitest ^4.1.9`, `typescript ^6.0.3`.
+- **UPDATE** `apps/server/package.json` — `jest ^30.4.2`, `@jest/globals ^30.4.1`, `@types/jest ^30.0.0`, `ts-jest ^29.4.11`, `typescript ^6.0.3`.
+- **UPDATE** `packages/shared/package.json` — `jest ^30.4.2`, `@types/jest ^30.0.0`, **add `@jest/globals ^30.4.1`**, `ts-jest ^29.4.11`, `typescript ^6.0.3`.
+- **UPDATE** `pnpm-lock.yaml` — root install (Vite 8 / TS 6 / Jest 30; no runtime-dep drift).
+- **UPDATE** 25 server test files + 6 shared test files (`apps/server/src/**/__tests__/*.test.ts`, `packages/shared/src/**/__tests__/*.test.ts`) — added explicit `import { … } from '@jest/globals'` (the @types/jest-30 ambient-globals fix; one import line each, no logic change).
+- _No `vite.config.ts` / `jest.config.cjs` / `tsconfig.json` changes needed; no production source changed._
+
 ## Change Log
 
 | Date | Change |
 |---|---|
 | 2026-06-14 | Story TD-4 created (ready-for-dev): build/test-tooling majors — Vite 6→8 (+plugin-react 4→6, client; Vitest checked/bumped), TypeScript 5→6 (all workspaces), Jest 29→30 (server+shared; client on Vitest untouched). Tooling-only, no runtime behavior change; split-if-stuck per sub-upgrade. |
+| 2026-06-16 | Implemented all 4 tasks (AC #1–#5): Vite 8.0.16 + plugin-react 6.0.2 + Vitest 4.1.9 (client), TypeScript 6.0.3 (all 3), Jest 30 + ts-jest 29.4.11 (server+shared, +@jest/globals in shared). No config/production-source changes; the only fixup was explicit `@jest/globals` imports in 31 test files (@types/jest-30 dropped ambient globals under TS 6) — matches the existing convention, no `@ts-ignore`/`as any`. Build + dev-server + full suite green (client 271 / server 375 / shared 136); typecheck clean. Status → review. |

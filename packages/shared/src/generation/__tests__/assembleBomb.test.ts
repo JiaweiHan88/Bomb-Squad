@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { RoundConfig, TeamId } from '../../types/session.js';
 import type { DevDemoState } from '../../modules/dev-demo/types.js';
 import { generateRoundBombs } from '../assembleBomb.js';

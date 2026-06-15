@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { TimerState } from '@bomb-squad/shared';
 import {
   startSegment,

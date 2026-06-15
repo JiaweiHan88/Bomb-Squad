@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { SessionState } from '@bomb-squad/shared';
 import { assignPlayerToTeam } from '../assignTeam.js';
 import { addPlayerToSession } from '../joinSession.js';

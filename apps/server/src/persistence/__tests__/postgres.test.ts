@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { createPostgresArchive } from '../postgres.js';
 import type { PoolLike, PostgresArchive } from '../postgres.js';
 

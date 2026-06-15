@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 /**
  * Integration tests for the VOICE_TOKEN handler (Story 3.1, migrated to the
  * durable-id model in Story 2.5). Driven through a real socket round-trip
@@ -10,7 +11,6 @@
  * socket.id) → NOT_IN_SESSION for everyone. Tokens are decoded (never asserted
  * as opaque strings) and a log-leak guard enforces that the JWT is never logged.
  */
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import type {
   SessionState,
   SessionCreatePayload,

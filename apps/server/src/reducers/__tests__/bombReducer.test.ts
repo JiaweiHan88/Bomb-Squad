@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { BombState } from '@bomb-squad/shared';
 import { createBombReducer } from '../bombReducer.js';
 import type { ModuleReducer } from '../MODULE_REDUCERS.js';

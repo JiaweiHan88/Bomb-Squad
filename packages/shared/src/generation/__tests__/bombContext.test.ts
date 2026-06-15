@@ -1,3 +1,4 @@
+import { describe, expect, it, test } from '@jest/globals';
 import type { IndicatorLabel, PortType } from '../../types/bomb.js';
 import { generateBombContext } from '../bombContext.js';
 

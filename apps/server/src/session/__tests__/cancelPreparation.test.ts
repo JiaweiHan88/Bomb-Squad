@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import type { SessionState } from '@bomb-squad/shared';
 import { cancelPreparation } from '../cancelPreparation.js';
 import { openPreparation } from '../openPreparation.js';
