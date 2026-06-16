@@ -3,12 +3,14 @@ import type { DifficultyTier } from '../types/session.js';
 import { DEV_DEMO_MODULE_ID } from './dev-demo/types.js';
 import { WIRES_MODULE_ID } from './wires/types.js';
 import { BUTTON_MODULE_ID } from './the-button/types.js';
+import { PASSWORDS_MODULE_ID } from './passwords/types.js';
 // Import each generator directly from its own file, NOT via the module barrel
 // (./<mod>/index.js → ../index.js), so the registry never depends on the barrel
 // that parallel module stories edit.
 import { generateDevDemo } from './dev-demo/generate.js';
 import { generateWires } from './wires/generate.js';
 import { generateButton } from './the-button/generate.js';
+import { generatePasswords } from './passwords/generate.js';
 
 /**
  * A module's seeded instance generator. `seed` is the per-(team,slot) moduleSeed
@@ -44,6 +46,10 @@ export const MODULE_GENERATORS: Record<string, ModuleGenerator> = {
   // tier-pool entry land together (a pool may only list modules with both, or
   // generateLayout throws at ROUND_START).
   [BUTTON_MODULE_ID]: generateButton as ModuleGenerator,
+  // passwords: Story 5.5 — third Easy module, completing the canonical Easy pool
+  // (Wires/Button/Passwords). Generator + reducer + tier-pool entry land
+  // together (same generateLayout requirement as above).
+  [PASSWORDS_MODULE_ID]: generatePasswords as ModuleGenerator,
 };
 
 /**
@@ -73,10 +79,10 @@ export type ModuleId = (typeof MODULE_IDS)[number];
  * easier one (harder rounds can still draw easy modules). Generation resolves
  * `config.modulePool ?? TIER_POOLS[config.difficulty]`.
  *
- * INTERIM COMPOSITION (Story 5.4): every pool ID must have a registered
+ * INTERIM COMPOSITION (Story 5.5): every pool ID must have a registered
  * generator in MODULE_GENERATORS (generateLayout enforces this and fails loud).
- * The real generatable Easy modules are `'wires'` (5.3) and now `'the-button'`
- * (5.4); `'passwords'` (5.5) is added when it lands. RE-EXPAND further as
+ * The real generatable Easy modules are `'wires'` (5.3), `'the-button'` (5.4)
+ * and now `'passwords'` (5.5) — the canonical Easy trio. RE-EXPAND further as
  * modules land: keypads/whos-on-first/wire-sequences/mazes (medium) and the full
  * MODULE_IDS set (hard). The authoritative tier GATING (Easy/Medium/Hard supersets
  * surfaced in the dashboard) is owned by Story 8.1 — these defaults feed it; 8.1
@@ -85,7 +91,7 @@ export type ModuleId = (typeof MODULE_IDS)[number];
  * explicit `modulePool` (e.g. `['dev-demo']`).
  */
 export const TIER_POOLS: Record<DifficultyTier, readonly string[]> = {
-  easy: ['wires', 'the-button'],
-  medium: ['wires', 'the-button'],
-  hard: ['wires', 'the-button'],
+  easy: ['wires', 'the-button', 'passwords'],
+  medium: ['wires', 'the-button', 'passwords'],
+  hard: ['wires', 'the-button', 'passwords'],
 };

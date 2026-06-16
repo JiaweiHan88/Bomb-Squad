@@ -103,11 +103,12 @@ describe('generateRoundBombs — fail-loud config guards (no partial writes)', (
   });
 
   it('falls back to the difficulty tier pool when modulePool is undefined', () => {
-    // Interim Easy tier pool is ['wires', 'the-button'] (Story 5.4), so a
-    // no-override round draws real modules from that set rather than failing loud.
+    // Interim Easy tier pool is ['wires', 'the-button', 'passwords'] (Story 5.5),
+    // so a no-override round draws real modules from that set rather than failing
+    // loud.
     const bombs = generateRoundBombs('s', 1, config({ modulePool: undefined }), TEAMS);
     expect(bombs.A.modules).toHaveLength(4);
-    for (const m of bombs.A.modules) expect(['wires', 'the-button']).toContain(m.moduleId);
+    for (const m of bombs.A.modules) expect(['wires', 'the-button', 'passwords']).toContain(m.moduleId);
   });
 
   it('rejects an empty teamIds array', () => {

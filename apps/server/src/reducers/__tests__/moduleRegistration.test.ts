@@ -3,6 +3,7 @@ import {
   DEV_DEMO_MODULE_ID,
   WIRES_MODULE_ID,
   BUTTON_MODULE_ID,
+  PASSWORDS_MODULE_ID,
   devDemoReducer,
   generateDevDemo,
   generateWires,
@@ -11,6 +12,7 @@ import {
   type BombState,
   type ButtonState,
   type ModuleState,
+  type PasswordsState,
 } from '@bomb-squad/shared';
 import { createBombReducer, bombReducer } from '../bombReducer.js';
 import { MODULE_REDUCERS, type ModuleReducer } from '../MODULE_REDUCERS.js';
@@ -148,6 +150,44 @@ describe('open/closed module registration (AC2)', () => {
       type: 'MODULE_ACTION',
       moduleIndex: 0,
       payload: { type: 'RELEASE', timerDigits: [1, 2, 3] },
+    });
+    expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
+    expect(struck.strikes).toBe(1);
+  });
+
+  it('passwords (5.5) is registered and solves/strikes through the untouched bomb reducer', () => {
+    expect(MODULE_REDUCERS[PASSWORDS_MODULE_ID]).toBeDefined();
+    // Explicit columns spelling "about" at index 0 (filler 'z' spells no word),
+    // so the decision is deterministic without seed-searching.
+    const data: PasswordsState = {
+      columns: 'about'.split('').map((ch) => [ch, 'z', 'z', 'z', 'z', 'z']),
+      positions: [0, 0, 0, 0, 0],
+      startPositions: [0, 0, 0, 0, 0],
+    };
+    const passwordsBomb: BombState = {
+      context: CTX,
+      modules: [{ moduleId: PASSWORDS_MODULE_ID, status: 'armed', data }],
+      strikes: 0,
+      solved: false,
+    };
+    // SUBMIT on the valid word "about" solves with no strike.
+    const solved = bombReducer(passwordsBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'SUBMIT' },
+    });
+    expect(solved.modules[0].status).toBe('solved');
+    expect(solved.strikes).toBe(0);
+    // Cycle column 0 off the answer, SUBMIT → team strike + re-arm.
+    const cycled = bombReducer(passwordsBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'CYCLE', columnIndex: 0, direction: 'up' },
+    });
+    const struck = bombReducer(cycled, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'SUBMIT' },
     });
     expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
     expect(struck.strikes).toBe(1);

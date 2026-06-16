@@ -1,5 +1,5 @@
 import type { ManualPage } from '@bomb-squad/shared';
-import { getWiresManualPages, getButtonManualPages } from '@bomb-squad/shared';
+import { getWiresManualPages, getButtonManualPages, getPasswordsManualPages } from '@bomb-squad/shared';
 
 /**
  * DEV FIXTURES for `/dev/manual` ONLY — not game content.
@@ -8,9 +8,10 @@ import { getWiresManualPages, getButtonManualPages } from '@bomb-squad/shared';
  * starting with Wires in Story 5.3. These fixtures exist so the viewer can be
  * built/verified before any real module lands: the 11 chapter titles from the
  * mockup, a multi-page chapter (grouping), and a long chapter (scroll memory).
- * Wires (5.3) and The Button (5.4) are the exceptions: their chapters are the
- * CANONICAL module content from getWiresManualPages() / getButtonManualPages(),
- * not fixtures. Remaining stubs are replaced as each module story lands.
+ * Wires (5.3), The Button (5.4) and Passwords (5.5) are the exceptions: their
+ * chapters are the CANONICAL module content from getWiresManualPages() /
+ * getButtonManualPages() / getPasswordsManualPages(), not fixtures. Remaining
+ * stubs are replaced as each module story lands.
  */
 
 const stub = (chapterId: string, chapterTitle: string): ManualPage => ({
@@ -46,6 +47,8 @@ export const DEV_MANUAL_PAGES: ManualPage[] = [
   stub('complicated-wires', 'Complicated Wires'),
   stub('wire-sequences', 'Wire Sequences'),
   stub('whos-on-first', "Who's on First"),
-  stub('passwords', 'Passwords'),
+  // Passwords: CANONICAL content from the module's getManualPages() (Story 5.5)
+  // — the 35-word list renders from the same PASSWORD_WORDS the solver checks.
+  ...getPasswordsManualPages(),
   stub('mazes', 'Mazes'),
 ];

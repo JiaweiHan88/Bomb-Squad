@@ -2,9 +2,11 @@ import {
   DEV_DEMO_MODULE_ID,
   WIRES_MODULE_ID,
   BUTTON_MODULE_ID,
+  PASSWORDS_MODULE_ID,
   devDemoReducer,
   wiresReducer,
   buttonReducer,
+  passwordsReducer,
   type ModuleState,
   type Reducer,
 } from '@bomb-squad/shared';
@@ -30,4 +32,6 @@ export const MODULE_REDUCERS: Record<string, ModuleReducer> = {
   [WIRES_MODULE_ID]: wiresReducer as ModuleReducer,
   // the-button: Story 5.4 — press/hold with a timed release.
   [BUTTON_MODULE_ID]: buttonReducer as ModuleReducer,
+  // passwords: Story 5.5 — cycle five columns to spell a listed word, SUBMIT.
+  [PASSWORDS_MODULE_ID]: passwordsReducer as ModuleReducer,
 };

@@ -2,6 +2,7 @@ import type { IModule } from '@bomb-squad/shared';
 import { DEV_DEMO_MODULE } from './dev-demo/index.js';
 import { WIRES_MODULE } from './wires/index.js';
 import { BUTTON_MODULE } from './the-button/index.js';
+import { PASSWORDS_MODULE } from './passwords/index.js';
 
 /**
  * Module registration barrel — importing it (main.tsx does, once) registers
@@ -18,6 +19,7 @@ export const SANDBOX_MODULES: readonly SandboxModule[] = [
   DEV_DEMO_MODULE as SandboxModule,
   WIRES_MODULE as SandboxModule,
   BUTTON_MODULE as SandboxModule,
+  PASSWORDS_MODULE as SandboxModule,
 ];
 
-export { DEV_DEMO_MODULE, WIRES_MODULE, BUTTON_MODULE };
+export { DEV_DEMO_MODULE, WIRES_MODULE, BUTTON_MODULE, PASSWORDS_MODULE };

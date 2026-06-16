@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-15  # story 2.5 (lobby roster/ready/mic-check) → review (impl + tests + live smoke + Jay interactive all pass)
+last_updated: 2026-06-16  # story 5.5 (passwords) → review; 5.4 (the-button) → review
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,7 @@ development_status:
   5-2-expert-manual-viewer: done
   5-3-wires-module-walking-skeleton: done
   5-4-the-button-module: review
-  5-5-passwords-module: backlog
+  5-5-passwords-module: review
   epic-5-retrospective: optional
 
   # ---- Epic 6: Core Modules — Medium ----
