@@ -4,9 +4,9 @@ import { Text } from '@react-three/drei';
 import type { MeshStandardMaterial } from 'three';
 import { useGameStore } from '../store/gameStore.js';
 import { useUiStore } from '../store/uiStore.js';
-import { getModuleRenderer } from '../modules/registry.js';
+import { selectModuleRenderer } from '../modules/registry.js';
 import { isPrimaryActivation } from '../modules/interaction.js';
-import { formatBayTag, type ModuleSlot } from './layout.js';
+import { formatBayTag, formatModuleType, type ModuleSlot } from './layout.js';
 import { prefersReducedMotion } from './dom.js';
 import { SOLVE_LED_FLASH_MS, solveLedVisual, type ModuleStatus } from './moduleLed.js';
 import { DEV_PLACEHOLDER_MODULES } from './devBombState.js';
@@ -16,6 +16,11 @@ import { DEV_PLACEHOLDER_MODULES } from './devBombState.js';
  * (mockup .bay anatomy), the solve LED, and the module body resolved through
  * the renderer registry (AC1: data-driven, no per-module conditionals here).
  * Rendering only — the LED renders server truth; green iff status==='solved'.
+ *
+ * `typesOnly` is the Preparation placeholder mode (Story 4.6): the tag shows the
+ * module *type* instead of MOD-NN, the face is forced to the empty
+ * PLACEHOLDER_RENDERER (no generated value can leak), and the bay is inert —
+ * no click-to-focus and no per-frame LED work (the prep bomb is static).
  */
 
 /** Faceplate dimensions (Story 4.1's plate, now framed as a bay). */
@@ -51,9 +56,12 @@ const statusAt = (modules: ReadonlyArray<{ status: ModuleStatus }> | undefined, 
 export const ModuleBay = memo(function ModuleBay({
   slot,
   moduleId,
+  typesOnly = false,
 }: {
   slot: ModuleSlot;
   moduleId: string;
+  /** Preparation placeholder mode (Story 4.6): type tag, value-free face, inert. */
+  typesOnly?: boolean;
 }) {
   // Scoped reactive selector (snapshot-rate, not per-frame): primitive value,
   // so unrelated store broadcasts don't re-render this bay.
@@ -71,17 +79,19 @@ export const ModuleBay = memo(function ModuleBay({
   // is observed even when React batches the two updates into one render
   // ('struck' is transient by contract — the bomb reducer rolls it up).
   useEffect(() => {
+    if (typesOnly) return; // prep bomb has no live status — nothing to flash.
     let prev = statusAt(useGameStore.getState().bomb?.modules, slot.moduleIndex);
     return useGameStore.subscribe((s) => {
       const next = statusAt(s.bomb?.modules, slot.moduleIndex);
       if (next === 'struck' && prev !== 'struck') flashPendingRef.current = true;
       prev = next;
     });
-  }, [slot.moduleIndex]);
+  }, [slot.moduleIndex, typesOnly]);
 
   // Flash driver: the only per-frame work in the scene. Early-outs when no
   // flash is active; no allocations inside the callback (Color.set reuses).
   useFrame(({ clock }) => {
+    if (typesOnly) return; // static prep bomb — no per-frame work (project rule).
     const mat = ledMatRef.current;
     if (!mat) return;
     if (flashPendingRef.current) {
@@ -98,18 +108,25 @@ export const ModuleBay = memo(function ModuleBay({
     if (elapsedMs >= SOLVE_LED_FLASH_MS) flashStartRef.current = null;
   });
 
-  const onClick = (event: ThreeEvent<MouseEvent>) => {
-    // Shared with the module interaction helpers (5.1) so click-to-focus and
-    // module clicks use the same button/drag-tolerance contract.
-    if (!isPrimaryActivation(event.button, event.delta)) return;
-    event.stopPropagation();
-    useUiStore.getState().setActiveModuleIndex(slot.moduleIndex);
-  };
+  // In prep the bay is inert: no click-to-focus, no module interaction
+  // (Story 4.6 — "verify a click does nothing"). Orbit/zoom still orient.
+  const onClick = typesOnly
+    ? undefined
+    : (event: ThreeEvent<MouseEvent>) => {
+        // Shared with the module interaction helpers (5.1) so click-to-focus and
+        // module clicks use the same button/drag-tolerance contract.
+        if (!isPrimaryActivation(event.button, event.delta)) return;
+        event.stopPropagation();
+        useUiStore.getState().setActiveModuleIndex(slot.moduleIndex);
+      };
 
   // Base (non-flash) LED visual is declarative; the useFrame driver overrides
-  // it only while a flash is active and re-asserts every active frame.
+  // it only while a flash is active and re-asserts every active frame. In prep
+  // there is no live status, so the LED sits at its base armed visual.
   const base = solveLedVisual(status, null, false);
-  const Renderer = getModuleRenderer(moduleId);
+  // Prep forces the empty-face placeholder for every slot — the value-free
+  // guarantee (no wire colours / button label / letters / symbols ever leak).
+  const Renderer = selectModuleRenderer(moduleId, typesOnly);
 
   return (
     // Back-face bays (normal -z) rotate 180° about y so tag/LED/body face outward.
@@ -134,29 +151,51 @@ export const ModuleBay = memo(function ModuleBay({
         </mesh>
       ))}
 
-      {/* Bay tag — mockup .bay-tag (#5A5560, mono, letter-spaced) */}
-      <Text
-        font="/fonts/jetbrains-mono-700.ttf"
-        fontSize={0.04}
-        color="#5A5560"
-        letterSpacing={0.18}
-        anchorX="left"
-        anchorY="middle"
-        position={TAG_POSITION}
-      >
-        {formatBayTag(slot.moduleIndex)}
-      </Text>
+      {/* Bay tag — mockup .bay-tag (#5A5560, mono, letter-spaced). In prep
+          (Story 4.6) it carries the module TYPE centered on the empty face;
+          in the live round it is the MOD-NN micro-label. */}
+      {typesOnly ? (
+        <Text
+          font="/fonts/jetbrains-mono-700.ttf"
+          fontSize={0.07}
+          color="#9A95A0"
+          letterSpacing={0.04}
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={0.72}
+          textAlign="center"
+          position={[0, 0, FACE_Z]}
+        >
+          {formatModuleType(moduleId)}
+        </Text>
+      ) : (
+        <Text
+          font="/fonts/jetbrains-mono-700.ttf"
+          fontSize={0.04}
+          color="#5A5560"
+          letterSpacing={0.18}
+          anchorX="left"
+          anchorY="middle"
+          position={TAG_POSITION}
+        >
+          {formatBayTag(slot.moduleIndex)}
+        </Text>
+      )}
 
-      {/* Solve LED — the Defuser's only visual solved-confirmation (AC2) */}
-      <mesh position={LED_POSITION} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[LED_RADIUS, LED_RADIUS, 0.012, 16]} />
-        <meshStandardMaterial
-          ref={ledMatRef}
-          color={base.color}
-          emissive={base.emissive}
-          emissiveIntensity={base.emissiveIntensity}
-        />
-      </mesh>
+      {/* Solve LED — the Defuser's only visual solved-confirmation (AC2). It is
+          live-round state chrome: hidden in prep (Story 4.6), where there is no
+          committed bomb and a lit LED would imply a (non-existent) solve. */}
+      {!typesOnly && (
+        <mesh position={LED_POSITION} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[LED_RADIUS, LED_RADIUS, 0.012, 16]} />
+          <meshStandardMaterial
+            ref={ledMatRef}
+            color={base.color}
+            emissive={base.emissive}
+            emissiveIntensity={base.emissiveIntensity}
+          />
+        </mesh>
+      )}
 
       {/* Module body — resolved via the renderer registry (placeholder until Epic 5) */}
       <group position={[0, -0.04, FACE_Z]}>

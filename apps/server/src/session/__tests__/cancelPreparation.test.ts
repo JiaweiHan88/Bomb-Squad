@@ -22,6 +22,17 @@ const lobbyState = (): SessionState =>
     facilitatorId: 'sock-fac',
   });
 
+/** A between-rounds session with two populated teams (after round 1). */
+const betweenRoundsWithTeams = (): SessionState => ({
+  ...lobbyState(),
+  status: 'between-rounds',
+  roundNumber: 1,
+  teams: {
+    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000] },
+    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 0, cumulativeTimeMs: 2_000, roundTimesMs: [2_000] },
+  },
+});
+
 describe('cancelPreparation', () => {
   it('returns preparation to lobby and decrements roundNumber (inverse of open)', () => {
     const prep = openPreparation(lobbyState());
@@ -38,6 +49,28 @@ describe('cancelPreparation', () => {
     const cancelled = cancelPreparation(first);
     const reopened = openPreparation(cancelled);
     expect(reopened.roundNumber).toBe(first.roundNumber);
+  });
+
+  it('returns preparation to BETWEEN-ROUNDS for round 2+ and reverses the rotation advance (Story 8.6)', () => {
+    // Facilitator advanced from between-rounds → prep (round 2), then changed mind.
+    const prep = openPreparation(betweenRoundsWithTeams());
+    expect(prep.status).toBe('preparation');
+    expect(prep.roundNumber).toBe(2);
+    expect(prep.teams.A!.currentDefuserIndex).toBe(1); // advanced
+
+    const next = cancelPreparation(prep);
+    expect(next.status).toBe('between-rounds'); // NOT lobby
+    expect(next.roundNumber).toBe(1);
+    expect(next.teams.A!.currentDefuserIndex).toBe(0); // reversed
+    expect(next.teams.B!.currentDefuserIndex).toBe(0);
+  });
+
+  it('open ∘ cancel is the identity on the between-rounds path (round 2+)', () => {
+    const before = betweenRoundsWithTeams();
+    const roundTrip = cancelPreparation(openPreparation(before));
+    expect(roundTrip.status).toBe(before.status);
+    expect(roundTrip.roundNumber).toBe(before.roundNumber);
+    expect(roundTrip.teams).toEqual(before.teams);
   });
 
   it.each(['lobby', 'active', 'ended', 'between-rounds'] as const)(

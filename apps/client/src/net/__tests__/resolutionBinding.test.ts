@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import type { RoundEndPayload } from '@bomb-squad/shared';
 import { useGameStore } from '../../store/gameStore.js';
 import { bindServerEvents } from '../bindServerEvents.js';
@@ -29,7 +29,14 @@ function fakeSocket(): { socket: AppClientSocket; emit: (event: string, payload:
 }
 
 const resetStore = () =>
-  useGameStore.setState({ session: null, bomb: null, timer: null, resolution: null, connection: 'disconnected' });
+  useGameStore.setState({
+    session: null,
+    bomb: null,
+    timer: null,
+    resolution: null,
+    scoreboard: null,
+    connection: 'disconnected',
+  });
 
 describe('bindServerEvents — round resolution (Story 8.5)', () => {
   beforeEach(resetStore);
@@ -70,22 +77,41 @@ describe('bindServerEvents — round resolution (Story 8.5)', () => {
     expect(useGameStore.getState().resolution).toEqual({ outcome: 'time-expired', elapsedMs: 300_000 });
   });
 
-  it('SCOREBOARD never touches the resolution snapshot (Story 8.6 owns the scoreboard)', () => {
+  it('SCOREBOARD never touches the resolution snapshot (it sets scoreboard, not resolution)', () => {
     const { socket, emit } = fakeSocket();
     bindServerEvents(socket);
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     emit('SCOREBOARD', { teams: {} });
     expect(useGameStore.getState().resolution).toBeNull();
-    infoSpy.mockRestore();
   });
 });
 
-describe('gameStore.setBomb — new round clears a stale resolution', () => {
+describe('bindServerEvents — between-rounds scoreboard (Story 8.6)', () => {
+  beforeEach(resetStore);
+
+  it('SCOREBOARD sets the scoreboard preview snapshot', () => {
+    const { socket, emit } = fakeSocket();
+    bindServerEvents(socket);
+    const payload = {
+      teams: { A: { cumulativeTimeMs: 60_000, rounds: [60_000] } },
+      winnerTeamId: 'A' as const,
+    };
+    emit('SCOREBOARD', payload);
+    expect(useGameStore.getState().scoreboard).toEqual(payload);
+  });
+});
+
+describe('gameStore.setBomb — new round clears stale resolution + scoreboard', () => {
   beforeEach(resetStore);
 
   it('a fresh BOMB_INIT snapshot resets resolution to null', () => {
     useGameStore.getState().setResolution({ outcome: 'defused', elapsedMs: 1_000 });
     useGameStore.getState().setBomb({ strikes: 0, modules: [] } as never);
     expect(useGameStore.getState().resolution).toBeNull();
+  });
+
+  it('a fresh BOMB_INIT snapshot clears a stale between-rounds scoreboard', () => {
+    useGameStore.getState().setScoreboard({ teams: { A: { cumulativeTimeMs: 1_000, rounds: [1_000] } } });
+    useGameStore.getState().setBomb({ strikes: 0, modules: [] } as never);
+    expect(useGameStore.getState().scoreboard).toBeNull();
   });
 });

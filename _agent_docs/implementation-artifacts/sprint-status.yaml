@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-16  # code review: story 5.4 (the-button) → done; 5.5 (passwords) → done; (prior: TD-1..4 dependency-refresh batch complete)
+last_updated: 2026-06-17  # story 8.6 (between-round flow & scoreboard preview) → done (gds-code-review: clean, 1 patch applied [missing AC-3 handler-integration tests], 3 deferred, 3 dismissed; 813 tests green, typecheck clean; Task 10 human verification deferred to a later session per Jay — see deferred-work.md)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -82,7 +82,7 @@ development_status:
   4-3-module-slots-and-solve-leds: done
   4-4-diegetic-timer-lcd-with-client-extrapolation: done
   4-5-strike-indicator-and-strike-roll-up: done
-  4-6-preparation-placeholder-bomb-view: backlog
+  4-6-preparation-placeholder-bomb-view: done
   4-7-snapshot-sync-and-optimistic-render-at-60fps: done
   epic-4-retrospective: optional
 
@@ -118,7 +118,7 @@ development_status:
   8-3-round-start-defuser-assignment-and-preparation-control: done
   8-4-server-authoritative-timer-and-strike-escalation: done
   8-5-round-resolution: done
-  8-6-between-round-flow-and-scoreboard-preview: backlog
+  8-6-between-round-flow-and-scoreboard-preview: done
   8-7-pause-facilitator-and-disconnect: backlog
   8-8-retry-a-failed-round: backlog
   8-9-relay-orchestration-and-odd-team-equalisation: backlog

@@ -6,6 +6,7 @@ import type {
   ModuleUpdate,
   StrikePayload,
   RoundOutcome,
+  ScoreboardPayload,
 } from '@bomb-squad/shared';
 
 /**
@@ -24,6 +25,14 @@ interface GameState {
   bomb: BombState | null;
   timer: TimerState | null;
   resolution: ResolutionState | null;
+  /**
+   * Between-rounds scoreboard preview (Story 8.6). Set from the one-shot
+   * SCOREBOARD event. The Scoreboard surface derives its render from
+   * `session.teams` (authoritative, reconnect-safe), so this is the explicit
+   * "scoreboard now" signal/corroboration — the surface does NOT require it.
+   * Cleared on a new round (BOMB_INIT) and on clearSession.
+   */
+  scoreboard: ScoreboardPayload | null;
   connection: 'disconnected' | 'connecting' | 'connected';
   /** This client's durable playerId (Story 2.7), resolved from SESSION_IDENTITY.
    * Reactive so the "You" tag / role routing update the moment identity lands —
@@ -43,6 +52,7 @@ interface GameState {
   setBomb: (bomb: BombState) => void;
   setTimer: (timer: TimerState) => void;
   setResolution: (resolution: ResolutionState | null) => void;
+  setScoreboard: (scoreboard: ScoreboardPayload | null) => void;
   /**
    * Immutably replaces one module in the bomb's modules array.
    * Non-integer or out-of-range moduleIndex is dropped with a console warning
@@ -69,6 +79,7 @@ export const useGameStore = create<GameState>((set) => ({
   bomb: null,
   timer: null,
   resolution: null,
+  scoreboard: null,
   connection: 'disconnected',
   myPlayerId: null,
   removalNotice: null,
@@ -76,13 +87,22 @@ export const useGameStore = create<GameState>((set) => ({
   setSession: (session) => set({ session }),
   setMyPlayerId: (myPlayerId) => set({ myPlayerId }),
   clearSession: (notice) =>
-    set({ session: null, bomb: null, timer: null, resolution: null, myPlayerId: null, removalNotice: notice ?? null }),
+    set({
+      session: null,
+      bomb: null,
+      timer: null,
+      resolution: null,
+      scoreboard: null,
+      myPlayerId: null,
+      removalNotice: notice ?? null,
+    }),
   clearRemovalNotice: () => set({ removalNotice: null }),
-  // A fresh bomb (BOMB_INIT) means a new round — clear any prior resolution so a
-  // stale result banner can't bleed into the next round.
-  setBomb: (bomb) => set({ bomb, resolution: null }),
+  // A fresh bomb (BOMB_INIT) means a new round — clear any prior resolution AND
+  // the stale between-rounds scoreboard so neither bleeds into the next round.
+  setBomb: (bomb) => set({ bomb, resolution: null, scoreboard: null }),
   setTimer: (timer) => set({ timer }),
   setResolution: (resolution) => set({ resolution }),
+  setScoreboard: (scoreboard) => set({ scoreboard }),
 
   applyModuleUpdate: ({ moduleIndex, state }) =>
     set((s) => {

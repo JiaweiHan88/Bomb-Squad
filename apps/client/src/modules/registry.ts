@@ -40,3 +40,14 @@ export function registerModuleRenderer(renderer: ModuleRenderer): void {
 export function getModuleRenderer(moduleId: string): ModuleRenderer {
   return renderers.get(moduleId) ?? PLACEHOLDER_RENDERER;
 }
+
+/**
+ * Renderer selection for a bay (Story 4.6). In Preparation (`typesOnly`) every
+ * slot is forced to the empty-face PLACEHOLDER_RENDERER regardless of what is
+ * registered — the single guarantee that no generated value (wire colours,
+ * button label, password letters, symbols) can leak onto the prep bomb. In the
+ * live round it resolves the real renderer as usual.
+ */
+export function selectModuleRenderer(moduleId: string, typesOnly: boolean): ModuleRenderer {
+  return typesOnly ? PLACEHOLDER_RENDERER : getModuleRenderer(moduleId);
+}

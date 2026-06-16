@@ -20,7 +20,7 @@ import { useGameStore } from '../store/gameStore.js';
  * here — never listeners owned by other modules or socket.io internals.
  */
 export function bindServerEvents(socket: AppClientSocket): () => void {
-  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setConnection, clearSession, setMyPlayerId } =
+  const { setSession, setBomb, applyModuleUpdate, setTimer, setStrike, setResolution, setScoreboard, setConnection, clearSession, setMyPlayerId } =
     useGameStore.getState();
 
   const onBombDefused = (payload: RoundEndPayload) => {
@@ -38,9 +38,13 @@ export function bindServerEvents(socket: AppClientSocket): () => void {
     const outcome = strikes >= 3 ? 'exploded' : 'time-expired';
     setResolution({ outcome, elapsedMs: payload.elapsedMs });
   };
-  // Story 8.6 owns the scoreboard — left a stub here (never rendered mid-round, AC-3).
+  // Between-rounds scoreboard preview (Story 8.6). The server emits this only on
+  // entering 'between-rounds' (every team resolved), alongside a 'between-rounds'
+  // SESSION_STATE — so it never arrives mid-round (AC-3). The Scoreboard surface
+  // derives its render from session.teams (reconnect-safe); this populates the
+  // explicit preview signal.
   const onScoreboard = (payload: ScoreboardPayload) => {
-    console.info('[socket] SCOREBOARD', payload);
+    setScoreboard(payload);
   };
   const onLifelineToast = (payload: LifelineToastPayload) => {
     console.info('[socket] LIFELINE_TOAST', payload);

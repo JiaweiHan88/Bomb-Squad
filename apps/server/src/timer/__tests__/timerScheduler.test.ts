@@ -79,7 +79,7 @@ async function seedSession(store: MemoryRedisStore, timerMs = 10_000): Promise<v
     ...base,
     status: 'active',
     roundNumber: ROUND_NUMBER,
-    teams: { A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0 } },
+    teams: { A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] } },
   };
   await store.setJSON(sessionKey(SID), session);
   const round: RoundState = { roundNumber: ROUND_NUMBER, status: 'active', defusers: { A: 'p1' }, retry: false };
@@ -125,13 +125,20 @@ describe('TimerScheduler fire path (reload + revalidate)', () => {
 
     await h.scheduler.fireNow(SID, 'A');
 
-    // Story 8.5: the timeout path now runs the full ceremony, not a bare emit.
-    expect(h.emitted).toEqual([
-      { room: `session:${SID}:team:A`, event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: 10_000 } },
-    ]);
+    // Story 8.5: the timeout path runs the full ceremony, not a bare emit.
+    // Story 8.6: a single-team session is the last team to resolve, so the
+    // between-rounds entry fires too (SESSION_STATE routes to the scoreboard,
+    // SCOREBOARD carries the preview).
+    expect(h.emitted[0]).toEqual({
+      room: `session:${SID}:team:A`,
+      event: 'BOMB_EXPLODED',
+      payload: { teamId: 'A', elapsedMs: 10_000 },
+    });
+    expect(h.emitted.map((e) => e.event)).toEqual(['BOMB_EXPLODED', 'SESSION_STATE', 'SCOREBOARD']);
     expect(h.store.data.has(timerKey(SID, 'A'))).toBe(false);
     const session = (await h.store.getJSON<SessionState>(sessionKey(SID)))!;
     expect(session.teams.A!.cumulativeTimeMs).toBe(10_000); // displayed elapsed = timerMs
+    expect(session.teams.A!.roundTimesMs).toEqual([10_000]);
     expect(session.status).toBe('between-rounds');
     const round = (await h.store.getJSON<RoundState>(roundKey(SID, ROUND_NUMBER)))!;
     expect(round.status).toBe('time-expired');

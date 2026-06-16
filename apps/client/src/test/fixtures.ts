@@ -41,6 +41,7 @@ export function makeTeam(
     relayOrder,
     currentDefuserIndex: 0,
     cumulativeTimeMs: 0,
+    roundTimesMs: [],
     ...overrides,
   };
 }

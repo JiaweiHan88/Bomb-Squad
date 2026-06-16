@@ -36,6 +36,16 @@ export function formatBayTag(moduleIndex: number): string {
   return `MOD-${String(moduleIndex + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Human-readable module-type label for the Preparation placeholder bomb (4.6):
+ * the kebab-case moduleId rendered as upper-case words. "wires" → "WIRES",
+ * "the-button" → "THE BUTTON". Derived from the id so a new module type needs
+ * no label table — the prep bay tag reads whatever pool the round config holds.
+ */
+export function formatModuleType(moduleId: string): string {
+  return moduleId.replace(/-/g, ' ').toUpperCase();
+}
+
 export function computeModuleLayout(count: number): ModuleSlot[] {
   if (!Number.isFinite(count) || count <= 0) return [];
 

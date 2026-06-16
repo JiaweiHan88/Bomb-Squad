@@ -78,10 +78,10 @@ export const PREP_GUIDANCE =
   'Walk them through the manual — two to five minutes is the sweet spot. Start when they stop arguing.';
 export const ON_THE_BOMB_NEXT = 'On the bomb next';
 export const START_THE_ROUND = 'Start the round';
-export const PREP_DEFUSER_LINE = "You're defusing this round.";
 export const PREP_MANUAL_LINE = "You're on the manual. Read fast.";
-export const PREP_DEFUSER_PLACEHOLDER =
-  'Your bomb is on the bench. Module types appear here once the armourer is done.';
+// Story 4.6: the upcoming Defuser's prep surface is now the placeholder bomb
+// itself (PrepBombView), not a text line — the former PREP_DEFUSER_LINE /
+// PREP_DEFUSER_PLACEHOLDER copy is retired.
 
 // Active round (Story 8.3) — interim non-defuser surfaces; 8.5+/Epic 9 own the real ones.
 export const ROUND_IN_PROGRESS = 'Round in progress.';
@@ -92,9 +92,24 @@ export const WATCHING_THE_BOMB_ROOM = 'Watching the bomb room. Keep it down.';
 export const RESULT_DEFUSED = 'DEFUSED.';
 export const RESULT_DETONATED = 'DETONATED.';
 export const RESULT_TIME_EXPIRED = 'TIME EXPIRED.';
-// Interim post-round surface — Story 8.6 (between-rounds + scoreboard preview)
-// replaces this. Deliberately NOT a scoreboard (AC-3: no mid-round scoreboard).
+// Interim post-round line (Story 8.5) — shown briefly on the resolution banner
+// in the window between the scene hold and the between-rounds SESSION_STATE
+// arriving. No longer terminal: the Scoreboard surface (Story 8.6) takes over
+// once the server broadcasts 'between-rounds'. Deliberately NOT a scoreboard.
 export const BETWEEN_ROUNDS_PLACEHOLDER = 'Round over. Stand by for the next one.';
+
+// Between-rounds scoreboard preview (Story 8.6). Operator-world voice. This is a
+// PREVIEW, not the final scoreboard (8.10) — copy reads "standings"/"leading",
+// never "winner".
+export const SCOREBOARD_EYEBROW = 'Between rounds';
+export const SCOREBOARD_HEADING = 'Standings';
+export const SCOREBOARD_LEADING = 'Leading';
+export const SCOREBOARD_TOTAL = 'Total';
+export const SCOREBOARD_ROUND_LABEL = 'Round';
+// Facilitator advance control — opens the next round's Preparation phase.
+export const START_NEXT_ROUND = 'Start next round';
+// Non-facilitator standby line while the scoreboard is up.
+export const BETWEEN_ROUNDS_WAITING = 'Waiting for the facilitator to start the next round.';
 
 // Bomb Room voice (Story 3.2) — the join affordance + EXPERIENCE.md voice
 // microcopy. The speaker pill + mute toggle are Story 3.4, not here.

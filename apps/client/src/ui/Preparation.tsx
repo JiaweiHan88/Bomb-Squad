@@ -8,14 +8,13 @@ import ManualViewer from '../manual/ManualViewer.js';
 import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
 import { upcomingDefuserId } from './rotation.js';
+import PrepBombView from './PrepBombView.js';
 import {
   PREP_HEADING,
   PREP_GUIDANCE,
   ON_THE_BOMB_NEXT,
   START_THE_ROUND,
-  PREP_DEFUSER_LINE,
   PREP_MANUAL_LINE,
-  PREP_DEFUSER_PLACEHOLDER,
   BACK_TO_LOBBY,
   TEAM_A,
   TEAM_B,
@@ -136,16 +135,9 @@ export default function Preparation() {
   }
 
   if (isUpcomingDefuser) {
-    return (
-      <div className="flex flex-1 items-start justify-center p-8">
-        <section className="w-full max-w-xl rounded-lg bg-surface-raised p-8">
-          <h2 className="mb-1 font-display text-lg font-semibold">{PREP_DEFUSER_LINE}</h2>
-          {/* Story 4.6 seam: the preparation placeholder bomb (module types,
-              no values) mounts here in place of this line. */}
-          <p className="text-sm text-ink-muted">{PREP_DEFUSER_PLACEHOLDER}</p>
-        </section>
-      </div>
-    );
+    // Story 4.6: the upcoming Defuser orients on a value-free placeholder bomb
+    // (module types, no values) — the same immersive stage the live bomb uses.
+    return <PrepBombView />;
   }
 
   // Experts and Spectators browse the full manual during prep (EXPERIENCE.md).

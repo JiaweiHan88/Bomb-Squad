@@ -54,6 +54,7 @@ describe('assignPlayerToTeam', () => {
       relayOrder: ['sock-maya'],
       currentDefuserIndex: 0,
       cumulativeTimeMs: 0,
+      roundTimesMs: [],
     });
     expect(next.teams.B).toBeUndefined();
   });

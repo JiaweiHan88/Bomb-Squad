@@ -119,13 +119,28 @@ function CameraRig({ slots }: { slots: ModuleSlot[] }) {
 const SHOW_STATS =
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('stats');
 
-export default function BombScene() {
+/** A bay only needs a module *type* to lay out and tag; the live bomb's
+ *  ModuleState satisfies this, and so does the prep types-only list (4.6). */
+interface BombSceneProps {
+  /**
+   * Preparation placeholder mode (Story 4.6): bays show module TYPES with empty
+   * value-free faces, and the active-round chrome (timer LCD, strike LEDs, the
+   * diegetic BombContext metadata) is hidden — there is no committed bomb yet.
+   */
+  typesOnly?: boolean;
+  /** Prep slot source (types only). Required when `typesOnly`; ignored otherwise. */
+  modules?: ReadonlyArray<{ moduleId: string }>;
+}
+
+export default function BombScene({ typesOnly = false, modules: prepModules }: BombSceneProps = {}) {
   // Reactive (non-per-frame) reads: layout and metadata follow the bomb
   // snapshot when one exists, else the dev-harness placeholders. The modules
   // array (not a bare count) is the source of truth since 4.3 — each slot
   // renders its module's data (id → registry, status → solve LED).
-  const modules = useGameStore((s) => s.bomb?.modules) ?? DEV_PLACEHOLDER_MODULES;
+  const liveModules = useGameStore((s) => s.bomb?.modules) ?? DEV_PLACEHOLDER_MODULES;
   const context = useGameStore((s) => s.bomb?.context) ?? DEV_BOMB_CONTEXT;
+  // In prep the slot source is the explicit config-derived list (no store bomb).
+  const modules: ReadonlyArray<{ moduleId: string }> = typesOnly ? (prepModules ?? []) : liveModules;
   const slots = useMemo(() => computeModuleLayout(modules.length), [modules.length]);
 
   return (
@@ -158,20 +173,28 @@ export default function BombScene() {
         </mesh>
       ))}
 
-      {/* Diegetic BombContext metadata: serial / batteries / indicators / ports */}
-      <ChassisFeatures context={context} />
+      {/* Active-round chrome is hidden in Preparation (Story 4.6): no committed
+          BombContext (serial/batteries/indicators/ports are randomised values),
+          no timer LCD, no strike LEDs — the prep bomb is a value-free shell. */}
+      {!typesOnly && (
+        <>
+          {/* Diegetic BombContext metadata: serial / batteries / indicators / ports */}
+          <ChassisFeatures context={context} />
 
-      {/* Diegetic timer LCD on the chassis top band (Story 4.4) */}
-      <TimerLcd />
+          {/* Diegetic timer LCD on the chassis top band (Story 4.4) */}
+          <TimerLcd />
 
-      {/* Strike LED dots beside the timer (Story 4.5) */}
-      <StrikeIndicator />
+          {/* Strike LED dots beside the timer (Story 4.5) */}
+          <StrikeIndicator />
+        </>
+      )}
 
       {slots.map((slot) => (
         <ModuleBay
           key={slot.moduleIndex}
           slot={slot}
           moduleId={modules[slot.moduleIndex]?.moduleId ?? 'placeholder'}
+          typesOnly={typesOnly}
         />
       ))}
 
