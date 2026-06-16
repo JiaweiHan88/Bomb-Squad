@@ -28,9 +28,10 @@
 import type { RoundOutcome, RoundState, SessionState, TeamId, TimerState } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
 import { roundKey, sessionKey, timerKey } from '../state/keys.js';
-import { teamRoom, type SessionIOServer, type SessionLog } from '../handlers/sessionHandlers.js';
+import { sessionRoom, teamRoom, type SessionIOServer, type SessionLog } from '../handlers/sessionHandlers.js';
 import { remainingMs } from '../timer/timerCore.js';
 import type { TimerScheduler } from '../timer/timerScheduler.js';
+import { buildScoreboard } from './buildScoreboard.js';
 
 export interface ResolveRoundDeps {
   redis: RedisStore;
@@ -135,25 +136,42 @@ async function resolveRoundCeremony(
   deps.timer.cancel(sessionId, teamId);
   await deps.redis.del(timerKey(sessionId, teamId));
 
-  // (b) Record elapsed into this team's cumulativeTimeMs and flip the session
-  // toward the next phase. Immutable: spread new TeamState/SessionState, never
-  // mutate in place (project rule).
-  //
-  // Story 8.6: between-rounds entry (scoreboard preview + ready gate) is owned by
-  // 8.6 and is not yet merged, so we flip status → 'between-rounds' here as the
-  // correct next phase for 8.6 to build on. We only flip from 'active' (never
-  // regress a later phase). CAVEAT for 8.6: with two racing teams sharing one
-  // session, the FIRST team to resolve flips the shared status; proper
-  // both-teams-resolved gating belongs to 8.6's between-rounds entry. We never
-  // emit SCOREBOARD here (AC-3). Also reconcile deferred-work: cancelPreparation
-  // hard-codes a return to 'lobby' — once 'between-rounds' → preparation becomes
-  // reachable it must restore the originating phase (8.6 follow-up).
+  // BETWEEN-ROUNDS GATE (Story 8.6): the session enters 'between-rounds' only
+  // when EVERY participating team (those in round.defusers) has resolved — i.e.
+  // this is the LAST team to finish. We detect that via the same per-team fence:
+  // a resolved team's live timer key is gone (deleted above / on its own
+  // resolution). After deleting THIS team's key, if no OTHER participating team
+  // still has a live timer key, this resolution completes the round. Until then
+  // the shared session status stays 'active' so a still-playing team is never
+  // routed off its bomb mid-round (preserves Story 8.5 AC-3 end-to-end). This
+  // read-check is race-safe because the whole ceremony runs inside the per-session
+  // serialization chain (see `sessionChains`): two teams cannot both observe the
+  // other as still-live.
+  let anotherTeamStillLive = false;
+  for (const otherTeamId of Object.keys(round.defusers) as TeamId[]) {
+    if (otherTeamId === teamId) continue;
+    const otherTimer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, otherTeamId));
+    if (otherTimer !== null) {
+      anotherTeamStillLive = true;
+      break;
+    }
+  }
+  const enteringBetweenRounds = session.status === 'active' && !anotherTeamStillLive;
+
+  // (b) Record elapsed into this team's cumulativeTimeMs + per-round history, and
+  // flip the session phase only when this resolution completes the round.
+  // Immutable: spread new TeamState/SessionState, never mutate in place (project
+  // rule). The maintained invariant is cumulativeTimeMs === sum(roundTimesMs).
   const updatedSession: SessionState = {
     ...session,
-    status: session.status === 'active' ? 'between-rounds' : session.status,
+    status: enteringBetweenRounds ? 'between-rounds' : session.status,
     teams: {
       ...session.teams,
-      [teamId]: { ...team, cumulativeTimeMs: team.cumulativeTimeMs + elapsedMs },
+      [teamId]: {
+        ...team,
+        cumulativeTimeMs: team.cumulativeTimeMs + elapsedMs,
+        roundTimesMs: [...team.roundTimesMs, elapsedMs],
+      },
     },
   };
   await deps.redis.setJSON(sessionKey(sessionId), updatedSession);
@@ -161,12 +179,24 @@ async function resolveRoundCeremony(
   // (c) Record the round-level outcome (last-writer-wins across teams; see header).
   await deps.redis.setJSON(roundKey(sessionId, roundNumber), { ...round, status: outcome });
 
-  // (d) Announce. BOMB_DEFUSED for a defuse; BOMB_EXPLODED for both failure
-  // outcomes (DETONATED vs TIME EXPIRED is a client-side label, not a 3rd event).
+  // (d) Announce this team's result. BOMB_DEFUSED for a defuse; BOMB_EXPLODED for
+  // both failure outcomes (DETONATED vs TIME EXPIRED is a client-side label, not
+  // a 3rd event).
   const event = outcome === 'defused' ? 'BOMB_DEFUSED' : 'BOMB_EXPLODED';
   deps.io.to(teamRoom(sessionId, teamId)).emit(event, { teamId, elapsedMs });
 
   deps.log.info({ sessionId, teamId, outcome, elapsedMs }, 'round resolved');
+
+  // (e) Between-rounds entry (Story 8.6): once every team has resolved, announce
+  // the new phase to ALL roles — broadcast the between-rounds SESSION_STATE
+  // (clients route to the scoreboard surface) then emit the SCOREBOARD preview.
+  // Persist-then-emit (the persist already happened in step b). The next round
+  // does not start automatically — it waits on the facilitator's PREPARATION_OPEN.
+  if (enteringBetweenRounds) {
+    deps.io.to(sessionRoom(sessionId)).emit('SESSION_STATE', updatedSession);
+    deps.io.to(sessionRoom(sessionId)).emit('SCOREBOARD', buildScoreboard(updatedSession));
+    deps.log.info({ sessionId, roundNumber }, 'between-rounds — scoreboard preview emitted');
+  }
 }
 
 /**

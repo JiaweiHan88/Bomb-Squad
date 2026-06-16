@@ -70,7 +70,13 @@ async function makeHarness(opts?: {
     teams:
       (opts?.withTeam ?? true)
         ? {
-            A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: opts?.cumulativeTimeMs ?? 0 },
+            A: {
+              teamId: 'A',
+              relayOrder: ['p1'],
+              currentDefuserIndex: 0,
+              cumulativeTimeMs: opts?.cumulativeTimeMs ?? 0,
+              roundTimesMs: opts?.cumulativeTimeMs ? [opts.cumulativeTimeMs] : [],
+            },
           }
         : {},
   };
@@ -109,13 +115,23 @@ describe('resolveRound — defuse (AC-1)', () => {
 
     const session = (await loadSession(h))!;
     expect(session.teams.A!.cumulativeTimeMs).toBe(1_000 + 60_000);
+    expect(session.teams.A!.roundTimesMs).toEqual([1_000, 60_000]);
+    // Single team → this resolution is the last → between-rounds entry fires.
     expect(session.status).toBe('between-rounds');
 
     expect((await loadRound(h))!.status).toBe('defused');
     expect(h.store.data.has(timerKey(SID, 'A'))).toBe(false);
     expect(h.cancelCalls).toEqual([{ sessionId: SID, teamId: 'A' }]);
+    // Team result first, then the session-wide between-rounds entry (SESSION_STATE
+    // routes clients to the scoreboard, SCOREBOARD carries the preview).
     expect(h.emitted).toEqual([
       { room: `session:${SID}:team:A`, event: 'BOMB_DEFUSED', payload: { teamId: 'A', elapsedMs: 60_000 } },
+      { room: `session:${SID}`, event: 'SESSION_STATE', payload: session },
+      {
+        room: `session:${SID}`,
+        event: 'SCOREBOARD',
+        payload: { teams: { A: { cumulativeTimeMs: 61_000, rounds: [1_000, 60_000] } }, winnerTeamId: 'A' },
+      },
     ]);
   });
 });
@@ -127,10 +143,15 @@ describe('resolveRound — failures (AC-2)', () => {
     await resolveRound(h.deps, SID, 'A', 'time-expired', TIMER_MS + 10_000);
 
     expect((await loadSession(h))!.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([TIMER_MS]);
     expect((await loadRound(h))!.status).toBe('time-expired');
-    expect(h.emitted).toEqual([
-      { room: `session:${SID}:team:A`, event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: TIMER_MS } },
-    ]);
+    // Team failure event first, then the between-rounds entry (single team → last).
+    expect(h.emitted[0]).toEqual({
+      room: `session:${SID}:team:A`,
+      event: 'BOMB_EXPLODED',
+      payload: { teamId: 'A', elapsedMs: TIMER_MS },
+    });
+    expect(h.emitted.map((e) => e.event)).toEqual(['BOMB_EXPLODED', 'SESSION_STATE', 'SCOREBOARD']);
   });
 
   it('3rd strike: status=exploded, BOMB_EXPLODED with displayed elapsed at the strike instant', async () => {
@@ -147,13 +168,15 @@ describe('resolveRound — idempotency (AC-4)', () => {
   it('a second call on an already-resolved team is a no-op (timer key is the fence)', async () => {
     const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
     await resolveRound(h.deps, SID, 'A', 'defused', 60_000);
-    expect(h.emitted).toHaveLength(1);
+    // BOMB_DEFUSED + the between-rounds entry (SESSION_STATE + SCOREBOARD).
+    expect(h.emitted).toHaveLength(3);
 
     // Late strike after the defuse: timer key already deleted → no-op.
     await resolveRound(h.deps, SID, 'A', 'exploded', 70_000);
-    expect(h.emitted).toHaveLength(1); // no second emit
+    expect(h.emitted).toHaveLength(3); // no second emit / no second between-rounds entry
     expect((await loadRound(h))!.status).toBe('defused'); // no status regression
     expect((await loadSession(h))!.teams.A!.cumulativeTimeMs).toBe(60_000); // no double time
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([60_000]); // no double append
   });
 });
 
@@ -227,8 +250,8 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
       status: 'active',
       roundNumber: ROUND_NUMBER,
       teams: {
-        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0 },
-        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0 },
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
       },
     };
     await store.setJSON(sessionKey(SID), session);
@@ -256,9 +279,74 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
     const after = (await store.getJSON<SessionState>(sessionKey(SID)))!;
     expect(after.teams.A!.cumulativeTimeMs).toBe(60_000);
     expect(after.teams.B!.cumulativeTimeMs).toBe(TIMER_MS);
-    expect(emitted).toHaveLength(2);
+    expect(after.teams.A!.roundTimesMs).toEqual([60_000]);
+    expect(after.teams.B!.roundTimesMs).toEqual([TIMER_MS]);
+    // The session enters between-rounds exactly once — on the LAST team to resolve.
+    expect(after.status).toBe('between-rounds');
+
+    // Each team gets its own per-team result event; the between-rounds entry
+    // (SESSION_STATE + SCOREBOARD) fires exactly once, not per team.
+    expect(emitted.filter((e) => e.event === 'BOMB_DEFUSED')).toHaveLength(1);
+    expect(emitted.filter((e) => e.event === 'BOMB_EXPLODED')).toHaveLength(1);
+    expect(emitted.filter((e) => e.event === 'SESSION_STATE')).toHaveLength(1);
+    expect(emitted.filter((e) => e.event === 'SCOREBOARD')).toHaveLength(1);
+    expect(emitted).toHaveLength(4);
+
+    // The SCOREBOARD preview carries both teams; A (60s) leads B (timerMs).
+    const scoreboard = emitted.find((e) => e.event === 'SCOREBOARD')!.payload as {
+      teams: Record<string, { cumulativeTimeMs: number; rounds: number[] }>;
+      winnerTeamId?: string;
+    };
+    expect(scoreboard.teams.A).toEqual({ cumulativeTimeMs: 60_000, rounds: [60_000] });
+    expect(scoreboard.teams.B).toEqual({ cumulativeTimeMs: TIMER_MS, rounds: [TIMER_MS] });
+    expect(scoreboard.winnerTeamId).toBe('A');
+
     expect(store.data.has(timerKey(SID, 'A'))).toBe(false);
     expect(store.data.has(timerKey(SID, 'B'))).toBe(false);
+  });
+
+  it('first team to resolve does NOT enter between-rounds while the other is still live', async () => {
+    const store = createMemoryRedisStore();
+    const emitted: Emitted[] = [];
+    const base = createSessionState({
+      sessionId: SID,
+      joinCode: 'ABC123',
+      facilitatorId: 'fac',
+      config: { timerMs: TIMER_MS },
+    });
+    await store.setJSON(sessionKey(SID), {
+      ...base,
+      status: 'active',
+      roundNumber: ROUND_NUMBER,
+      teams: {
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
+      },
+    } as SessionState);
+    await store.setJSON(roundKey(SID, ROUND_NUMBER), {
+      roundNumber: ROUND_NUMBER,
+      status: 'active',
+      defusers: { A: 'p1', B: 'p2' },
+      retry: false,
+    } as RoundState);
+    await store.setJSON(timerKey(SID, 'A'), startSegment(TIMER_MS, 0));
+    await store.setJSON(timerKey(SID, 'B'), startSegment(TIMER_MS, 0));
+
+    const deps: ResolveRoundDeps = {
+      redis: store,
+      io: fakeIo(emitted),
+      log: noopLog,
+      timer: { cancel: () => {} },
+    };
+
+    // Only team A resolves; B's bomb is still live.
+    await resolveRound(deps, SID, 'A', 'defused', 60_000);
+
+    const after = (await store.getJSON<SessionState>(sessionKey(SID)))!;
+    expect(after.status).toBe('active'); // NOT between-rounds — B still playing
+    expect(after.teams.A!.cumulativeTimeMs).toBe(60_000);
+    // Only A's team result; no SESSION_STATE / SCOREBOARD broadcast yet.
+    expect(emitted.map((e) => e.event)).toEqual(['BOMB_DEFUSED']);
   });
 });
 

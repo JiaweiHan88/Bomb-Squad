@@ -7,6 +7,7 @@ const team = (relayOrder: string[], currentDefuserIndex: number): TeamState => (
   relayOrder,
   currentDefuserIndex,
   cumulativeTimeMs: 0,
+  roundTimesMs: [],
 });
 
 describe('upcomingDefuserId (must mirror the server rotation pick)', () => {

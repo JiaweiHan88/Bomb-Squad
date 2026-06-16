@@ -59,6 +59,7 @@ export function assignPlayerToTeam(state: SessionState, args: AssignTeamArgs): S
     relayOrder: [],
     currentDefuserIndex: 0,
     cumulativeTimeMs: 0,
+    roundTimesMs: [],
   };
   teams[args.teamId] = target.relayOrder.includes(args.playerId)
     ? target

@@ -51,7 +51,7 @@ describe('selectModuleRenderer (Story 4.6 prep value-free guarantee)', () => {
     expect(selectModuleRenderer('test-prep-registered', true)).toBe(PLACEHOLDER_RENDERER);
   });
 
-  it('resolves real renderers in the live round (typesOnly === false)', () => {
+  it('falls back to the placeholder for unknown ids in the live round (typesOnly === false)', () => {
     expect(selectModuleRenderer('still-unknown-2', false)).toBe(PLACEHOLDER_RENDERER);
   });
 });

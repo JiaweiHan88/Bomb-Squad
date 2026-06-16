@@ -20,6 +20,17 @@ const lobbyState = (): SessionState =>
     facilitatorId: 'sock-fac',
   });
 
+/** A session with two populated teams at the given status/roundNumber. */
+const withTeams = (status: SessionState['status'], roundNumber: number): SessionState => ({
+  ...lobbyState(),
+  status,
+  roundNumber,
+  teams: {
+    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000] },
+    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 1, cumulativeTimeMs: 2_000, roundTimesMs: [2_000] },
+  },
+});
+
 describe('openPreparation', () => {
   it('moves a lobby to preparation and increments roundNumber (0 → 1)', () => {
     const next = openPreparation(lobbyState());
@@ -32,6 +43,24 @@ describe('openPreparation', () => {
     const next = openPreparation(between);
     expect(next.status).toBe('preparation');
     expect(next.roundNumber).toBe(3);
+  });
+
+  it('advances every team currentDefuserIndex by 1 when opened from between-rounds (Story 8.6)', () => {
+    const next = openPreparation(withTeams('between-rounds', 1));
+    expect(next.teams.A!.currentDefuserIndex).toBe(1);
+    expect(next.teams.B!.currentDefuserIndex).toBe(2);
+    // Times/relay order untouched by the advance.
+    expect(next.teams.A!.cumulativeTimeMs).toBe(1_000);
+    expect(next.teams.A!.relayOrder).toEqual(['p1', 'p2']);
+  });
+
+  it('leaves currentDefuserIndex untouched when opened from the lobby (round 1)', () => {
+    const state = withTeams('lobby', 0);
+    const next = openPreparation(state);
+    expect(next.teams.A!.currentDefuserIndex).toBe(0);
+    expect(next.teams.B!.currentDefuserIndex).toBe(1);
+    // Lobby path does not rebuild the teams map (same reference, no advance).
+    expect(next.teams).toBe(state.teams);
   });
 
   it.each(['preparation', 'active', 'ended'] as const)(

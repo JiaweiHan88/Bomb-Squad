@@ -4,7 +4,7 @@ baseline_commit: f532aeb
 
 # Story 4.6: Preparation Placeholder Bomb View
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -155,3 +155,10 @@ claude-opus-4-8 (Claude Code, gds-dev-story workflow)
 - 2026-06-15: Story created (context engine analysis — comprehensive developer guide). Status: ready-for-dev.
 - 2026-06-16: Implemented Option A prep placeholder bomb (value-free types-only `BombScene`/`ModuleBay`, `PrepBombView`, `buildPrepModules`, `selectModuleRenderer`, `formatModuleType`). Tests added; tsc/test/build gates green. Status → review.
 - 2026-06-16: Interactive verification (Jay) caught a leaked solve LED on bay 1 (dev-placeholder `solved` fallback); hid the solve LED in `typesOnly` prep. Re-verified clean. Task 5 / AC3 confirmed.
+
+## Review Findings
+
+_gds-code-review 2026-06-16 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). Acceptance Auditor: no AC violations — value-free guarantee airtight, role gating preserved, Option A as specified._
+
+- [x] [Review][Defer] No fallback/waiting surface when prep config is unavailable — `PrepBombView` returns `null` when `session.config` is absent (snapshot not yet arrived) or `moduleCount` resolves to 0, and the retired `PREP_DEFUSER_PLACEHOLDER` removed the prior "module types appear here once the armourer is done" copy. The upcoming Defuser would see a blank surface with no orientation/waiting message. Practically unreachable in normal prep flow (config is set when prep opens; moduleCount domain is 3–11), so this is a UX-intent call, not a correctness bug. [`apps/client/src/ui/PrepBombView.tsx`] — **deferred:** practically unreachable (config is present when prep opens and moduleCount domain is 3–11); a fallback is gold-plating until proven otherwise.
+- [x] [Review][Patch] Misleading registry test name — `it('resolves real renderers in the live round (typesOnly === false)')` asserts an *unregistered* id (`'still-unknown-2'`) returns `PLACEHOLDER_RENDERER`, i.e. it tests the unknown-id fallback, not real-renderer resolution (the first test already covers the real path). Rename to describe the fallback it actually exercises, or change to a registered id asserting `.toBe(real)`. [`apps/client/src/modules/__tests__/registry.test.ts`]

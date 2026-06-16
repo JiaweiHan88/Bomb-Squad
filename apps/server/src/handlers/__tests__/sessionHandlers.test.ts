@@ -384,7 +384,7 @@ describe('SESSION_JOIN handler', () => {
         'sock-d1': { playerId: 'sock-d1', displayName: 'Dee', role: 'defuser', isReady: true, teamId: 'A' },
       },
       teams: {
-        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000 },
+        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000, roundTimesMs: [12_000] },
       },
     };
     await store.setJSON(sessionKey(ack.sessionId), seeded);
@@ -806,6 +806,7 @@ describe('TEAM_ASSIGN handler', () => {
         relayOrder: [mayaId],
         currentDefuserIndex: 0,
         cumulativeTimeMs: 0,
+        roundTimesMs: [],
       });
     }
   });
@@ -1063,6 +1064,36 @@ describe('PREPARATION_OPEN handler', () => {
   it('non-facilitator → NOT_FACILITATOR, no broadcast, store byte-identical', async () => {
     const ack = await createSession(facilitator);
     await joinAs(joiner, ack.joinCode, 'Maya');
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(error.recoverable).toBe(true);
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('non-facilitator advance IN between-rounds → NOT_FACILITATOR, no broadcast, store byte-identical', async () => {
+    // AC-3: the between-rounds advance (PREPARATION_OPEN) is facilitator-only.
+    // The authority gate must fire BEFORE the phase transition, so a
+    // non-facilitator probe in between-rounds learns nothing and changes
+    // nothing (no index advance, no roundNumber bump, no broadcast).
+    const ack = await sessionWithTeam(); // joiner (Maya) is assigned to Team A
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: 1,
+      teams: {
+        ...live.teams,
+        A: { ...live.teams.A!, cumulativeTimeMs: 12_000, roundTimesMs: [12_000] },
+      },
+    });
     const storedBefore = store.data.get(sessionKey(ack.sessionId));
 
     const facSpy = jest.fn();
@@ -1349,6 +1380,63 @@ describe('ROUND_START handler', () => {
     expect(teamB.map((s) => s.data.playerId)).toEqual([devonId]);
   });
 
+  it('between-rounds advance → ROUND_START commits the NEXT rotation Defuser (AC-3 end-to-end)', async () => {
+    // Two players relay on Team A. After the facilitator's between-rounds advance
+    // (PREPARATION_OPEN → currentDefuserIndex +1), the next ROUND_START must
+    // commit relayOrder[1], not round 1's relayOrder[0] pick — proving the
+    // rotation moved end-to-end through the handler, not just the openPreparation
+    // unit. The expected picks are derived from the committed relayOrder so the
+    // assertion is robust to assignment ordering.
+    const ack = await createSession(facilitator);
+    const j1 = await joinAs(maya, ack.joinCode, 'Maya');
+    const mayaId = idOf(j1, 'Maya');
+    const j2 = await joinAs(devon, ack.joinCode, 'Devon');
+    const devonId = idOf(j2, 'Devon');
+
+    const everyone = () =>
+      Promise.all([facilitator, maya, devon].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')));
+    let done = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    await done;
+    done = everyone();
+    facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'A', role: 'expert' });
+    await done;
+
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    const relayOrder = seeded.teams.A!.relayOrder;
+    expect(relayOrder).toEqual([mayaId, devonId]);
+
+    // Flip into between-rounds at round 1, index 0 — as the resolution ceremony
+    // leaves the session after round 1 completes.
+    await store.setJSON(sessionKey(ack.sessionId), {
+      ...seeded,
+      status: 'between-rounds',
+      roundNumber: 1,
+      teams: {
+        ...seeded.teams,
+        A: { ...seeded.teams.A!, currentDefuserIndex: 0, cumulativeTimeMs: 9_000, roundTimesMs: [9_000] },
+      },
+    });
+
+    // Facilitator advances → preparation, roundNumber 2, index +1.
+    done = everyone();
+    facilitator.emit('PREPARATION_OPEN');
+    await done;
+    const advanced = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(advanced.status).toBe('preparation');
+    expect(advanced.roundNumber).toBe(2);
+    expect(advanced.teams.A!.currentDefuserIndex).toBe(1);
+
+    // ROUND_START commits the NEXT defuser (relayOrder[1] = devon), not round 1's.
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    await statePromise;
+
+    const round2 = JSON.parse(store.data.get(roundKey(ack.sessionId, 2))!) as RoundState;
+    expect(round2.defusers.A).toBe(relayOrder[1]);
+    expect(round2.defusers.A).not.toBe(relayOrder[0]);
+  });
+
   it('generates + persists a bomb per populated team and broadcasts BOMB_INIT to each team room (Story 4.7)', async () => {
     const { sessionId } = await setupPrepared();
 
@@ -1584,12 +1672,25 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
 
     expect(exploded).toEqual({ teamId: 'A', elapsedMs: TIMER_MS });
     expect(store.data.has(timerKey(sessionId, 'A'))).toBe(false);
-    // Story 8.5: the timeout path now runs the full resolution ceremony — it
-    // records displayed elapsed into cumulativeTimeMs and flips the session
-    // toward between-rounds (the active→between-rounds flip 8.4 deferred to 8.5).
-    const session = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    expect(session.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
-    expect(session.status).toBe('between-rounds');
+    // Story 8.5: the timeout path runs the full resolution ceremony — records
+    // displayed elapsed into cumulativeTimeMs and (Story 8.6) keeps the shared
+    // session 'active' because Team B is still playing. Between-rounds entry waits
+    // for the LAST team to resolve so B is never routed off its bomb mid-round.
+    const afterA = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    expect(afterA.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect(afterA.teams.A!.roundTimesMs).toEqual([TIMER_MS]);
+    expect(afterA.status).toBe('active');
+
+    // Now Team B expires too → last team → between-rounds entry: session flips and
+    // a SCOREBOARD preview is broadcast to the whole session (Story 8.6).
+    const scoreboardPromise = onceEvent<unknown>(maya, 'SCOREBOARD');
+    scheduler.setNow(TIMER_MS + 2);
+    await scheduler.fireNow(sessionId, 'B');
+    await scoreboardPromise;
+
+    const afterB = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    expect(afterB.teams.B!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect(afterB.status).toBe('between-rounds');
   });
 });
 
