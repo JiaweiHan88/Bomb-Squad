@@ -19,9 +19,9 @@ describe('generateLayout — guards (fail loud)', () => {
   });
 
   it('rejects a pool containing an unregistered module id', () => {
-    // 'the-button' (Story 5.4) has no registered generator yet — 'wires' is now
-    // registered (Story 4.7), so it would no longer fail loud.
-    expect(() => generateLayout(1, 3, ['the-button'])).toThrow(/unregistered id "the-button"/);
+    // 'simon-says' (Epic 7) has no registered generator yet — 'wires' (5.3) and
+    // 'the-button' (5.4) are now registered, so they no longer fail loud.
+    expect(() => generateLayout(1, 3, ['simon-says'])).toThrow(/unregistered id "simon-says"/);
   });
 });
 

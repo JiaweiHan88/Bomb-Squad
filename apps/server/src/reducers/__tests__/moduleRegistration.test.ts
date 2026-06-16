@@ -2,13 +2,17 @@ import { describe, expect, it } from '@jest/globals';
 import {
   DEV_DEMO_MODULE_ID,
   WIRES_MODULE_ID,
+  BUTTON_MODULE_ID,
+  PASSWORDS_MODULE_ID,
   devDemoReducer,
   generateDevDemo,
   generateWires,
   solveWires,
   type BombContext,
   type BombState,
+  type ButtonState,
   type ModuleState,
+  type PasswordsState,
 } from '@bomb-squad/shared';
 import { createBombReducer, bombReducer } from '../bombReducer.js';
 import { MODULE_REDUCERS, type ModuleReducer } from '../MODULE_REDUCERS.js';
@@ -109,6 +113,81 @@ describe('open/closed module registration (AC2)', () => {
       type: 'MODULE_ACTION',
       moduleIndex: 0,
       payload: { type: 'CUT', wireIndex: wrongIndex },
+    });
+    expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
+    expect(struck.strikes).toBe(1);
+  });
+
+  it('the-button (5.4) is registered and presses/releases through the untouched bomb reducer', () => {
+    expect(MODULE_REDUCERS[BUTTON_MODULE_ID]).toBeDefined();
+    // yellow → hold (rule 5), strip blue → release on a 4. Explicit data so the
+    // decision is deterministic without seed-searching.
+    const data: ButtonState = { color: 'yellow', label: 'Press', stripColor: 'blue', held: false, ctx: CTX };
+    const buttonBomb: BombState = {
+      context: CTX,
+      modules: [{ moduleId: BUTTON_MODULE_ID, status: 'armed', data }],
+      strikes: 0,
+      solved: false,
+    };
+    // PRESS reveals the strip (held) without solving — flows through bombReducer.
+    const held = bombReducer(buttonBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'PRESS' },
+    });
+    expect((held.modules[0].data as ButtonState).held).toBe(true);
+    expect(held.modules[0].status).toBe('armed');
+    // RELEASE at the matching digit (4 present) solves with no strike.
+    const solved = bombReducer(held, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'RELEASE', timerDigits: [1, 4, 3] },
+    });
+    expect(solved.modules[0].status).toBe('solved');
+    expect(solved.strikes).toBe(0);
+    // RELEASE at a wrong digit rolls up into a team strike and re-arms.
+    const struck = bombReducer(held, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'RELEASE', timerDigits: [1, 2, 3] },
+    });
+    expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
+    expect(struck.strikes).toBe(1);
+  });
+
+  it('passwords (5.5) is registered and solves/strikes through the untouched bomb reducer', () => {
+    expect(MODULE_REDUCERS[PASSWORDS_MODULE_ID]).toBeDefined();
+    // Explicit columns spelling "about" at index 0 (filler 'z' spells no word),
+    // so the decision is deterministic without seed-searching.
+    const data: PasswordsState = {
+      columns: 'about'.split('').map((ch) => [ch, 'z', 'z', 'z', 'z', 'z']),
+      positions: [0, 0, 0, 0, 0],
+      startPositions: [0, 0, 0, 0, 0],
+    };
+    const passwordsBomb: BombState = {
+      context: CTX,
+      modules: [{ moduleId: PASSWORDS_MODULE_ID, status: 'armed', data }],
+      strikes: 0,
+      solved: false,
+    };
+    // SUBMIT on the valid word "about" solves with no strike.
+    const solved = bombReducer(passwordsBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'SUBMIT' },
+    });
+    expect(solved.modules[0].status).toBe('solved');
+    expect(solved.strikes).toBe(0);
+    // Cycle column 0 off the answer, SUBMIT → team strike + re-arm.
+    const cycled = bombReducer(passwordsBomb, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'CYCLE', columnIndex: 0, direction: 'up' },
+    });
+    const struck = bombReducer(cycled, {
+      type: 'MODULE_ACTION',
+      moduleIndex: 0,
+      payload: { type: 'SUBMIT' },
     });
     expect(struck.modules[0].status).toBe('armed'); // transient 'struck' rolled up
     expect(struck.strikes).toBe(1);

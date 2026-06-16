@@ -1,5 +1,5 @@
 import type { ManualPage } from '@bomb-squad/shared';
-import { getWiresManualPages } from '@bomb-squad/shared';
+import { getWiresManualPages, getButtonManualPages, getPasswordsManualPages } from '@bomb-squad/shared';
 
 /**
  * DEV FIXTURES for `/dev/manual` ONLY — not game content.
@@ -8,8 +8,10 @@ import { getWiresManualPages } from '@bomb-squad/shared';
  * starting with Wires in Story 5.3. These fixtures exist so the viewer can be
  * built/verified before any real module lands: the 11 chapter titles from the
  * mockup, a multi-page chapter (grouping), and a long chapter (scroll memory).
- * Wires is the exception: its chapter is the CANONICAL module content from
- * getWiresManualPages() (Story 5.3), not a fixture.
+ * Wires (5.3), The Button (5.4) and Passwords (5.5) are the exceptions: their
+ * chapters are the CANONICAL module content from getWiresManualPages() /
+ * getButtonManualPages() / getPasswordsManualPages(), not fixtures. Remaining
+ * stubs are replaced as each module story lands.
  */
 
 const stub = (chapterId: string, chapterTitle: string): ManualPage => ({
@@ -26,29 +28,9 @@ export const DEV_MANUAL_PAGES: ManualPage[] = [
   // Wires: CANONICAL content from the module's getManualPages() (Story 5.3) —
   // the rule tables render from the same data solveWires() evaluates.
   ...getWiresManualPages(),
-  // Two pages → exercises chapter grouping (buildChapters).
-  {
-    chapterId: 'the-button',
-    chapterTitle: 'The Button',
-    sections: [
-      {
-        heading: 'Pressing or holding',
-        content:
-          'Placeholder page 1 for The Button. Evaluate the press/hold decision rules in order; the first matching rule wins.',
-      },
-    ],
-  },
-  {
-    chapterId: 'the-button',
-    chapterTitle: 'The Button',
-    sections: [
-      {
-        heading: 'Releasing a held button',
-        content:
-          'Placeholder page 2 for The Button. A held button shows a coloured release strip; release when the timer shows the matching digit.',
-      },
-    ],
-  },
+  // The Button: CANONICAL content from the module's getManualPages() (Story 5.4)
+  // — the decision + release tables render from the same data the solver uses.
+  ...getButtonManualPages(),
   stub('keypads', 'Keypads'),
   stub('simon-says', 'Simon Says'),
   // Long chapter → exercises per-chapter scroll memory (AC2).
@@ -65,6 +47,8 @@ export const DEV_MANUAL_PAGES: ManualPage[] = [
   stub('complicated-wires', 'Complicated Wires'),
   stub('wire-sequences', 'Wire Sequences'),
   stub('whos-on-first', "Who's on First"),
-  stub('passwords', 'Passwords'),
+  // Passwords: CANONICAL content from the module's getManualPages() (Story 5.5)
+  // — the 35-word list renders from the same PASSWORD_WORDS the solver checks.
+  ...getPasswordsManualPages(),
   stub('mazes', 'Mazes'),
 ];

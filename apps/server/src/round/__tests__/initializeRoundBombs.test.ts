@@ -46,9 +46,9 @@ describe('initializeRoundBombs', () => {
   it('rejects a bad pool WITHOUT writing any team bomb (no partial round state)', async () => {
     const store = createMemoryRedisStore();
     await expect(
-      // 'the-button' (Story 5.4) has no registered generator yet; 'wires' is now
-      // registered (Story 4.7), so it would no longer fail loud.
-      initializeRoundBombs(store, 'sess-bad', 1, config({ modulePool: ['the-button'] }), TEAMS),
+      // 'simon-says' (Epic 7) has no registered generator yet; 'wires' (5.3) and
+      // 'the-button' (5.4) are now registered, so they no longer fail loud.
+      initializeRoundBombs(store, 'sess-bad', 1, config({ modulePool: ['simon-says'] }), TEAMS),
     ).rejects.toThrow(/unregistered id/);
     expect(store.data.size).toBe(0);
   });

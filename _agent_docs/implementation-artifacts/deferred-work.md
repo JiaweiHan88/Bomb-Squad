@@ -209,3 +209,7 @@ A coherent class of deferrals the dev harness **structurally cannot reach** — 
 ## Deferred from: code review of story-2-5 (2026-06-15)
 
 - **Duplicate display names collide in speaker-dot aria-labels** — the per-row speaker dot's accessible label is `"<displayName> speaking|quiet"`; display names are trimmed but not deduped on join, so two "Sam"s yield indistinguishable dot labels, degrading the colorblind/name-always-shown floor for screen-reader users. Pre-existing — name uniqueness is a join-validation concern, not introduced by 2.5. Address when join-name validation (or a per-row id suffix) is next touched (`apps/client/src/ui/Lobby.tsx:230`).
+
+## Deferred from: code review of story-5.4 (2026-06-16)
+
+- **Client-supplied `RELEASE.timerDigits` is fully trusted by the Button reducer** — the action guard only checks `typeof === 'number'`, and nothing recomputes the true displayed timer digit server-side, so a crafted `timerDigits: [4]` solves a blue HOLD button with no real timer. No present bug because the production `MODULE_INTERACT` socket handler is deferred to Epic 8 (the sandbox supplies real digits). When Epic 8 wires the authoritative handler, the server must recompute the displayed digit from its own clock rather than trusting the client payload (project-context: "client input is untrusted"). Becomes a Medium security gap if that handler trusts the payload. (`packages/shared/src/modules/the-button/types.ts`, `reducer.ts`)

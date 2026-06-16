@@ -8,4 +8,6 @@
  */
 export * from './dev-demo/index.js';
 export * from './wires/index.js';
+export * from './the-button/index.js';
+export * from './passwords/index.js';
 export * from './registry.js';
