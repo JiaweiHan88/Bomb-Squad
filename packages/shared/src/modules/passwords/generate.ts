@@ -5,7 +5,7 @@ import {
   LETTERS_PER_COLUMN,
   type PasswordsState,
 } from './types.js';
-import { countSpellableWords } from './solve.js';
+import { countSpellableWords, isValidPassword } from './solve.js';
 
 /** a-z, the alphabet fillers are drawn from (lowercase to match PASSWORD_WORDS). */
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
@@ -24,8 +24,10 @@ const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
  *     word, since the 35 words share many letters). If not unique, re-roll the
  *     fillers from the SAME seeded stream and re-check. Deterministic given the
  *     seed; expected count is barely above 1, so re-rolls are rare.
- *  4. Choose seeded random start positions (NOT the solution — the Defuser must
- *     cycle). Store them as startPositions for a faithful MODULE_RESET.
+ *  4. Choose seeded random start positions, re-rolling until the shown word is
+ *     NOT a listed word — the Defuser must cycle, and the module must never be
+ *     born already spelling the (unique) solution. Store them as startPositions
+ *     for a faithful MODULE_RESET.
  *
  * The answer is NOT stored: SUBMIT recomputes the shown word and checks list
  * membership (wires AI1). `ctx` is unused — Passwords has no bomb-context rule.
@@ -58,7 +60,16 @@ export function generatePasswords(seed: number): PasswordsState {
     throw new Error('passwords: could not generate a unique-solution instance');
   }
 
-  const startPositions = Array.from({ length: COLUMN_COUNT }, () => randInt(LETTERS_PER_COLUMN));
+  // Re-roll start positions (deterministically) until the shown word is NOT a
+  // listed word, so the module is never born already solved. Only the target is
+  // spellable from these columns, so the loop just avoids the rare case where the
+  // random starts coincide with the target letter in every column.
+  let startPositions: number[] = [];
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    startPositions = Array.from({ length: COLUMN_COUNT }, () => randInt(LETTERS_PER_COLUMN));
+    const shown = columns.map((col, i) => col[startPositions[i]]).join('');
+    if (!isValidPassword(shown)) break;
+  }
 
   return {
     columns,

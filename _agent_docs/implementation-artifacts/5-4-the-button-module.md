@@ -4,7 +4,7 @@ baseline_commit: f532aeb
 
 # Story 5.4: The Button Module
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -56,6 +56,13 @@ So that we handle a module whose solution depends on bomb context and the live t
   - [x] Headless smoke: the committed SwiftShader playwright rig from 5.3 was ad-hoc (not in this worktree, `playwright-core` absent). Ran a runtime liveness smoke instead — `vite dev` boots, `/dev/sandbox` serves 200, the-button resolves cleanly in the module graph, no vite errors; production build transformed all 748 modules incl. the-button. **The full visual smoke (10-item screenshot inspection) folds into Jay's interactive Task 8** (honest record — the screenshot rig was not re-provisioned).
 - [x] Task 8 — Human verification (AC: 5)
   - [x] **Jay verifies interactively:** in `/dev/sandbox`, generate The Button from a couple of seeds, solve a "press" one by tapping and a "hold" one by reading the strip rule from `/dev/manual` and releasing at the right displayed digit (the real information-asymmetry loop), make a deliberate wrong action and a deliberate wrong-digit release, confirm strike pulse + recovery, confirm label/strip-letter legibility at normal zoom. Record his observed results item-by-item in Completion Notes — story is not done without this.
+
+### Review Findings
+
+_Code review 2026-06-16 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All ACs verified satisfied; findings below are non-blocking._
+
+- [x] [Review][Patch] Stray `buttonReducer` re-export in the client contract-types file — **fixed:** stray lines removed; `index.ts` imports `buttonReducer` directly from shared, tsc clean. — copy-paste residue: a `types.ts` (types-only barrel) re-exports a runtime value, leaked through `index.ts`'s `export * from './types.js'`. `reducer.ts` is the designated home; the Passwords sibling has no such line. Harmless, no collision, but inconsistent. [apps/client/src/modules/the-button/types.ts:20-21]
+- [x] [Review][Defer] Client-supplied `RELEASE.timerDigits` is fully trusted by the reducer — deferred, future scope. The guard only checks `typeof === 'number'`; the server never recomputes the true displayed digit, so a crafted `[4]` solves a blue HOLD button. No present bug (production `MODULE_INTERACT` is deferred to Epic 8); becomes Medium when that handler lands. Add to the Epic 8 checklist: server must recompute the displayed digit, not trust the payload. [packages/shared/src/modules/the-button/types.ts]
 
 ## Dev Notes
 

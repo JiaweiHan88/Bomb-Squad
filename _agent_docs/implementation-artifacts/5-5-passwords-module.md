@@ -4,7 +4,7 @@ baseline_commit: cbb2517
 
 # Story 5.5: Passwords Module
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -55,6 +55,13 @@ So that we solve a verbal/language module by cycling letters to a valid word.
   - [x] Headless/runtime smoke (the SwiftShader screenshot rig was not committed — at minimum run the 5.4 liveness smoke: `vite dev` boots, `/dev/sandbox` serves 200, `passwords` resolves in the module graph; build transforms cleanly). Record honestly what was and wasn't run; full visual confirmation folds into Task 8.
 - [x] Task 8 — Human verification (AC: 4)
   - [x] **Jay verifies interactively:** in `/dev/sandbox`, generate Passwords from a couple of seeds, read the valid words in `/dev/manual`, cycle the columns to the one reachable word and SUBMIT → solve; cycle to a non-word and SUBMIT → strike + recovery; confirm letters are legible at normal zoom. Record his observed results item-by-item in Completion Notes — story is not done without this.
+
+### Review Findings
+
+_Code review 2026-06-16 (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All ACs verified satisfied; findings below are non-blocking._
+
+- [x] [Review][Decision → resolved] Generator throws on re-roll exhaustion vs. fall back to a different target word — **Jay's call (2026-06-16): accept the throw as-is.** It is an explicit, documented never-happens safety net; the 400-seed sweep shows first-roll success, and a thrown round is loud/debuggable rather than silently shipping a non-unique puzzle. No code change. [packages/shared/src/modules/passwords/generate.ts:43-59]
+- [x] [Review][Patch] Random start positions are unguarded — the module can be born already spelling the solution. `startPositions` is drawn randomly with no check that `currentWord` differs from the (unique) target, contradicting the code's own comment ("NOT the solution — the Defuser must cycle") and AC1's intent. ~1/7776 per instance; SUBMIT then solves with zero cycling. **fixed:** start positions now re-roll deterministically until `currentWord` is not a listed word; regression test added to the 400-seed sweep (shared suite 202 green). [packages/shared/src/modules/passwords/generate.ts:61]
 
 ## Dev Notes
 

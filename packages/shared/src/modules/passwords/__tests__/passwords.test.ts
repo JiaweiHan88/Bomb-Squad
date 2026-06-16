@@ -96,6 +96,12 @@ describe('generatePasswords — determinism + uniqueness (AC1)', () => {
     }
   });
 
+  it('is never born already spelling the solution — the shown word is not a listed word (AC1)', () => {
+    for (let seed = 0; seed < 400; seed++) {
+      expect(isValidPassword(currentWord(generatePasswords(seed)))).toBe(false);
+    }
+  });
+
   it('never calls Math.random (seeded RNG only)', () => {
     const original = Math.random;
     Math.random = () => {
