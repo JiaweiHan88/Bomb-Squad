@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-17  # story 8.6 (between-round flow & scoreboard preview) → done (gds-code-review: clean, 1 patch applied [missing AC-3 handler-integration tests], 3 deferred, 3 dismissed; 813 tests green, typecheck clean; Task 10 human verification deferred to a later session per Jay — see deferred-work.md)
+last_updated: 2026-06-17  # story 8.1 (round configuration & difficulty gating) → review (gds-dev-story: TIER_CATALOG/TIER_DEFAULTS + shared parseRoundConfig + ROUND_CONFIGURE handler + facilitator RoundConfigPanel; server 425/shared 211/client 310 green, typecheck clean; corrected a pre-existing stale prepLayout Easy-pool assertion; Task 5 human verification still pending per human-verification-ac-rule)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -113,7 +113,7 @@ development_status:
 
   # ---- Epic 8: Game Loop & Scoring ----
   epic-8: in-progress
-  8-1-round-configuration-and-difficulty-gating: backlog
+  8-1-round-configuration-and-difficulty-gating: review
   8-2-per-team-bomb-generation: done
   8-3-round-start-defuser-assignment-and-preparation-control: done
   8-4-server-authoritative-timer-and-strike-escalation: done

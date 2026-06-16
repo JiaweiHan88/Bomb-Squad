@@ -2176,3 +2176,144 @@ describe('PLAYER_READY handler (Story 2.5)', () => {
     }
   });
 });
+
+describe('ROUND_CONFIGURE handler (Story 8.1)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let joiner: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+      }),
+    );
+    facilitator = await server.connectClient();
+    joiner = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  const fullConfig = {
+    difficulty: 'medium' as const,
+    moduleCount: 5,
+    timerMs: 360_000,
+    strikeSpeedUpPct: 25,
+    modulePool: ['wires', 'the-button'],
+    modifiers: { asymmetricExpertRoles: true, spectatorLifelines: false },
+  };
+
+  it('happy path: facilitator config broadcasts the new SESSION_STATE and persists it', async () => {
+    const ack = await createSession(facilitator);
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_CONFIGURE', { config: fullConfig });
+    const state = await statePromise;
+
+    expect(state.config).toEqual(fullConfig);
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.config).toEqual(fullConfig);
+  });
+
+  it('AC2: a non-facilitator socket → NOT_FACILITATOR, no broadcast, store byte-identical', async () => {
+    const ack = await createSession(facilitator);
+    // joiner enters the session so it has a socket.data.sessionId pointer.
+    const facJoinDrain = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const joinerState = nextEvent<SessionState>(joiner, 'SESSION_STATE');
+    joiner.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+    await Promise.all([facJoinDrain, joinerState]);
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(joiner, 'ERROR');
+    joiner.emit('ROUND_CONFIGURE', { config: fullConfig });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('NOT_FACILITATOR');
+    expect(error.recoverable).toBe(true);
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('a connected socket that never entered a session → NOT_IN_SESSION', async () => {
+    const outsider = await server.connectClient();
+    const errorPromise = nextEvent<ErrorPayload>(outsider, 'ERROR');
+    outsider.emit('ROUND_CONFIGURE', { config: fullConfig });
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_SESSION');
+  });
+
+  it('invalid payload (out-of-range count) → INVALID_PAYLOAD, nothing persisted/broadcast', async () => {
+    const ack = await createSession(facilitator);
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_CONFIGURE', { config: { ...fullConfig, moduleCount: 99 } } as never);
+    const error = await errorPromise;
+
+    expect(error.code).toBe('INVALID_PAYLOAD');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
+  it('un-generatable pool id → INVALID_PAYLOAD (fails here, not at round start)', async () => {
+    await createSession(facilitator);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_CONFIGURE', { config: { ...fullConfig, modulePool: ['keypads'] } } as never);
+    const error = await errorPromise;
+    expect(error.code).toBe('INVALID_PAYLOAD');
+    expect(error.message).toMatch(/keypads/);
+  });
+
+  it('a partial config (missing fields) → INVALID_PAYLOAD (ROUND_CONFIGURE needs a full config)', async () => {
+    await createSession(facilitator);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_CONFIGURE', { config: { difficulty: 'hard' } } as never);
+    const error = await errorPromise;
+    expect(error.code).toBe('INVALID_PAYLOAD');
+  });
+
+  it('rejects configuring an active round → NOT_IN_CONFIGURABLE_PHASE', async () => {
+    const ack = await createSession(facilitator);
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...seeded, status: 'active' });
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_CONFIGURE', { config: fullConfig });
+    const error = await errorPromise;
+    expect(error.code).toBe('NOT_IN_CONFIGURABLE_PHASE');
+  });
+
+  it('allows configuring between rounds', async () => {
+    const ack = await createSession(facilitator);
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...seeded, status: 'between-rounds' });
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_CONFIGURE', { config: fullConfig });
+    const state = await statePromise;
+    expect(state.config).toEqual(fullConfig);
+  });
+
+  it('idempotent: re-asserting the current config does not re-broadcast', async () => {
+    const ack = await createSession(facilitator);
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    // Re-send the existing config verbatim (DEFAULT_ROUND_CONFIG, modifiers complete).
+    facilitator.emit('ROUND_CONFIGURE', { config: seeded.config });
+    // Give the server a tick; no broadcast should arrive.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+});

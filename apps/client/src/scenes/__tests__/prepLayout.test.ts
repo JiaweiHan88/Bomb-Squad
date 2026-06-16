@@ -30,9 +30,9 @@ describe('buildPrepModules (Story 4.6 Option A — config-derived orientation bo
   });
 
   it('resolves the tier default pool when no modulePool override is set', () => {
-    // Easy pool is currently ['wires']; every slot reads that type.
+    // Easy tier pool is the canonical trio (Stories 5.3–5.5); slots cycle it.
     const slots = buildPrepModules(config({ difficulty: 'easy', moduleCount: 4 }));
-    expect(slots.every((s) => s.moduleId === 'wires')).toBe(true);
+    expect(slots.map((s) => s.moduleId)).toEqual(['wires', 'the-button', 'passwords', 'wires']);
   });
 
   it('an explicit modulePool override wins over the tier default', () => {

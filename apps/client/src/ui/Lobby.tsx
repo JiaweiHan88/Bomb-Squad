@@ -6,6 +6,7 @@ import { getSocket } from '../net/socket.js';
 import Button from './Button.js';
 import ConfirmButton from './ConfirmButton.js';
 import LobbyMicCheck from './LobbyMicCheck.js';
+import RoundConfigPanel from './RoundConfigPanel.js';
 import { buildShareLink } from './shareLink.js';
 import {
   OPEN_PREPARATION,
@@ -69,6 +70,10 @@ const ASSIGN_ERROR_CODES: ReadonlySet<string> = new Set([
   'PLAYER_REMOVE_FAILED',
   // PLAYER_READY rejection (Story 2.5) — the self-toggle shares this banner.
   'PLAYER_READY_FAILED',
+  // ROUND_CONFIGURE rejections (Story 8.1) — the round-config panel emits from
+  // this surface (NOT_FACILITATOR / INVALID_PAYLOAD / NOT_IN_SESSION already listed).
+  'NOT_IN_CONFIGURABLE_PHASE',
+  'ROUND_CONFIGURE_FAILED',
 ]);
 
 /** Facilitator first, then by name — a stable order across roster broadcasts. */
@@ -194,7 +199,10 @@ export default function Lobby() {
   };
 
   return (
-    <div className="flex flex-1 items-start justify-center gap-6 p-8">
+    <div className="flex flex-1 flex-wrap items-start justify-center gap-6 p-8">
+      {/* Facilitator round-setup (Story 8.1) — self-gated; renders null for
+          non-facilitators and once a round is running. */}
+      <RoundConfigPanel />
       <section className="w-full max-w-xl rounded-lg bg-surface-raised p-8">
         <h2 className="mb-4 font-display text-lg font-semibold">{TEAM_ROSTER}</h2>
         {assignError !== null && (

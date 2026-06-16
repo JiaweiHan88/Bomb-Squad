@@ -119,3 +119,26 @@ export const VOICE_CONNECTED = 'Bomb Room voice connected.';
 // Non-blocking failure microcopy — the game keeps running (AC #4); dismissible.
 export const VOICE_UNAVAILABLE = 'Voice unavailable — game continues without it';
 export const VOICE_DISMISS = 'Dismiss';
+
+// Round configuration dashboard (Story 8.1) — facilitator-only panel in the
+// lobby. Operator-world voice; no bomb-chassis vocabulary.
+export const ROUND_CONFIG_TITLE = 'Round configuration';
+export const DIFFICULTY_LABEL = 'Difficulty tier';
+export const TIER_EASY = 'Easy';
+export const TIER_MEDIUM = 'Medium';
+export const TIER_HARD = 'Hard';
+export const TIER_EASY_HINT = '3–4 mod';
+export const TIER_MEDIUM_HINT = '5–6 mod';
+export const TIER_HARD_HINT = '7–9 mod';
+export const TIMER_LABEL = 'Timer';
+export const MODULE_COUNT_LABEL = 'Module count';
+export const MODULE_COUNT_DECREMENT = 'Decrease module count';
+export const MODULE_COUNT_INCREMENT = 'Increase module count';
+export const STRIKE_SPEEDUP_LABEL = 'Strike speed-up';
+export const MODIFIER_ASYMMETRIC = 'Asymmetric Expert roles';
+export const MODIFIER_ASYMMETRIC_SUB = 'Split manual chapters across Experts. Off for first-timers.';
+export const MODIFIER_LIFELINES = 'Spectator lifelines';
+export const MODIFIER_LIFELINES_SUB = 'Let spectators spend tokens to send hints.';
+export const MODULE_POOL_LABEL = 'Module pool';
+export const MODULE_POOL_SUB = 'Tap to include or exclude. Greyed modules arrive in a later release.';
+export const MODULE_POOL_COMING_SOON = 'coming soon';

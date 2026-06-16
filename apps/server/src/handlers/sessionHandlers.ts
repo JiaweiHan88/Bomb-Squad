@@ -4,7 +4,6 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
   RoundConfig,
-  DifficultyTier,
   PlayerRole,
   SessionState,
   TeamId,
@@ -15,6 +14,7 @@ import { startSegment } from '../timer/timerCore.js';
 import type { TimerScheduler } from '../timer/timerScheduler.js';
 import { generateJoinCode } from '../session/joinCode.js';
 import { createSessionState } from '../session/createSession.js';
+import { parseRoundConfig } from '../session/parseRoundConfig.js';
 import { addPlayerToSession } from '../session/joinSession.js';
 import { removePlayerFromSession } from '../session/removePlayerFromSession.js';
 import {
@@ -99,16 +99,15 @@ export const sessionRoom = (sessionId: string): string => `session:${sessionId}`
 export const teamRoom = (sessionId: string, teamId: TeamId): string =>
   `session:${sessionId}:team:${teamId}`;
 
-const DIFFICULTIES: readonly DifficultyTier[] = ['easy', 'medium', 'hard'];
-
 type ParseResult =
   | { ok: true; config?: Partial<RoundConfig> }
   | { ok: false; message: string };
 
 /**
- * Boundary validation for the untrusted SESSION_CREATE payload. Accepts only
- * known config keys with in-range values and rebuilds a fresh object (never
- * passes the raw client object onward). A missing payload is tolerated.
+ * Boundary validation for the untrusted SESSION_CREATE payload. Unwraps the
+ * `{ config }` envelope (a missing payload/config is tolerated) and delegates
+ * the config object to the shared {@link parseRoundConfig} in partial mode, so
+ * SESSION_CREATE and ROUND_CONFIGURE share one validator.
  */
 export function parseSessionCreatePayload(payload: unknown): ParseResult {
   if (payload === undefined || payload === null) return { ok: true };
@@ -117,69 +116,26 @@ export function parseSessionCreatePayload(payload: unknown): ParseResult {
   }
   const { config } = payload as { config?: unknown };
   if (config === undefined) return { ok: true };
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-    return { ok: false, message: 'config must be an object' };
-  }
+  return parseRoundConfig(config, { full: false });
+}
 
-  const out: Partial<RoundConfig> = {};
-  for (const [key, value] of Object.entries(config)) {
-    // JSON transport cannot carry undefined, but a hand-rolled in-process
-    // client can — treat explicitly-undefined keys as absent.
-    if (value === undefined) continue;
-    switch (key) {
-      case 'difficulty':
-        if (!DIFFICULTIES.includes(value as DifficultyTier)) {
-          return { ok: false, message: 'config.difficulty must be easy|medium|hard' };
-        }
-        out.difficulty = value as DifficultyTier;
-        break;
-      case 'moduleCount':
-        if (!Number.isInteger(value) || (value as number) < 3 || (value as number) > 11) {
-          return { ok: false, message: 'config.moduleCount must be an integer in 3–11' };
-        }
-        out.moduleCount = value as number;
-        break;
-      case 'timerMs':
-        if (!Number.isInteger(value) || (value as number) <= 0) {
-          return { ok: false, message: 'config.timerMs must be a positive integer' };
-        }
-        out.timerMs = value as number;
-        break;
-      case 'strikeSpeedUpPct':
-        if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 50) {
-          return { ok: false, message: 'config.strikeSpeedUpPct must be an integer in 0–50' };
-        }
-        out.strikeSpeedUpPct = value;
-        break;
-      case 'modulePool':
-        if (!Array.isArray(value) || !value.every((id) => typeof id === 'string')) {
-          return { ok: false, message: 'config.modulePool must be an array of strings' };
-        }
-        out.modulePool = [...(value as string[])];
-        break;
-      case 'modifiers': {
-        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-          return { ok: false, message: 'config.modifiers must be an object' };
-        }
-        const modifiers: Partial<RoundConfig['modifiers']> = {};
-        for (const [modKey, modValue] of Object.entries(value)) {
-          if (modValue === undefined) continue;
-          if (modKey !== 'asymmetricExpertRoles' && modKey !== 'spectatorLifelines') {
-            return { ok: false, message: `config.modifiers.${modKey} is not a known modifier` };
-          }
-          if (typeof modValue !== 'boolean') {
-            return { ok: false, message: `config.modifiers.${modKey} must be a boolean` };
-          }
-          modifiers[modKey] = modValue;
-        }
-        out.modifiers = modifiers as RoundConfig['modifiers'];
-        break;
-      }
-      default:
-        return { ok: false, message: `config.${key} is not a known setting` };
-    }
+/** Structural equality of two RoundConfigs — the idempotent ROUND_CONFIGURE
+ * no-op check (re-asserting the current config must not re-broadcast). */
+function roundConfigEqual(a: RoundConfig, b: RoundConfig): boolean {
+  if (
+    a.difficulty !== b.difficulty ||
+    a.moduleCount !== b.moduleCount ||
+    a.timerMs !== b.timerMs ||
+    a.strikeSpeedUpPct !== b.strikeSpeedUpPct ||
+    a.modifiers.asymmetricExpertRoles !== b.modifiers.asymmetricExpertRoles ||
+    a.modifiers.spectatorLifelines !== b.modifiers.spectatorLifelines
+  ) {
+    return false;
   }
-  return { ok: true, config: out };
+  const ap = a.modulePool;
+  const bp = b.modulePool;
+  if (ap === undefined || bp === undefined) return ap === bp;
+  return ap.length === bp.length && ap.every((id, i) => id === bp[i]);
 }
 
 /** Session capacity cap (GDD: 2–16 players; the facilitator counts as a player). */
@@ -902,6 +858,79 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'PREPARATION_OPEN_FAILED',
           message: 'Could not open preparation. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Facilitator (re)configures the upcoming round (Story 8.1, FR8). Allowed
+    // only in the pre-round windows (lobby / between-rounds) — once a round is
+    // active the layout is fixed; round 2+ reuses the persisted config. Same
+    // load → authority → guard → persist → broadcast pipeline as TEAM_ASSIGN.
+    // No ack (frozen contract): success is the SESSION_STATE broadcast.
+    socket.on('ROUND_CONFIGURE', async (payload) => {
+      // The payload is server-untrusted; widen to validate the inner config.
+      const raw = payload as unknown as { config?: unknown } | null | undefined;
+      const parsed = parseRoundConfig(raw?.config, { full: true });
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+          return;
+        }
+
+        // Authority gate FIRST (a non-facilitator probe learns nothing).
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator configures the round.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Phase guard: config only lands before a round starts.
+        if (state.status !== 'lobby' && state.status !== 'between-rounds') {
+          socket.emit('ERROR', {
+            code: 'NOT_IN_CONFIGURABLE_PHASE',
+            message: 'The round can only be configured before it starts.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Idempotent no-op: re-asserting the current config changes nothing.
+        if (roundConfigEqual(state.config, parsed.config)) return;
+
+        const next: SessionState = { ...state, config: parsed.config };
+        // Persist then emit. Single-key write — nothing partial to roll back.
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info(
+          {
+            sessionId,
+            difficulty: parsed.config.difficulty,
+            moduleCount: parsed.config.moduleCount,
+            by: socket.id,
+          },
+          'round configured',
+        );
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'ROUND_CONFIGURE failed');
+        socket.emit('ERROR', {
+          code: 'ROUND_CONFIGURE_FAILED',
+          message: 'Could not save the configuration. Try again.',
           recoverable: true,
         });
       }

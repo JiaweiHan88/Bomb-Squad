@@ -95,3 +95,37 @@ export const TIER_POOLS: Record<DifficultyTier, readonly string[]> = {
   medium: ['wires', 'the-button', 'passwords'],
   hard: ['wires', 'the-button', 'passwords'],
 };
+
+/**
+ * Canonical KTANE difficulty tiering (Decision 006) used as DISPLAY / GATING
+ * metadata by the Facilitator dashboard (Story 8.1) — NOT the runtime generation
+ * pool. It lists every module a tier *will* contain, including ones whose
+ * generators land in later epics (keypads/simon-says/…). Each tier is a superset
+ * of the easier one.
+ *
+ * THE TWO-POOL SPLIT (read before editing): `TIER_POOLS` above is the RUNTIME
+ * pool — generation draws from it and `generateLayout` throws for any id without
+ * a registered generator. `TIER_CATALOG` is the FULL design tiering for the UI.
+ * The dashboard's *selectable* pool is `TIER_CATALOG[tier] ∩ keys(MODULE_GENERATORS)`;
+ * un-implemented modules render as disabled chips. Do NOT collapse these two —
+ * expanding `TIER_POOLS` to match this catalog before the generators exist makes
+ * a default round throw at ROUND_START.
+ */
+export const TIER_CATALOG: Record<DifficultyTier, readonly ModuleId[]> = {
+  easy: ['wires', 'the-button', 'passwords'],
+  medium: ['wires', 'the-button', 'passwords', 'keypads', 'whos-on-first', 'wire-sequences', 'mazes'],
+  hard: [...MODULE_IDS],
+};
+
+/**
+ * Recommended per-tier defaults the dashboard applies when a tier is selected
+ * (GDD Difficulty System table). Count is the low end of each tier's documented
+ * range (easy 3–4 → 3, medium 5–6 → 5, hard 7–9 → 7); timers are the GDD
+ * placeholder values pending playtesting. The Facilitator may override both.
+ * Easy stays consistent with `DEFAULT_ROUND_CONFIG` (server createSession).
+ */
+export const TIER_DEFAULTS: Record<DifficultyTier, { moduleCount: number; timerMs: number }> = {
+  easy: { moduleCount: 3, timerMs: 300_000 },
+  medium: { moduleCount: 5, timerMs: 360_000 },
+  hard: { moduleCount: 7, timerMs: 420_000 },
+};
