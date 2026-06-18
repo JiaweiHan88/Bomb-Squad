@@ -58,6 +58,8 @@ describe('parseRoundConfig — range and shape validation', () => {
     ['strikeSpeedUpPct -1', { ...fullConfig, strikeSpeedUpPct: -1 }],
     ['strikeSpeedUpPct 51', { ...fullConfig, strikeSpeedUpPct: 51 }],
     ['timerMs 0', { ...fullConfig, timerMs: 0 }],
+    ['timerMs above max (600_001)', { ...fullConfig, timerMs: 600_001 }],
+    ['timerMs over 32-bit setTimeout ceiling', { ...fullConfig, timerMs: 2_200_000_000 }],
     ['unknown difficulty', { ...fullConfig, difficulty: 'extreme' }],
     ['unknown modifier key', { ...fullConfig, modifiers: { asymmetricExpertRoles: true, spectatorLifelines: false, x: true } }],
     ['non-boolean modifier', { ...fullConfig, modifiers: { asymmetricExpertRoles: 'yes', spectatorLifelines: false } }],

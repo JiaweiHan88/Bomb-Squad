@@ -64,6 +64,13 @@ so that I can tune the challenge to my team.
   - [x] `pnpm -w typecheck` clean (no `@ts-ignore`); run the full server + client test suites green; no regression in `sessionHandlers.test.ts` or `Lobby.test.tsx`.
   - [ ] **Human verification (Jay) — REQUIRED, not done until observed** [[human-verification-ac-rule]]: on the full Docker stack at `https://localhost` (server on plain `tsx`, NOT `tsx watch` per [[timer-verification-tsx-watch-gotcha]]), as Facilitator: pick each tier and confirm count/timer/pool defaults update; override count/timer/strike-speedup/modifiers/pool and confirm they stick across a refresh (broadcast-reconciled); confirm a joined non-facilitator never sees the panel; confirm the panel reads calmly (no blinking, no nested modal). Record the observed result here.
 
+### Review Findings
+
+_Code review 2026-06-18 (gds-code-review, 3-layer adversarial). 0 decision_needed, 2 patch, 0 defer, 8 dismissed as noise._
+
+- [x] [Review][Patch] `timerMs` has no server-side upper bound — setTimeout 32-bit overflow can detonate a round at t≈0 [apps/server/src/session/parseRoundConfig.ts:53-58] — FIXED 2026-06-18: added `MAX_TIMER_MS = 600_000` upper bound (matches client slider, well under 2³¹); regression tests added for 600_001 and 2_200_000_000.
+- [x] [Review][Patch] ROUND_CONFIGURE success log records transient `by: socket.id` instead of durable `socket.data.playerId` [apps/server/src/handlers/sessionHandlers.ts:925] — FIXED 2026-06-18: now logs `socket.data.playerId`.
+
 ## Dev Notes
 
 ### The two-pool split — the single most important constraint (AC-1 disaster prevention)

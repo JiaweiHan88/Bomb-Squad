@@ -922,7 +922,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
             sessionId,
             difficulty: parsed.config.difficulty,
             moduleCount: parsed.config.moduleCount,
-            by: socket.id,
+            by: socket.data.playerId,
           },
           'round configured',
         );

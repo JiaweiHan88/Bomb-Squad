@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-17  # story 8.1 (round configuration & difficulty gating) → review (gds-dev-story: TIER_CATALOG/TIER_DEFAULTS + shared parseRoundConfig + ROUND_CONFIGURE handler + facilitator RoundConfigPanel; server 425/shared 211/client 310 green, typecheck clean; corrected a pre-existing stale prepLayout Easy-pool assertion; Task 5 human verification still pending per human-verification-ac-rule)
+last_updated: 2026-06-18  # story 8.1 code review (gds-code-review): 2 patches applied — timerMs server-side upper bound (setTimeout 32-bit overflow guard) + ROUND_CONFIGURE log uses durable playerId; 8 findings dismissed as noise; all 3 ACs confirmed satisfied. Stays in `review` pending Task 5 human verification (human-verification-ac-rule)
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system

@@ -3,6 +3,14 @@ import { MODULE_GENERATORS } from '@bomb-squad/shared';
 
 const DIFFICULTIES: readonly DifficultyTier[] = ['easy', 'medium', 'hard'];
 
+/**
+ * Upper bound for `timerMs`. The client slider tops out at 600_000 (10:00);
+ * matching it keeps server and dashboard in lockstep. Critically, any bound far
+ * below 2_147_483_647 prevents a >2³¹ delay from being silently clamped to ~1ms
+ * by setTimeout in the timer scheduler (which would detonate the round at t≈0).
+ */
+const MAX_TIMER_MS = 600_000;
+
 /** Keys a RoundConfig may carry; `modulePool` is optional (undefined = tier default). */
 const REQUIRED_KEYS = ['difficulty', 'moduleCount', 'timerMs', 'strikeSpeedUpPct', 'modifiers'] as const;
 
@@ -51,8 +59,8 @@ export function parseRoundConfig(
         out.moduleCount = value as number;
         break;
       case 'timerMs':
-        if (!Number.isInteger(value) || (value as number) <= 0) {
-          return { ok: false, message: 'config.timerMs must be a positive integer' };
+        if (!Number.isInteger(value) || (value as number) <= 0 || (value as number) > MAX_TIMER_MS) {
+          return { ok: false, message: `config.timerMs must be a positive integer up to ${MAX_TIMER_MS}` };
         }
         out.timerMs = value as number;
         break;
