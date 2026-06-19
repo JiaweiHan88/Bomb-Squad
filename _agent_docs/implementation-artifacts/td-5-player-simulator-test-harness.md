@@ -10,7 +10,7 @@ context:
 
 # Story TD-5: Player-Simulator Test Harness (Headless Bot Swarm)
 
-Status: review
+Status: done
 
 <!-- Tech-debt / tooling story (not from an epic). Surfaced by the Story 8.6
      human-verification deferral: a solo dev cannot form 2 teams with rotating
@@ -195,3 +195,4 @@ claude-opus-4-8 (gds-dev-story)
 |------------|------------------------------------------------------------------------|
 | 2026-06-18 | Story TD-5 created (ready-for-dev): headless bot-swarm simulator CLI (`tools/sim-clients`) so a solo dev can form 2 teams with rotating defusers and drive multi-round sessions to resolution while staying Facilitator in one browser — unblocking the 8.6 / 8.1 human-verification gates. Grounded against the typed socket contract, shared pure solve fns, defuser-rotation authority, and the `testSocketServer` pattern. |
 | 2026-06-18 | Implemented all 6 tasks (AC #1–#6). Shipped the tool (BotClient + solvers + timerDigits + swarm with autonomous & hybrid modes + CLI + README) and a Docker-free in-process e2e (`pnpm verify`, 6/6 green: defuse, multi-round rotation, button hold-loop, strike). Surfaced + handled the facilitator-only `TEAM_ASSIGN` authority (two modes) and the load-modify-store race (sequential assignment). Workspace typecheck clean. Status → review. (claude-opus-4-8) |
+| 2026-06-19 | **Closed → done inside Sprint 4 (Jay's call at the Sprint 4 retro).** Acceptance evidence: workspace typecheck clean, `pnpm verify` 6/6 green, and a live smoke against the running Docker stack (bots connected to the real server, formed 2 teams, both defused). The tool then unblocked the 8.1 + 8.6 human-verification gates live. No separate 3-layer review run — Jay accepted the e2e + live evidence as the gate for this dev-only tooling. |

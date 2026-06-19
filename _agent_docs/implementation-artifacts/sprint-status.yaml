@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-19  # Human verification (Jay) PASSED live on the Docker stack using the TD-5 bot swarm: story 8.1 → done (round config/difficulty gating), story 8.6 Task 10 deferred human-verify now resolved (between-round flow/scoreboard/rotation/reconnect). Sprint 4 human-verify gates all cleared.
+last_updated: 2026-06-19  # Sprint 4 retrospective (sprint-4-retro-2026-06-19.md): all 5 stories + TD-4 + TD-5 done (TD-5 closed inside Sprint 4 by Jay's call). 3 action items — escalate the load-modify-store/concurrency theme (3rd recurrence), every story ships explicit human-validation instructions, server recomputes RELEASE timer digit. Sprint 4 genuinely done; Sprint 5 (relay/resilience/full voice) may start.
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -147,4 +147,4 @@ development_status:
   td-2-safe-dependency-bumps-and-node-engine: done
   td-3-react-19-and-r3f-upgrade: done
   td-4-tooling-vite-typescript-jest: done
-  td-5-player-simulator-test-harness: review
+  td-5-player-simulator-test-harness: done
