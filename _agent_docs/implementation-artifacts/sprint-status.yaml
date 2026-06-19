@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-18  # story 8.1 code review (gds-code-review): 2 patches applied — timerMs server-side upper bound (setTimeout 32-bit overflow guard) + ROUND_CONFIGURE log uses durable playerId; 8 findings dismissed as noise; all 3 ACs confirmed satisfied. Stays in `review` pending Task 5 human verification (human-verification-ac-rule)
+last_updated: 2026-06-19  # Human verification (Jay) PASSED live on the Docker stack using the TD-5 bot swarm: story 8.1 → done (round config/difficulty gating), story 8.6 Task 10 deferred human-verify now resolved (between-round flow/scoreboard/rotation/reconnect). Sprint 4 human-verify gates all cleared.
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -113,7 +113,7 @@ development_status:
 
   # ---- Epic 8: Game Loop & Scoring ----
   epic-8: in-progress
-  8-1-round-configuration-and-difficulty-gating: review
+  8-1-round-configuration-and-difficulty-gating: done
   8-2-per-team-bomb-generation: done
   8-3-round-start-defuser-assignment-and-preparation-control: done
   8-4-server-authoritative-timer-and-strike-escalation: done
@@ -147,3 +147,4 @@ development_status:
   td-2-safe-dependency-bumps-and-node-engine: done
   td-3-react-19-and-r3f-upgrade: done
   td-4-tooling-vite-typescript-jest: done
+  td-5-player-simulator-test-harness: review

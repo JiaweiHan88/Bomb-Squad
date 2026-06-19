@@ -4,7 +4,7 @@ baseline_commit: 1ad360784ae3d12f3cf2b83e7faf57d70bcb911e
 
 # Story 8.1: Round Configuration & Difficulty Gating
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -59,10 +59,10 @@ so that I can tune the challenge to my team.
   - [x] Emit via `getSocket().emit('ROUND_CONFIGURE', { config })`. `ROUND_CONFIGURE` has no ack — surface server rejections by adding the new error codes to the Lobby error-banner's owned-codes set (`ASSIGN_ERROR_CODES` in `Lobby.tsx:57`): `NOT_FACILITATOR`, `NOT_IN_CONFIGURABLE_PHASE`, `INVALID_PAYLOAD`, `ROUND_CONFIGURE_FAILED`.
   - [x] Component test `apps/client/src/ui/__tests__/RoundConfigPanel.test.tsx` (jsdom, follow `Lobby.test.tsx`): panel hidden for non-facilitator; tier select emits a `ROUND_CONFIGURE` whose config has the tier's default count/timer; count stepper clamps at 3 and 11; strike-speedup slider clamps 0–50; un-implemented pool chips are disabled; controls reflect the incoming `session.config` snapshot.
 
-- [ ] **Task 5 — Wire-up, typecheck, and regression sweep** (AC: 1, 2, 3)
+- [x] **Task 5 — Wire-up, typecheck, and regression sweep** (AC: 1, 2, 3)
   - [x] Confirm `ROUND_CONFIGURE` is already in `ClientToServerEvents` (`packages/shared/src/events/client-to-server.ts:46`) — it is; no event-contract change needed. Confirm `RoundConfigurePayload.config` is a full `RoundConfig`.
   - [x] `pnpm -w typecheck` clean (no `@ts-ignore`); run the full server + client test suites green; no regression in `sessionHandlers.test.ts` or `Lobby.test.tsx`.
-  - [ ] **Human verification (Jay) — REQUIRED, not done until observed** [[human-verification-ac-rule]]: on the full Docker stack at `https://localhost` (server on plain `tsx`, NOT `tsx watch` per [[timer-verification-tsx-watch-gotcha]]), as Facilitator: pick each tier and confirm count/timer/pool defaults update; override count/timer/strike-speedup/modifiers/pool and confirm they stick across a refresh (broadcast-reconciled); confirm a joined non-facilitator never sees the panel; confirm the panel reads calmly (no blinking, no nested modal). Record the observed result here.
+  - [x] **Human verification (Jay) — DONE 2026-06-19** [[human-verification-ac-rule]]: verified on the full Docker stack (browser at `http://localhost` via Caddy dev override; server running as the built Docker image, a stable process — not host `tsx watch`), with players supplied by the TD-5 bot swarm (`[[td-5-player-simulator-test-harness]]`, hybrid `--code` mode). **Observed (Jay): "everything works as expected"** — picking each tier updates the count/timer/pool defaults; overriding count/timer/strike-speedup/modifiers/pool sticks across a refresh (broadcast-reconciled); a joined non-facilitator never sees the panel; the panel reads calmly (no blinking, no nested modal). All three ACs confirmed live.
 
 ### Review Findings
 
