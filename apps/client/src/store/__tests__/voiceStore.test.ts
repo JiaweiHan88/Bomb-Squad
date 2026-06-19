@@ -8,7 +8,7 @@ import { useVoiceStore } from '../voiceStore.js';
  * transition clears it so no stale dots survive a drop.
  */
 beforeEach(() => {
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
 });
 
 describe('voiceStore.activeSpeakers', () => {
@@ -33,5 +33,41 @@ describe('voiceStore.activeSpeakers', () => {
     useVoiceStore.getState().setActiveSpeakers(['p1']);
     useVoiceStore.getState().setConnecting();
     expect(useVoiceStore.getState().activeSpeakers).toEqual([]);
+  });
+});
+
+/**
+ * voiceStore self-mute flag (Story 3.4). The store is the SOLE home for mute
+ * state. Every non-connected transition clears it so a stale mute can't survive a
+ * reconnect — a fresh connect always starts un-muted.
+ */
+describe('voiceStore.muted', () => {
+  it('defaults to false', () => {
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('setMuted flips the flag both ways', () => {
+    useVoiceStore.getState().setMuted(true);
+    expect(useVoiceStore.getState().muted).toBe(true);
+    useVoiceStore.getState().setMuted(false);
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('setConnecting clears muted (no stale mute on reconnect)', () => {
+    useVoiceStore.getState().setMuted(true);
+    useVoiceStore.getState().setConnecting();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('setUnavailable clears muted', () => {
+    useVoiceStore.getState().setMuted(true);
+    useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('reset clears muted', () => {
+    useVoiceStore.getState().setMuted(true);
+    useVoiceStore.getState().reset();
+    expect(useVoiceStore.getState().muted).toBe(false);
   });
 });

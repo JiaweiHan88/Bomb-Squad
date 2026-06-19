@@ -8,6 +8,8 @@ export { default as Preparation } from './Preparation.js';
 export { default as ActiveRound } from './ActiveRound.js';
 export { default as Scoreboard } from './Scoreboard.js';
 export { default as VoiceController } from './VoiceController.js';
+export { default as SpeakerIndicator } from './SpeakerIndicator.js';
+export { default as MuteControl } from './MuteControl.js';
 export { default as LoadingScreen } from './LoadingScreen.js';
 export { default as PlatformGate } from './PlatformGate.js';
 export { useViewportGate } from './useViewportGate.js';

@@ -112,6 +112,11 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   let room: VoiceRoom | null = null;
   // Guards re-entrant connect/disconnect (double-click, unmount-during-connect).
   let phase: 'idle' | 'connecting' | 'connected' = 'idle';
+  // Whether the CURRENT connect published the mic (Story 3.3 `publish` flag). A
+  // listen-only spectator (`publish: false`) has no local mic track, so mute is a
+  // safe no-op for them (Story 3.4) — `setMuted` only touches the mic when this is
+  // `true`. Reset on every teardown so a stale value can't leak across reconnects.
+  let published = false;
   // Bumped by every disconnect/teardown (and superseded by any newer connect) so
   // an in-flight connect can detect, after each await, that it was torn down and
   // abort+dispose its room instead of leaking a live SFU connection + hot mic.
@@ -315,6 +320,10 @@ export function createVoiceController(deps: VoiceControllerDeps) {
 
     room = r;
     phase = 'connected';
+    // Remember whether THIS connect published, so a later setMuted() no-ops for a
+    // listen-only spectator (no mic to toggle) — belt-and-suspenders with the
+    // MuteControl's own render gate (Story 3.4).
+    published = publish;
     useVoiceStore.getState().setConnected({ room: roomName, identity });
 
     // Best-effort autoplay recovery (Task 2 autoplay note): we are inside the
@@ -337,6 +346,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     const r = room;
     room = null;
     phase = 'idle';
+    published = false;
     if (reason === 'unavailable') {
       useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
     } else {
@@ -360,7 +370,31 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     await r.disconnect().catch(() => undefined);
   }
 
-  return { connect, disconnect };
+  /**
+   * Toggle the local mic publish (Story 3.4 self-mute). A thin wrapper over
+   * `setMicrophoneEnabled`: mute ⇒ `setMicrophoneEnabled(false)`, unmute ⇒
+   * `setMicrophoneEnabled(true)`. Other clients observe the change naturally — a
+   * muted self drops out of their `ActiveSpeakersChanged`, no extra signaling.
+   *
+   * Guarded two ways: it only acts when `phase === 'connected'` AND this connect
+   * published a mic (a listen-only spectator has no local track — muting it is
+   * meaningless, so this is a no-op for them). The SDK call is try/catch-wrapped
+   * like teardown: a failed toggle must NOT throw into the UI, and on failure we
+   * leave the store flag untouched (no optimistic flip). Writes ONLY voiceStore.
+   */
+  async function setMuted(muted: boolean): Promise<void> {
+    if (phase !== 'connected' || !published || !room) return;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!muted);
+    } catch {
+      // A failed mic toggle must never throw into the UI — leave the flag as-is
+      // so the control reflects the real (unchanged) publish state.
+      return;
+    }
+    useVoiceStore.getState().setMuted(muted);
+  }
+
+  return { connect, disconnect, setMuted };
 }
 
 // App-wide singleton: the real LiveKit Room + the real VOICE_TOKEN request.
@@ -378,3 +412,9 @@ export const connectVoice = (opts: { publish?: boolean } = {}): Promise<void> =>
 
 /** Disconnect + full teardown. Safe to call on unmount or repeatedly. */
 export const disconnectVoice = (): Promise<void> => controller.disconnect();
+
+/** Toggle the local self-mute (Story 3.4). `setVoiceMuted(true)` mutes the mic,
+ * `false` unmutes. A no-op unless connected as a publisher — safe to call from a
+ * non-publishing / not-connected client (it simply does nothing). The caller (the
+ * publisher-only MuteControl) owns the decision; no role branching here. */
+export const setVoiceMuted = (muted: boolean): Promise<void> => controller.setMuted(muted);

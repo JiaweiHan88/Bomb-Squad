@@ -82,13 +82,13 @@ beforeEach(() => {
     bomb: { strikes: 0 } as never,
     connection: 'connected',
   });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useGameStore.setState({ session: null, bomb: null, timer: null, connection: 'disconnected' });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
 });
 
 // ── The load-bearing independence test (AC #3) ───────────────────────────────
@@ -504,6 +504,75 @@ describe('listen-only (publish:false) spectator connect', () => {
     await controller.disconnect();
     await controller.connect(false);
     expect(requestToken).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Self-mute toggle (Story 3.4, AC #3/#6) ───────────────────────────────────
+// `setMuted` is a thin wrapper over `setMicrophoneEnabled`: mute ⇒ (false),
+// unmute ⇒ (true). It only acts for a CONNECTED publisher; it's a no-op for a
+// listen-only spectator (no mic) or when not connected. A failed toggle never
+// throws into the UI and never optimistically flips the store flag. And — like
+// all voice — it never mutates gameStore.
+
+describe('setMuted (self-mute publish toggle)', () => {
+  it('a publisher: setMuted(true) mutes the mic + flag, setMuted(false) restores both', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect(); // publish: true → mic acquired with (true)
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(useVoiceStore.getState().muted).toBe(true);
+
+    await controller.setMuted(false);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('a listen-only spectator: setMuted(true) is a no-op (no mic call, flag stays false)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okLoungeToken() });
+    await controller.connect(false); // listen-only → mic never acquired
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('setMuted before connect is a no-op (not connected → nothing to toggle)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('a thrown setMicrophoneEnabled does NOT flip the flag and does NOT escape', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    // The mute toggle (not the connect publish) rejects.
+    setMicrophoneEnabled.mockRejectedValueOnce(new Error('mic toggle failed'));
+
+    await expect(controller.setMuted(true)).resolves.toBeUndefined(); // swallowed
+    expect(useVoiceStore.getState().muted).toBe(false); // flag untouched on failure
+  });
+
+  it('mute toggling never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+
+    await controller.setMuted(true);
+    await controller.setMuted(false);
+
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
   });
 });
 

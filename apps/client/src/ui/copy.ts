@@ -128,6 +128,13 @@ export const VOICE_LOUNGE_CTA = 'Listen to the Bomb Room';
 export const VOICE_LOUNGE_CONNECTING = 'Connecting to the Bomb Room…';
 export const VOICE_LOUNGE_CONNECTED = 'Listening to the Bomb Room.';
 
+// In-round speaker indicator + self-mute (Story 3.4). The pill always shows the
+// name (never icon-only); SPEAKING is reused for its accessible label. The mute
+// control carries an aria-label that flips with state — operator-world, dry.
+export const MUTE_SELF = 'Mute';
+export const UNMUTE_SELF = 'Unmute';
+export const MUTED_STATUS = 'Muted';
+
 // Round configuration dashboard (Story 8.1) — facilitator-only panel in the
 // lobby. Operator-world voice; no bomb-chassis vocabulary.
 export const ROUND_CONFIG_TITLE = 'Round configuration';

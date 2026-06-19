@@ -1,5 +1,5 @@
 # generated: 2026-06-10
-# last_updated: 2026-06-20
+# last_updated: 2026-06-20 (3-4 in-progress)
 # project: Bomb Squad
 # project_key: NOKEY
 # tracking_system: file-system
@@ -70,7 +70,7 @@ development_status:
   3-1-role-scoped-livekit-token-minting: done
   3-2-bomb-room-bidirectional-channel: done
   3-3-spectator-lounge-listen-only-channel: in-progress
-  3-4-speaker-indicator-and-mute-controls: backlog
+  3-4-speaker-indicator-and-mute-controls: in-progress
   3-5-token-re-mint-on-role-change: backlog
   3-6-graceful-voice-degradation: backlog
   epic-3-retrospective: optional

@@ -7,6 +7,8 @@ import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
 import ResolutionBanner from './ResolutionBanner.js';
 import VoiceController from './VoiceController.js';
+import SpeakerIndicator from './SpeakerIndicator.js';
+import MuteControl from './MuteControl.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
 
 /**
@@ -61,8 +63,13 @@ export default function ActiveRound() {
     <div className="relative flex flex-1 flex-col">
       {surface}
       <ResolutionBanner />
-      {/* Bomb Room voice join (Story 3.2) — non-blocking, unmount-safe. Self-hides
-          for non-Bomb-Room roles. Speaker pill + mute are Story 3.4. */}
+      {/* Voice HUD corners (non-blocking, self-gating). Story 3.2 connect CTA is
+          bottom-right; Story 3.4 adds the speaker pill (top-left, all in-round
+          roles incl. a spectator watching the Bomb Room) and the self-mute toggle
+          (bottom-left, publisher-only — self-gates internally). The timer LCD
+          (top-center/right) is reserved for Stories 4.4/4.5 — pill stays clear. */}
+      <SpeakerIndicator />
+      <MuteControl />
       <VoiceController />
     </div>
   );
