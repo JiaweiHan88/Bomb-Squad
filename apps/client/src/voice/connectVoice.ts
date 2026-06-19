@@ -182,7 +182,21 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     await r.disconnect().catch(() => undefined);
   }
 
-  async function connect(): Promise<void> {
+  /**
+   * Connect the local participant to their server-assigned voice room.
+   *
+   * `publish` (default `true`) decides whether we acquire + publish the mic:
+   * - Bomb Room (Defuser/Expert) → `true`: publish the mic so they can talk.
+   * - Spectator Lounge (Story 3.3) → `false`: LISTEN-ONLY. We skip
+   *   `setMicrophoneEnabled(true)` entirely, so `getUserMedia` is never invoked
+   *   and no mic-permission prompt appears (AC #2). The participant still
+   *   subscribes to + plays every remote audio track — they HEAR the room.
+   *
+   * The controller stays role-agnostic: the caller picks `publish`, and we trust
+   * whatever `room` the token returns (the server routes a spectator to the
+   * lounge with a `canPublish: false` grant — listen-only is also enforced there).
+   */
+  async function connect(publish = true): Promise<void> {
     // Double-connect guard (AC #5): ignore while already connecting/connected.
     if (phase !== 'idle') return;
     phase = 'connecting';
@@ -271,9 +285,11 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     try {
       // url + token from the ack; never logged.
       await r.connect(url, token);
-      // Publishes the mic — needs the user gesture + permission (Task 4 calls
-      // connect() from a click handler).
-      await r.localParticipant.setMicrophoneEnabled(true);
+      // Publish the mic ONLY for a Bomb Room participant — needs the user gesture
+      // + permission (Task 4 calls connect() from a click handler). A listen-only
+      // spectator (publish === false) skips this entirely: getUserMedia is never
+      // invoked, so no mic prompt appears (Story 3.3 AC #2).
+      if (publish) await r.localParticipant.setMicrophoneEnabled(true);
     } catch {
       // Connect/publish rejected → clean up the half-open room, go unavailable.
       // (Floating disconnect is .catch()-guarded so a rejected teardown of an
@@ -354,8 +370,11 @@ const controller = createVoiceController({
 });
 
 /** Connect the local participant to their server-assigned voice room. MUST be
- * called from a user-gesture handler (autoplay + getUserMedia need a gesture). */
-export const connectVoice = (): Promise<void> => controller.connect();
+ * called from a user-gesture handler (autoplay + getUserMedia need a gesture).
+ * `publish` defaults to `true` (Bomb Room talk); pass `{ publish: false }` for a
+ * listen-only spectator so no mic is acquired and no mic prompt shows (Story 3.3). */
+export const connectVoice = (opts: { publish?: boolean } = {}): Promise<void> =>
+  controller.connect(opts.publish ?? true);
 
 /** Disconnect + full teardown. Safe to call on unmount or repeatedly. */
 export const disconnectVoice = (): Promise<void> => controller.disconnect();

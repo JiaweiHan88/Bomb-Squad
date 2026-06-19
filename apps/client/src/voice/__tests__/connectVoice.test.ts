@@ -402,6 +402,111 @@ describe('active-speaker tracking', () => {
   });
 });
 
+// ── Listen-only / spectator connect (Story 3.3, AC #1/#2/#4/#5) ──────────────
+// A spectator connects with `publish: false`: we must NEVER call
+// setMicrophoneEnabled (no getUserMedia → no mic prompt — AC #2) while still
+// subscribing to + playing every remote audio track (the spectator HEARS the
+// lounge — AC #1). The independence + teardown invariants hold for this path too.
+
+const LOUNGE_GRANT = {
+  url: 'ws://livekit:7880',
+  token: 'LOUNGE.JWT.VALUE',
+  room: 'spectator-lounge:sess-1',
+  identity: 'spec-1',
+};
+
+function okLoungeToken(): TokenResult {
+  return { ok: true, grant: LOUNGE_GRANT };
+}
+
+describe('listen-only (publish:false) spectator connect', () => {
+  it('NEVER acquires the mic yet still subscribes/plays remote audio and reaches connected', async () => {
+    const { room, connect, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+
+    const pending = controller.connect(false); // listen-only
+    expect(useVoiceStore.getState().status).toBe('connecting');
+    await pending;
+
+    // The load-bearing AC #2 assertion: no mic was ever requested.
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    // Still connected to the room the token named (lounge) + identity recorded.
+    expect(connect).toHaveBeenCalledWith(LOUNGE_GRANT.url, LOUNGE_GRANT.token);
+    const s = useVoiceStore.getState();
+    expect(s.status).toBe('connected');
+    expect(s.room).toBe(LOUNGE_GRANT.room);
+    expect(s.identity).toBe(LOUNGE_GRANT.identity);
+
+    // Remote audio is still subscribed + attached — the spectator HEARS it (AC #1).
+    const { track } = makeFakeAudioTrack();
+    room.emit(RoomEvent.TrackSubscribed, track);
+    expect(track.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it('the listen-only path never mutates gameStore — success (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+    await controller.connect(false);
+    expect(useVoiceStore.getState().status).toBe('connected');
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+
+  it('the listen-only path never mutates gameStore — failure → unavailable, game keeps running', async () => {
+    const before = useGameStore.getState();
+    const controller = createVoiceController({
+      createRoom: () => makeFakeRoom().room,
+      requestToken: async (): Promise<TokenResult> => ({ ok: false }),
+    });
+    await controller.connect(false);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+
+  it('subscribe-only connect→disconnect detaches audio, drops listeners, disconnects (no leak)', async () => {
+    const { room, disconnect, listeners } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+    await controller.connect(false);
+
+    const { track, el } = makeFakeAudioTrack();
+    room.emit(RoomEvent.TrackSubscribed, track);
+
+    await controller.disconnect();
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(el.remove).toHaveBeenCalled(); // audio element removed from DOM
+    for (const set of listeners.values()) expect(set.size).toBe(0); // listeners unbound
+    expect(useVoiceStore.getState().status).toBe('idle');
+  });
+
+  it('reconnect after a listen-only disconnect requests a FRESH token', async () => {
+    const requestToken = vi.fn(async () => okLoungeToken());
+    const controller = createVoiceController({
+      createRoom: () => makeFakeRoom().room,
+      requestToken,
+    });
+    await controller.connect(false);
+    await controller.disconnect();
+    await controller.connect(false);
+    expect(requestToken).toHaveBeenCalledTimes(2);
+  });
+});
+
 // ── Fresh token per connect (AC #6) ──────────────────────────────────────────
 
 describe('a fresh token is requested per connect (never cached/reused)', () => {

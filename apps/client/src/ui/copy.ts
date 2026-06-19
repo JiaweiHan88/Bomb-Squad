@@ -120,6 +120,14 @@ export const VOICE_CONNECTED = 'Bomb Room voice connected.';
 export const VOICE_UNAVAILABLE = 'Voice unavailable — game continues without it';
 export const VOICE_DISMISS = 'Dismiss';
 
+// Spectator Lounge listen-only voice (Story 3.3) — a spectator HEARS the Bomb
+// Room but cannot speak into it (EXPERIENCE.md Flow 4), so the copy says
+// "listen", never "connect to"/"in" the Bomb Room. Failure reuses the shared
+// VOICE_UNAVAILABLE + VOICE_DISMISS. No speaker pill, no mute toggle (Story 3.4).
+export const VOICE_LOUNGE_CTA = 'Listen to the Bomb Room';
+export const VOICE_LOUNGE_CONNECTING = 'Connecting to the Bomb Room…';
+export const VOICE_LOUNGE_CONNECTED = 'Listening to the Bomb Room.';
+
 // Round configuration dashboard (Story 8.1) — facilitator-only panel in the
 // lobby. Operator-world voice; no bomb-chassis vocabulary.
 export const ROUND_CONFIG_TITLE = 'Round configuration';
