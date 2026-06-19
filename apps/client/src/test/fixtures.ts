@@ -42,6 +42,7 @@ export function makeTeam(
     currentDefuserIndex: 0,
     cumulativeTimeMs: 0,
     roundTimesMs: [],
+    equalisationRoundsPlayed: 0,
     ...overrides,
   };
 }

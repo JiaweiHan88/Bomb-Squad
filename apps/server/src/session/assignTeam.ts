@@ -23,8 +23,15 @@ export interface AssignTeamArgs {
  *   iff someone is on it).
  * - A role-only change never moves the player's relayOrder position.
  * - `currentDefuserIndex` stays 0: the handler's lobby-phase guard means no
- *   round has ever run when this executes, so there is nothing to clamp.
- *   (Epic 8 note: revisit if assignment is ever allowed between rounds.)
+ *   round has ever run when team MOVES execute (TEAM_ASSIGN only moves teams in
+ *   the lobby), so there is nothing to clamp here. Story 8.9 resolves the
+ *   deferred "index not re-clamped on a cross-team move" item (deferred-work.md)
+ *   at the READ side instead: `startRound` no longer wraps the index with a
+ *   modulo — it reads it RAW with an `0 <= index < relayOrder.length` bounds
+ *   check, so an out-of-range index cleanly yields "no natural pick" (exhausted)
+ *   rather than wrapping to the wrong player. The Story 8.9 equalisation
+ *   volunteer designation is a role-only change (no team move, no relayOrder
+ *   mutation), so it likewise never desynchronises the index.
  *
  * Guard clauses (defensive — the handler errors first, but pure functions
  * never trust): unknown playerId or a facilitator target returns the state
@@ -60,6 +67,7 @@ export function assignPlayerToTeam(state: SessionState, args: AssignTeamArgs): S
     currentDefuserIndex: 0,
     cumulativeTimeMs: 0,
     roundTimesMs: [],
+    equalisationRoundsPlayed: 0, // Story 8.9: a fresh team owes no equalisation yet.
   };
   teams[args.teamId] = target.relayOrder.includes(args.playerId)
     ? target

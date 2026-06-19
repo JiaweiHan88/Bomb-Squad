@@ -19,7 +19,7 @@ function player(id: string, role: PlayerInfo['role'], teamId?: 'A' | 'B'): Playe
 }
 
 function team(relayOrder: string[]): TeamState {
-  return { teamId: 'A', relayOrder, currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] };
+  return { teamId: 'A', relayOrder, currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 };
 }
 
 const baseState = (): SessionState =>

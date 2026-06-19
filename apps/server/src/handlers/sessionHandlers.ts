@@ -28,6 +28,8 @@ import { setPlayerReady } from '../session/setPlayerReady.js';
 import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
+import { isRelayComplete } from '../session/relayComplete.js';
+import { designateEqualisationVolunteer } from '../session/equalisationVolunteer.js';
 import { initializeRoundBombs } from '../round/initializeRoundBombs.js';
 
 /**
@@ -746,7 +748,42 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Defensive phase guard; Epic 8 (between-rounds flow) widens it deliberately.
+        // EQUALISATION VOLUNTEER (Story 8.9, AC-2): TEAM_ASSIGN is REUSED to
+        // designate the Facilitator's volunteer Defuser for an owed equalisation
+        // round (no new socket event — Task 1). Permitted between rounds and in
+        // preparation (the documented exception to "rotation is the sole Defuser
+        // authority"); deliberately NARROW — a role-only designation of a player
+        // already on the team, never a team move or relayOrder mutation. A round
+        // that is actually running ('active'/'ended') stays locked.
+        if (state.status === 'between-rounds' || state.status === 'preparation') {
+          const result = designateEqualisationVolunteer(state, {
+            teamId: parsed.teamId,
+            playerId: parsed.playerId,
+          });
+          if (!result.ok) {
+            socket.emit('ERROR', {
+              code: result.reason === 'NO_EQUALISATION_OWED' ? 'NO_EQUALISATION_ROUND' : 'INVALID_VOLUNTEER',
+              message:
+                result.reason === 'NO_EQUALISATION_OWED'
+                  ? 'That team has no equalisation round to staff.'
+                  : 'The volunteer must be a player who already defused on that team.',
+              recoverable: true,
+            });
+            return;
+          }
+          // Idempotent no-op (same volunteer re-asserted): no persist, no broadcast.
+          if (result.state === state) return;
+          await deps.redis.setJSON(sessionKey(sessionId), result.state);
+          io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+          deps.log.info(
+            { sessionId, teamId: parsed.teamId, volunteerId: parsed.playerId, by: socket.data.playerId },
+            'equalisation volunteer designated',
+          );
+          return;
+        }
+
+        // Defensive phase guard: team composition is otherwise locked once a
+        // round is active (and after the session ends).
         if (state.status !== 'lobby') {
           socket.emit('ERROR', {
             code: 'NOT_IN_LOBBY',
@@ -833,11 +870,32 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // Population guard: opening prep with no defuser-able player on any
-        // team strands the facilitator — ROUND_START would then refuse with
-        // NO_POPULATED_TEAM and (before PREPARATION_CANCEL) prep had no exit.
-        // Same error code the Lobby banner already owns; the message differs.
-        if (!hasPopulatedTeam(state)) {
+        // RELAY-COMPLETE gate (Story 8.9, AC-4): advancing FROM 'between-rounds'
+        // once every team has finished its rotation (incl. owed equalisation
+        // rounds) must NOT silently wrap the rotation back to player 0 (the old
+        // uncapped behaviour). Refuse with a typed RELAY_COMPLETE instead — Story
+        // 8.10 owns the actual session-end transition. While the relay is NOT
+        // complete the open proceeds: `openPreparation` advances the pointer and
+        // `startRound` routes natural-vs-equalisation-vs-rest per team. The
+        // volunteer for an owed equalisation round may still be undesignated here
+        // — that is fine; the facilitator designates it (TEAM_ASSIGN) during the
+        // preparation it is about to open, and ROUND_START enforces it.
+        if (state.status === 'between-rounds' && isRelayComplete(state)) {
+          socket.emit('ERROR', {
+            code: 'RELAY_COMPLETE',
+            message: 'The relay is complete — end the session.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Population guard (round 1 only): opening prep from the LOBBY with no
+        // defuser-able player on any team strands the facilitator — ROUND_START
+        // would then refuse with NO_POPULATED_TEAM. (Between-rounds is gated by
+        // the relay-complete check above; a not-complete relay always has an
+        // openable natural or equalisation round.) Same error code the Lobby
+        // banner already owns; the message differs.
+        if (state.status === 'lobby' && !hasPopulatedTeam(state)) {
           socket.emit('ERROR', {
             code: 'CANNOT_OPEN_PREP',
             message: 'Assign at least one player to a team first.',
@@ -1034,12 +1092,20 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
 
         const result = startRound(state);
         if (!result.ok) {
+          const message =
+            result.reason === 'NOT_IN_PREPARATION'
+              ? 'Open preparation before starting the round.'
+              : result.reason === 'EQUALISATION_VOLUNTEER_REQUIRED'
+                ? 'Assign a volunteer Defuser for the equalisation round first.'
+                : 'Assign at least one player to a team first.';
           socket.emit('ERROR', {
-            code: 'CANNOT_START_ROUND',
-            message:
-              result.reason === 'NOT_IN_PREPARATION'
-                ? 'Open preparation before starting the round.'
-                : 'Assign at least one player to a team first.',
+            // Story 8.9: a missing equalisation volunteer is its own recoverable
+            // code so the client can prompt the Facilitator to designate one.
+            code:
+              result.reason === 'EQUALISATION_VOLUNTEER_REQUIRED'
+                ? 'EQUALISATION_VOLUNTEER_REQUIRED'
+                : 'CANNOT_START_ROUND',
+            message,
             recoverable: true,
           });
           return;

@@ -95,7 +95,11 @@ describe('startRound', () => {
     expect(result.state.players['sock-sam']!.role).toBe('spectator');
   });
 
-  it('normalizes an out-of-range currentDefuserIndex via modulo (deferred 2.4 clamp, read side)', () => {
+  it('Story 8.9: an out-of-range index NO LONGER wraps — the team is exhausted and rests', () => {
+    // Old behaviour wrapped via modulo (5 % 2 = 1 → Devon); 8.9 reads the index
+    // raw, so an index past relayOrder means the team has exhausted its rotation
+    // and gets no natural pick. Team B still has a natural slot (the natural
+    // phase), so exhausted Team A simply rests (absent from defusers).
     let state = prepState();
     state = {
       ...state,
@@ -104,10 +108,10 @@ describe('startRound', () => {
     const result = startRound(state);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // relayOrder [maya, devon], 5 % 2 = 1 → Devon.
-    expect(result.round.defusers.A).toBe('sock-devon');
-    expect(result.state.players['sock-devon']!.role).toBe('defuser');
-    // Maya held the defuser role pre-start → displaced to expert.
+    expect(result.round.defusers.A).toBeUndefined(); // exhausted → rests, no wrap
+    expect(result.round.defusers.B).toBe('sock-ana'); // B's natural pick
+    // A resting team's stale 'defuser' (Maya, set in the lobby) is demoted to
+    // expert so its players are not stranded on the bomb surface (Task 6).
     expect(result.state.players['sock-maya']!.role).toBe('expert');
   });
 
@@ -171,6 +175,66 @@ describe('startRound', () => {
     expect(result.state.teams.A!.cumulativeTimeMs).toBe(0);
     expect(result.state.roundNumber).toBe(1);
     expect(result.state.config).toBe(state.config);
+  });
+});
+
+describe('startRound — odd-team equalisation round (Story 8.9)', () => {
+  /**
+   * A preparation-phase session whose natural rotation is EXHAUSTED for both
+   * teams (indices past relayOrder): A=[maya,devon] (len 2), B=[ana] (len 1),
+   * both at index 2. maxLen 2 ⇒ B owes 1 equalisation round, A owes 0.
+   */
+  const equalisationPrep = (volunteerForB: string | undefined): SessionState => {
+    const state = prepState();
+    return {
+      ...state,
+      teams: {
+        A: { ...state.teams.A!, currentDefuserIndex: 2 },
+        B: { ...state.teams.B!, currentDefuserIndex: 2, equalisationVolunteerId: volunteerForB },
+      },
+    };
+  };
+
+  it('commits the Facilitator volunteer for the owing team; the longer team rests', () => {
+    const result = startRound(equalisationPrep('sock-ana'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Only B plays (its volunteer); A has no owed round → absent from defusers.
+    expect(result.round.defusers).toEqual({ B: 'sock-ana' });
+    expect(result.state.players['sock-ana']!.role).toBe('defuser');
+  });
+
+  it('bumps equalisationRoundsPlayed and clears the consumed volunteer', () => {
+    const result = startRound(equalisationPrep('sock-ana'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.teams.B!.equalisationRoundsPlayed).toBe(1);
+    expect(result.state.teams.B!.equalisationVolunteerId).toBeUndefined();
+    // The longer team's bookkeeping is untouched.
+    expect(result.state.teams.A!.equalisationRoundsPlayed).toBe(0);
+  });
+
+  it('a resting team is absent from defusers and its stale defuser is demoted (Task 6)', () => {
+    // Maya holds 'defuser' from the lobby; Team A rests this equalisation round.
+    const result = startRound(equalisationPrep('sock-ana'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.round.defusers.A).toBeUndefined();
+    expect(result.state.players['sock-maya']!.role).toBe('expert');
+  });
+
+  it('refuses an equalisation round with no designated volunteer (server never auto-picks)', () => {
+    expect(startRound(equalisationPrep(undefined))).toEqual({
+      ok: false,
+      reason: 'EQUALISATION_VOLUNTEER_REQUIRED',
+    });
+  });
+
+  it('refuses a volunteer who is not on the team / not on the roster', () => {
+    expect(startRound(equalisationPrep('sock-ghost'))).toEqual({
+      ok: false,
+      reason: 'EQUALISATION_VOLUNTEER_REQUIRED',
+    });
   });
 });
 

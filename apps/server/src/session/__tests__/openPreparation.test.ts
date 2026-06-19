@@ -27,8 +27,8 @@ const withTeams = (status: SessionState['status'], roundNumber: number): Session
   status,
   roundNumber,
   teams: {
-    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000] },
-    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 1, cumulativeTimeMs: 2_000, roundTimesMs: [2_000] },
+    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000], equalisationRoundsPlayed: 0 },
+    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 1, cumulativeTimeMs: 2_000, roundTimesMs: [2_000], equalisationRoundsPlayed: 0 },
   },
 });
 
@@ -86,5 +86,25 @@ describe('openPreparation', () => {
     expect(next.players).toBe(state.players);
     expect(next.teams).toBe(state.teams);
     expect(next.config).toBe(state.config);
+  });
+
+  // Story 8.9 decision: the pointer advance stays UNIFORM (every team +1 on the
+  // between-rounds path) — `openPreparation` does NOT special-case equalisation
+  // rounds. The wrap-around bug is capped at the source (`startRound` reads the
+  // index raw, no modulo), so advancing an already-exhausted team's index past
+  // its relayOrder is harmless (it just marks exhaustion); the equalisation pick
+  // is the explicit Facilitator volunteer, never `relayOrder[index]`. This keeps
+  // openPreparation/cancelPreparation symmetric.
+  it('advances every team uniformly even when a team is already exhausted (8.9 — cap lives in startRound)', () => {
+    const exhausted: SessionState = {
+      ...withTeams('between-rounds', 2),
+      teams: {
+        A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 1, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['p3'], currentDefuserIndex: 1, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+      },
+    };
+    const next = openPreparation(exhausted);
+    expect(next.teams.A!.currentDefuserIndex).toBe(2);
+    expect(next.teams.B!.currentDefuserIndex).toBe(2); // exhausted B advances too — no special case
   });
 });

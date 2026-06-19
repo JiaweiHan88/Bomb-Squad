@@ -384,7 +384,7 @@ describe('SESSION_JOIN handler', () => {
         'sock-d1': { playerId: 'sock-d1', displayName: 'Dee', role: 'defuser', isReady: true, teamId: 'A' },
       },
       teams: {
-        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000, roundTimesMs: [12_000] },
+        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000, roundTimesMs: [12_000], equalisationRoundsPlayed: 0 },
       },
     };
     await store.setJSON(sessionKey(ack.sessionId), seeded);
@@ -807,6 +807,7 @@ describe('TEAM_ASSIGN handler', () => {
         currentDefuserIndex: 0,
         cumulativeTimeMs: 0,
         roundTimesMs: [],
+        equalisationRoundsPlayed: 0,
       });
     }
   });
@@ -1507,9 +1508,12 @@ describe('ROUND_START handler', () => {
     expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
   });
 
-  it('out-of-range currentDefuserIndex seeded in the store → modulo pick, no throw', async () => {
-    const { sessionId, mayaId } = await setupPrepared();
+  it('Story 8.9: out-of-range currentDefuserIndex no longer wraps — team exhausted, rests, no throw', async () => {
+    const { sessionId, mayaId, devonId } = await setupPrepared();
     const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    // A=[Maya] index 7 (past relayOrder) — the old modulo wrapped (7 % 1 = 0 →
+    // Maya). 8.9 reads it raw: A is exhausted. B=[Devon] still has its natural
+    // slot, so the round starts with Devon defusing and Team A resting.
     await store.setJSON(sessionKey(sessionId), {
       ...stored,
       teams: { ...stored.teams, A: { ...stored.teams.A!, currentDefuserIndex: 7 } },
@@ -1519,8 +1523,9 @@ describe('ROUND_START handler', () => {
     facilitator.emit('ROUND_START');
     const state = await statePromise;
 
-    // Team A relayOrder = [maya] → 7 % 1 = 0 → Maya still picked.
-    expect(state.players[mayaId]).toMatchObject({ role: 'defuser' });
+    const round = JSON.parse(store.data.get(roundKey(sessionId, 1))!) as RoundState;
+    expect(round.defusers).toEqual({ B: devonId }); // A rests, no wrap to Maya
+    expect(state.players[mayaId]).toMatchObject({ role: 'expert' }); // not stranded
   });
 
   it('a never-joined socket → NOT_IN_SESSION', async () => {
@@ -2315,5 +2320,197 @@ describe('ROUND_CONFIGURE handler (Story 8.1)', () => {
     // Give the server a tick; no broadcast should arrive.
     await new Promise((r) => setTimeout(r, 30));
     expect(facSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Relay orchestration & odd-team equalisation (Story 8.9)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let maya: TestClientSocket;
+  let devon: TestClientSocket;
+  let ana: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+      }),
+    );
+    facilitator = await server.connectClient();
+    maya = await server.connectClient();
+    devon = await server.connectClient();
+    ana = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  /** Join a socket and assign to a team, draining the facilitator's broadcasts. */
+  async function joinAssign(
+    socket: TestClientSocket,
+    joinCode: string,
+    name: string,
+    teamId: 'A' | 'B',
+  ): Promise<void> {
+    const joined = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName: name, role: 'expert' });
+    const state = await joined;
+    const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(state, name), teamId, role: 'expert' });
+    await facBc;
+  }
+
+  /** A=[Maya,Devon] (len 2), B=[Ana] (len 1) — the odd 2v1 relay. */
+  async function setupOdd(): Promise<{ sessionId: string; mayaId: string; anaId: string }> {
+    const ack = await createSession(facilitator);
+    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
+    await joinAssign(devon, ack.joinCode, 'Devon', 'A');
+    await joinAssign(ana, ack.joinCode, 'Ana', 'B');
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    return { sessionId: ack.sessionId, mayaId: idOf(live, 'Maya'), anaId: idOf(live, 'Ana') };
+  }
+
+  /** Overwrite the live session into a between-rounds snapshot. */
+  function seedBetweenRounds(
+    sessionId: string,
+    patch: { index: number; playedB?: number },
+  ): SessionState {
+    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    const next: SessionState = {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: patch.index + 1,
+      teams: {
+        A: { ...live.teams.A!, currentDefuserIndex: patch.index },
+        B: { ...live.teams.B!, currentDefuserIndex: patch.index, equalisationRoundsPlayed: patch.playedB ?? 0 },
+      },
+    };
+    store.data.set(sessionKey(sessionId), JSON.stringify(next));
+    return next;
+  }
+
+  it('odd 2v1: the between-rounds advance OPENS an equalisation round (relay not yet complete)', async () => {
+    const { sessionId } = await setupOdd();
+    // Naturals exhausted (index 1, both teams) but B owes 1 equalisation round.
+    seedBetweenRounds(sessionId, { index: 1 });
+
+    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    const state = await opened;
+    expect(state.status).toBe('preparation');
+  });
+
+  it('equalisation ROUND_START with no designated volunteer → EQUALISATION_VOLUNTEER_REQUIRED', async () => {
+    const { sessionId } = await setupOdd();
+    const seeded = seedBetweenRounds(sessionId, { index: 1 });
+    // Advance into the equalisation preparation (no volunteer yet).
+    store.data.set(sessionKey(sessionId), JSON.stringify({ ...seeded, status: 'preparation', roundNumber: 3, teams: {
+      A: { ...seeded.teams.A!, currentDefuserIndex: 2 },
+      B: { ...seeded.teams.B!, currentDefuserIndex: 2 },
+    } }));
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_START');
+    const error = await errorPromise;
+    expect(error.code).toBe('EQUALISATION_VOLUNTEER_REQUIRED');
+  });
+
+  it('TEAM_ASSIGN designates the equalisation volunteer between rounds', async () => {
+    const { sessionId, anaId } = await setupOdd();
+    seedBetweenRounds(sessionId, { index: 1 });
+
+    const bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: anaId, teamId: 'B', role: 'defuser' });
+    const state = await bc;
+    expect(state.teams.B!.equalisationVolunteerId).toBe(anaId);
+    expect(state.players[anaId]!.role).toBe('defuser');
+  });
+
+  it('TEAM_ASSIGN volunteer refuses a team that owes nothing / an off-team player', async () => {
+    const { sessionId, mayaId, anaId } = await setupOdd();
+    seedBetweenRounds(sessionId, { index: 1 });
+
+    // Team A owes no equalisation round.
+    let err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
+    expect((await err).code).toBe('NO_EQUALISATION_ROUND');
+
+    // Maya is not on Team B (off-team volunteer).
+    err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'B', role: 'defuser' });
+    expect((await err).code).toBe('INVALID_VOLUNTEER');
+    expect(anaId).toBeDefined();
+  });
+
+  it('equalisation ROUND_START commits the volunteer; the longer team rests (absent from defusers)', async () => {
+    const { sessionId, mayaId, anaId } = await setupOdd();
+    seedBetweenRounds(sessionId, { index: 1 });
+
+    // Designate Ana, open prep, start the equalisation round.
+    let bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: anaId, teamId: 'B', role: 'defuser' });
+    await bc;
+    bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    await bc;
+
+    const active = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    await active;
+
+    const round = JSON.parse(store.data.get(roundKey(sessionId, 3))!) as RoundState;
+    expect(round.defusers).toEqual({ B: anaId }); // A rests
+    const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    expect(stored.teams.B!.equalisationRoundsPlayed).toBe(1);
+    expect(stored.teams.B!.equalisationVolunteerId).toBeUndefined();
+    // Maya (A's stale defuser) is not stranded on the bomb surface.
+    expect(stored.players[mayaId]!.role).toBe('expert');
+  });
+
+  it('once every owed round is played → the advance is refused RELAY_COMPLETE', async () => {
+    const { sessionId } = await setupOdd();
+    // B has now played its 1 owed equalisation round.
+    seedBetweenRounds(sessionId, { index: 2, playedB: 1 });
+    const storedBefore = store.data.get(sessionKey(sessionId));
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+    expect(error.code).toBe('RELAY_COMPLETE');
+    // Refusal is a pure no-op: the relay does NOT silently wrap to player 0.
+    expect(store.data.get(sessionKey(sessionId))).toBe(storedBefore);
+  });
+
+  it('equal 1v1 reaches relay-complete with zero equalisation rounds → advance refused', async () => {
+    const ack = await createSession(facilitator);
+    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
+    await joinAssign(ana, ack.joinCode, 'Ana', 'B');
+    // After the single natural round (index 0), both 1-player teams are exhausted
+    // and owe nothing.
+    seedBetweenRounds(ack.sessionId, { index: 0 });
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    expect((await errorPromise).code).toBe('RELAY_COMPLETE');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+  });
+
+  it('a non-facilitator advance at relay-complete is still NOT_FACILITATOR (authority before completeness)', async () => {
+    const { sessionId } = await setupOdd();
+    seedBetweenRounds(sessionId, { index: 2, playedB: 1 });
+
+    const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('PREPARATION_OPEN');
+    expect((await errorPromise).code).toBe('NOT_FACILITATOR');
   });
 });

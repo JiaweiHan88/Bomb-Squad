@@ -48,6 +48,27 @@ export interface TeamState {
    * between-round preview (8.6) and final scoreboard (8.10) render.
    */
   roundTimesMs: number[];
+  /**
+   * Number of odd-team equalisation rounds this team has played (Story 8.9, FR44).
+   * A shorter team owes `max(teamA.len, teamB.len) - this.relayOrder.length`
+   * equalisation rounds; this counter increments (in `startRound`) each time an
+   * equalisation round is committed for the team, so `equalisationRoundsOwed`
+   * converges to 0 and `isRelayComplete` becomes true once every owed round is
+   * played. The longer team (and equal-size teams) never owe any, so this stays 0.
+   * Default 0 at every construction site (a fresh team owes nothing yet).
+   */
+  equalisationRoundsPlayed: number;
+  /**
+   * The Facilitator-assigned volunteer Defuser for the team's NEXT equalisation
+   * round (Story 8.9 AC-2, FR44). Set explicitly via the `TEAM_ASSIGN` event while
+   * between rounds / in preparation (the documented exception to "rotation is the
+   * sole Defuser authority" — 8.6 decision (c)); consumed and cleared by
+   * `startRound` when the equalisation round commits. Undefined when no volunteer
+   * is pending. The server NEVER auto-picks it — an equalisation `ROUND_START`
+   * refuses until the Facilitator designates one (GDD: "Facilitator assigns a
+   * volunteer Defuser").
+   */
+  equalisationVolunteerId?: string;
 }
 
 export interface SessionState {

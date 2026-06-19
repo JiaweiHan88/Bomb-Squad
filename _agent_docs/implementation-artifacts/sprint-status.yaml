@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-10
-last_updated: 2026-06-19  # Sprint 4 retrospective (sprint-4-retro-2026-06-19.md): all 5 stories + TD-4 + TD-5 done (TD-5 closed inside Sprint 4 by Jay's call). 3 action items — escalate the load-modify-store/concurrency theme (3rd recurrence), every story ships explicit human-validation instructions, server recomputes RELEASE timer digit. Sprint 4 genuinely done; Sprint 5 (relay/resilience/full voice) may start.
+last_updated: 2026-06-20  # Story 8-9 (relay orchestration & odd-team equalisation) → review (dev-story complete; Tasks 1-7 done + tests green; Task 8 = Jay's interactive verification outstanding). Sprint 5 kickoff (Epic-8 relay worktree): story 8-9 contexted via gds-create-story → ready-for-dev (first of the 8-9 → 8-7 → 8-8 server-state chain; 8-10 & 3-5 blocked on it). Prior: Sprint 4 retrospective (sprint-4-retro-2026-06-19.md): all 5 stories + TD-4 + TD-5 done (TD-5 closed inside Sprint 4 by Jay's call). 3 action items — escalate the load-modify-store/concurrency theme (3rd recurrence), every story ships explicit human-validation instructions, server recomputes RELEASE timer digit. Sprint 4 genuinely done; Sprint 5 (relay/resilience/full voice) may start.
 project: Bomb Squad
 project_key: NOKEY
 tracking_system: file-system
@@ -121,7 +121,7 @@ development_status:
   8-6-between-round-flow-and-scoreboard-preview: done
   8-7-pause-facilitator-and-disconnect: backlog
   8-8-retry-a-failed-round: backlog
-  8-9-relay-orchestration-and-odd-team-equalisation: backlog
+  8-9-relay-orchestration-and-odd-team-equalisation: review
   8-10-scoring-final-scoreboard-and-session-end-persistence: backlog
   epic-8-retrospective: optional
 

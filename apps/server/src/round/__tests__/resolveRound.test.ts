@@ -77,6 +77,7 @@ async function makeHarness(opts?: {
               currentDefuserIndex: 0,
               cumulativeTimeMs: opts?.cumulativeTimeMs ?? 0,
               roundTimesMs: opts?.cumulativeTimeMs ? [opts.cumulativeTimeMs] : [],
+              equalisationRoundsPlayed: 0,
             },
           }
         : {},
@@ -251,8 +252,8 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
       status: 'active',
       roundNumber: ROUND_NUMBER,
       teams: {
-        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
-        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
       },
     };
     await store.setJSON(sessionKey(SID), session);
@@ -320,8 +321,8 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
       status: 'active',
       roundNumber: ROUND_NUMBER,
       teams: {
-        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
-        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [] },
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
       },
     } as SessionState);
     await store.setJSON(roundKey(SID, ROUND_NUMBER), {
