@@ -1,0 +1,23 @@
+{
+  "name": "@bomb-squad/sim-clients",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only headless bot-swarm simulator: real socket clients that fill player seats and self-solve rounds so a solo dev can verify the multiplayer game loop (Stories 8.6 / 8.1) without juggling browsers.",
+  "scripts": {
+    "sim": "tsx src/main.ts",
+    "verify": "tsx src/verify.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bomb-squad/shared": "workspace:*",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@bomb-squad/server": "workspace:*",
+    "@types/node": "^25.9.3",
+    "socket.io": "^4.8.3",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3"
+  }
+}
