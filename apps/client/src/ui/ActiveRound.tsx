@@ -7,6 +7,7 @@ import { buildChapters } from '../manual/chapters.js';
 import { SANDBOX_MODULES } from '../modules/index.js';
 import ResolutionBanner from './ResolutionBanner.js';
 import VoiceController from './VoiceController.js';
+import PauseOverlay from './PauseOverlay.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
 
 /**
@@ -61,6 +62,9 @@ export default function ActiveRound() {
     <div className="relative flex flex-1 flex-col">
       {surface}
       <ResolutionBanner />
+      {/* Pause surface (Story 8.7): the facilitator's break-glass Pause control, and
+          the "Holding the clock" / amber disconnect strip + scene dim when paused. */}
+      <PauseOverlay />
       {/* Bomb Room voice join (Story 3.2) — non-blocking, unmount-safe. Self-hides
           for non-Bomb-Room roles. Speaker pill + mute are Story 3.4. */}
       <VoiceController />

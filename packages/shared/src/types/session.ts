@@ -80,4 +80,26 @@ export interface SessionState {
   players: Record<string, PlayerInfo>;
   teams: Partial<Record<TeamId, TeamState>>;
   roundNumber: number;
+  /**
+   * Pause freeze (Story 8.7, FR13). ORTHOGONAL to `status` — a pause freezes ON
+   * TOP of `active`/`between-rounds`, it is NOT a status value, so the session
+   * remembers (and resumes into) the exact phase it paused from. `null` = running.
+   * The server-epoch ms the pause began (parallels the per-team
+   * `TimerState.pausedAt` that freezes a live round's countdown).
+   */
+  pausedAt: number | null;
+  /**
+   * Why the session is paused (Story 8.7). `'facilitator'` = a manual between-rounds
+   * hold (resume is a free Facilitator click — no ready gate). `'disconnect'` = a
+   * mid-round participant dropped (resume requires the Facilitator PLUS all
+   * participants ready). `null` when running. The kind drives the resume gate.
+   */
+  pauseKind: 'facilitator' | 'disconnect' | null;
+  /**
+   * Durable player ids currently dropped during a mid-round disconnect pause
+   * (Story 8.7). Drives the amber strip's "who dropped" and is cleared per-player
+   * as each reconnects (the reconnect restore re-sends their BOMB_INIT). Empty
+   * unless `pauseKind === 'disconnect'`.
+   */
+  disconnectedPlayerIds: string[];
 }

@@ -4,6 +4,7 @@ import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import { formatTimerDisplay } from '../scenes/timerLcd.js';
 import ConfirmButton from './ConfirmButton.js';
+import PauseOverlay from './PauseOverlay.js';
 import {
   SCOREBOARD_EYEBROW,
   SCOREBOARD_HEADING,
@@ -97,7 +98,10 @@ export default function Scoreboard() {
   };
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-8">
+    <div className="relative flex flex-1 flex-col items-center justify-center p-8">
+      {/* Pause surface (Story 8.7): facilitator break-glass Pause + "Holding the
+          clock" strip when the between-rounds session is paused. */}
+      <PauseOverlay />
       <p className="mb-2 font-mono text-xs uppercase tracking-[0.34em] text-brass">
         {SCOREBOARD_EYEBROW}
       </p>

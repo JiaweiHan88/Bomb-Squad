@@ -7,9 +7,11 @@ import type {
   PlayerRole,
   SessionState,
   TeamId,
+  BombState,
+  TimerState,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
-import { sessionKey, joinCodeKey, roundKey, timerKey } from '../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../state/keys.js';
 import { startSegment } from '../timer/timerCore.js';
 import type { TimerScheduler } from '../timer/timerScheduler.js';
 import { generateJoinCode } from '../session/joinCode.js';
@@ -30,6 +32,8 @@ import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
 import { isRelayComplete } from '../session/relayComplete.js';
 import { designateEqualisationVolunteer } from '../session/equalisationVolunteer.js';
+import { pauseSession, resumeSession, canResume, clearDisconnectedPlayer } from '../session/pauseSession.js';
+import { freezeRoundTimers, resumeRoundTimers } from '../timer/pauseTimers.js';
 import { initializeRoundBombs } from '../round/initializeRoundBombs.js';
 
 /**
@@ -416,8 +420,43 @@ async function restoreReattachedSocket(
     }
 
     if (!restored) {
-      const fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
-      if (fresh !== null) socket.emit('SESSION_STATE', fresh);
+      let fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+      if (fresh !== null) {
+        // MID-ROUND RECONNECT RESTORE (Story 8.7, FR13): a reconnecting participant
+        // in an active/paused round must land back on a LIVE bomb surface — re-join
+        // its team room and re-send its bomb + current timer (BOMB_INIT is otherwise
+        // emitted only at ROUND_START, so a reconnect would see a blank scene —
+        // deferred-work.md). Resolve identity via the durable playerId, never socket.id.
+        const teamId = fresh.players[playerId]?.teamId;
+        const midRound = fresh.status === 'active' || fresh.pausedAt !== null;
+        if (teamId !== undefined && midRound) {
+          await socket.join(teamRoom(sessionId, teamId));
+          const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
+          if (bomb !== null) socket.emit('BOMB_INIT', bomb);
+          const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+          if (timer !== null) socket.emit('TIMER_UPDATE', timer);
+          // Clear this player from the disconnect-pause dropped list (they're back).
+          // The session STAYS paused until the facilitator resumes (AC-2 gate).
+          if (fresh.disconnectedPlayerIds.includes(playerId)) {
+            const { result } = await deps.redis.updateJSON<SessionState, SessionState | null>(
+              sessionKey(sessionId),
+              (current) => {
+                if (current === null) return { commit: false, result: null };
+                const cleared = clearDisconnectedPlayer(current, playerId);
+                return cleared === current
+                  ? { commit: false, result: current }
+                  : { commit: true, value: cleared, result: cleared };
+              },
+            );
+            if (result !== null) fresh = result;
+            io.to(sessionRoom(sessionId)).emit('SESSION_STATE', fresh);
+          } else {
+            socket.emit('SESSION_STATE', fresh);
+          }
+        } else {
+          socket.emit('SESSION_STATE', fresh);
+        }
+      }
     }
     // Re-emit the identity (token unchanged) so the client refreshes its store.
     if (reattachToken !== null) {
@@ -426,6 +465,54 @@ async function restoreReattachedSocket(
     deps.log.info({ sessionId, playerId, restored }, 'socket reattached');
   } catch (err) {
     deps.log.error({ err, socketId: socket.id }, 'reattach restore failed');
+  }
+}
+
+/**
+ * Mid-round disconnect auto-pause (Story 8.7, AC-2, FR13). Fired from the
+ * `disconnect` handler when a participant (a player on a team) drops during an
+ * ACTIVE round: freezes the clock IMMEDIATELY so no time is unfairly burned, names
+ * the dropper for the amber strip, and resets the resume-ready gate. Race-safe via
+ * the 2.6 `updateJSON` primitive (a team can be resolving concurrently). Only acts
+ * on an `active` round with the player still on a team; every other phase is a
+ * no-op (lobby cleanup is the grace-window path; between-rounds/ended don't pause).
+ */
+async function autoPauseOnDisconnect(
+  io: SessionIOServer,
+  deps: SessionHandlerDeps,
+  sessionId: string,
+  playerId: string,
+): Promise<void> {
+  try {
+    const { result } = await deps.redis.updateJSON<SessionState, SessionState | null>(
+      sessionKey(sessionId),
+      (current) => {
+        if (
+          current === null ||
+          current.status !== 'active' ||
+          current.players[playerId]?.teamId === undefined
+        ) {
+          return { commit: false, result: null };
+        }
+        const next = pauseSession(current, {
+          kind: 'disconnect',
+          now: deps.timer.now(),
+          droppedPlayerId: playerId,
+        });
+        if (next === current) return { commit: false, result: null };
+        return { commit: true, value: next, result: next };
+      },
+    );
+    if (result === null) return;
+
+    // Freeze the live per-team timers (persists pausedAt, NEVER deletes the key).
+    await freezeRoundTimers(io, deps, sessionId, Object.keys(result.teams) as TeamId[], deps.timer.now());
+    io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result);
+    const name = result.players[playerId]?.displayName ?? 'A player';
+    io.to(sessionRoom(sessionId)).emit('PAUSED', { reason: `Player dropped: ${name}` });
+    deps.log.info({ sessionId, playerId }, 'auto-paused (mid-round disconnect)');
+  } catch (err) {
+    deps.log.error({ err, sessionId, playerId }, 'auto-pause on disconnect failed');
   }
 }
 
@@ -1204,6 +1291,111 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
       }
     });
 
+    // Facilitator pauses the session (Story 8.7, AC-1, FR13). Payloadless; no ack:
+    // success is the SESSION_STATE broadcast (+ frozen TIMER_UPDATEs for an active
+    // round) + a PAUSED notification, failure a typed ERROR. Same authority-gate-
+    // first → phase guard → pure transition → persist → broadcast pipeline as the
+    // other facilitator actions. Pause is ORTHOGONAL to `status` (it freezes on top
+    // of active/between-rounds), so the session resumes into the same phase.
+    socket.on('FACILITATOR_PAUSE', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+        return;
+      }
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+          return;
+        }
+        // Authority gate FIRST (a non-facilitator probe learns nothing).
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', { code: 'NOT_FACILITATOR', message: 'Only the facilitator pauses.', recoverable: true });
+          return;
+        }
+        // Phase guard: pause only holds a live round or the between-rounds gap.
+        if (state.status !== 'active' && state.status !== 'between-rounds') {
+          socket.emit('ERROR', {
+            code: 'CANNOT_PAUSE',
+            message: 'There is nothing to pause right now.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const now = deps.timer.now();
+        const next = pauseSession(state, { kind: 'facilitator', now });
+        if (next === state) return; // already paused — idempotent no-op
+
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        // Freeze the live per-team countdown (active round only; between-rounds has
+        // no live timer). Persists the paused TimerState — NEVER deletes the key.
+        if (state.status === 'active') {
+          await freezeRoundTimers(io, deps, sessionId, Object.keys(next.teams) as TeamId[], now);
+        }
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        io.to(sessionRoom(sessionId)).emit('PAUSED', { reason: 'Facilitator paused' });
+        deps.log.info({ sessionId, from: state.status }, 'session paused (facilitator)');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'FACILITATOR_PAUSE failed');
+        socket.emit('ERROR', { code: 'PAUSE_FAILED', message: 'Could not pause. Try again.', recoverable: true });
+      }
+    });
+
+    // Facilitator resumes the session (Story 8.7, AC-1/AC-2, FR13). A
+    // facilitator-kind pause resumes freely; a disconnect-kind pause requires every
+    // participant ready (canResume). Re-arms the frozen per-team timers for an
+    // active round.
+    socket.on('FACILITATOR_RESUME', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+        return;
+      }
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+          return;
+        }
+        // Authority gate FIRST.
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', { code: 'NOT_FACILITATOR', message: 'Only the facilitator resumes.', recoverable: true });
+          return;
+        }
+        if (state.pausedAt === null) {
+          socket.emit('ERROR', { code: 'NOT_PAUSED', message: 'The session is not paused.', recoverable: true });
+          return;
+        }
+        // Disconnect-pause resume gate: every participant must be ready (AC-2).
+        if (!canResume(state)) {
+          socket.emit('ERROR', {
+            code: 'PLAYERS_NOT_READY',
+            message: 'All players must be ready to resume.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const now = deps.timer.now();
+        const pausedPhase = state.status; // pause is orthogonal; status is the pre-pause phase
+        const next = resumeSession(state);
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        // Re-arm the per-team timers for an active round (fresh segment, preserved
+        // strike speed-up). Between-rounds had no live timer to resume.
+        if (pausedPhase === 'active') {
+          await resumeRoundTimers(io, deps, sessionId, Object.keys(next.teams) as TeamId[], now);
+        }
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        io.to(sessionRoom(sessionId)).emit('RESUMED', { reason: 'Resumed' });
+        deps.log.info({ sessionId, phase: pausedPhase }, 'session resumed');
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'FACILITATOR_RESUME failed');
+        socket.emit('ERROR', { code: 'RESUME_FAILED', message: 'Could not resume. Try again.', recoverable: true });
+      }
+    });
+
     // Facilitator removes a player from the lobby roster (Story 2.7, AC 1/2).
     // Modelled on TEAM_ASSIGN: load → facilitator-gate → race-safe mutate →
     // persist → broadcast. No ack (frozen mutation convention): success is the
@@ -1338,16 +1530,16 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         const { result } = await deps.redis.updateJSON<SessionState, ReadyOutcome>(
           sessionKey(sessionId),
           (current) => {
-            // Lobby-phase guard inside the mutate: ready is a pre-round affordance
-            // (EXPERIENCE.md — ready buttons are gone once the round starts), so a
-            // stray PLAYER_READY after prep opens is inert, not a mutation of a
-            // started session. Unknown/absent player → noop. Between-round ready
-            // gating is Story 8.6, deliberately out of scope.
-            if (
-              current === null ||
-              current.status !== 'lobby' ||
-              current.players[playerId] === undefined
-            ) {
+            // Ready is a pre-round affordance in the LOBBY (EXPERIENCE.md — ready
+            // buttons are gone once the round starts), so a stray PLAYER_READY mid-
+            // round is inert. Story 8.7 ADDS one more window: while the session is
+            // paused for a mid-round DISCONNECT, participants ready up to satisfy the
+            // resume gate (AC-2). Unknown/absent player → noop.
+            const readyWindowOpen =
+              current !== null &&
+              (current.status === 'lobby' ||
+                (current.pausedAt !== null && current.pauseKind === 'disconnect'));
+            if (current === null || !readyWindowOpen || current.players[playerId] === undefined) {
               return { commit: false, result: { kind: 'noop' } };
             }
             const next = setPlayerReady(current, playerId, parsed.isReady);
@@ -1400,14 +1592,21 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         }
       }
       const key = `${sessionId}:${playerId}`;
-      if (pendingRemovals.has(key)) return; // already scheduled by a prior socket
-      const timer = setTimeout(() => {
-        pendingRemovals.delete(key);
-        void removeLobbyPlayer(io, deps, sessionId, playerId);
-      }, graceMs);
-      // Don't let a pending grace timer keep the process alive (clean shutdown/tests).
-      if (typeof timer.unref === 'function') timer.unref();
-      pendingRemovals.set(key, timer);
+      // Lobby grace-window seat removal (Story 2.7) — scheduled regardless of phase
+      // but `removeLobbyPlayer` no-ops unless the live session is in the lobby, so
+      // it is harmless mid-round (a reconnect cancels it via cancelPendingRemoval).
+      if (!pendingRemovals.has(key)) {
+        const timer = setTimeout(() => {
+          pendingRemovals.delete(key);
+          void removeLobbyPlayer(io, deps, sessionId, playerId);
+        }, graceMs);
+        // Don't let a pending grace timer keep the process alive (clean shutdown/tests).
+        if (typeof timer.unref === 'function') timer.unref();
+        pendingRemovals.set(key, timer);
+      }
+      // Story 8.7 (FR13): a mid-round (active) participant disconnect ALSO auto-
+      // pauses the round immediately (the lobby removal above no-ops there).
+      void autoPauseOnDisconnect(io, deps, sessionId, playerId);
     });
   });
 }

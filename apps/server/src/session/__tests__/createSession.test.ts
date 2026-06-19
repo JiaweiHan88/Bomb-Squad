@@ -25,6 +25,9 @@ describe('createSessionState', () => {
       },
       teams: {},
       roundNumber: 0,
+      pausedAt: null,
+      pauseKind: null,
+      disconnectedPlayerIds: [],
     });
   });
 

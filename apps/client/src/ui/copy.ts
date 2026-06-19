@@ -142,3 +142,15 @@ export const MODIFIER_LIFELINES_SUB = 'Let spectators spend tokens to send hints
 export const MODULE_POOL_LABEL = 'Module pool';
 export const MODULE_POOL_SUB = 'Tap to include or exclude. Greyed modules arrive in a later release.';
 export const MODULE_POOL_COMING_SOON = 'coming soon';
+
+// Paused / disconnect (Story 8.7) — operator-world voice, deadpan. The
+// facilitator pause is a "break-glass" hold; the disconnect pause is the amber
+// auto-pause naming who dropped. {name} is interpolated at render.
+export const FACILITATOR_PAUSE_CTA = 'Pause';
+export const PAUSE_RESUME_CTA = 'Resume';
+export const PAUSE_HELD = 'Holding the clock.';
+export const PAUSE_DROPPED_PREFIX = 'dropped — holding the clock.';
+export const PAUSE_WAITING_READY = 'All players must be ready to resume.';
+export const PAUSE_WAITING_FACILITATOR = 'Holding the clock — waiting for the facilitator to resume.';
+export const PAUSE_READY_CTA = "I'm ready";
+export const PAUSE_READY_DONE = 'Ready — waiting for the others.';

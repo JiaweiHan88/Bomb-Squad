@@ -58,5 +58,9 @@ export function createSessionState({
     players: { [facilitatorId]: facilitator },
     teams: {},
     roundNumber: 0,
+    // Story 8.7: a fresh session is running, never paused.
+    pausedAt: null,
+    pauseKind: null,
+    disconnectedPlayerIds: [],
   };
 }

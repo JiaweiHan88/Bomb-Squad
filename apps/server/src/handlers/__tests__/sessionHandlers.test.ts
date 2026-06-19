@@ -2514,3 +2514,225 @@ describe('Relay orchestration & odd-team equalisation (Story 8.9)', () => {
     expect((await errorPromise).code).toBe('NOT_FACILITATOR');
   });
 });
+
+describe('Pause — facilitator & disconnect (Story 8.7)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        disconnectGraceMs: 500,
+      }),
+    );
+    facilitator = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function nextIdentity(socket: TestClientSocket): Promise<SessionIdentityPayload> {
+    return new Promise((resolve) => socket.once('SESSION_IDENTITY', (p) => resolve(p)));
+  }
+  async function createWithIdentity(): Promise<{ ack: SessionCreatedPayload; identity: SessionIdentityPayload }> {
+    const idPromise = nextIdentity(facilitator);
+    const ack = await createSession(facilitator);
+    return { ack, identity: await idPromise };
+  }
+  async function joinWithIdentity(
+    joinCode: string,
+    displayName: string,
+  ): Promise<{ socket: TestClientSocket; identity: SessionIdentityPayload }> {
+    const socket = await server.connectClient();
+    const idPromise = nextIdentity(socket);
+    const statePromise = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName, role: 'expert' });
+    const [identity] = await Promise.all([idPromise, statePromise, facBc]);
+    return { socket, identity };
+  }
+  async function assign(playerId: string, teamId: 'A' | 'B'): Promise<void> {
+    const bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId, teamId, role: 'defuser' });
+    await bc;
+  }
+
+  const runningTimer = (): TimerState => ({
+    startedAt: 0,
+    remainingAtStart: 300_000,
+    speedMultiplier: 1,
+    pausedAt: null,
+  });
+
+  /** Overwrite the live session to a patched snapshot (active by default). */
+  function seed(sessionId: string, patch: Partial<SessionState>): SessionState {
+    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    const next = { ...live, status: 'active' as const, roundNumber: 1, ...patch };
+    store.data.set(sessionKey(sessionId), JSON.stringify(next));
+    return next;
+  }
+
+  it('FACILITATOR_PAUSE in an active round freezes the live timer (key kept) and broadcasts PAUSED', async () => {
+    const { ack } = await createWithIdentity();
+    const { identity: maya } = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.playerId, 'A');
+    seed(ack.sessionId, {});
+    await store.setJSON(timerKey(ack.sessionId, 'A'), runningTimer());
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const pausedPromise = new Promise((r) => facilitator.once('PAUSED', r as never));
+    facilitator.emit('FACILITATOR_PAUSE');
+    const state = await statePromise;
+    await pausedPromise;
+
+    expect(state.pausedAt).not.toBeNull();
+    expect(state.pauseKind).toBe('facilitator');
+    const timer = JSON.parse(store.data.get(timerKey(ack.sessionId, 'A'))!) as TimerState;
+    expect(timer.pausedAt).not.toBeNull(); // frozen
+    expect(store.data.get(timerKey(ack.sessionId, 'A'))).toBeDefined(); // NOT deleted
+  });
+
+  it('FACILITATOR_PAUSE between rounds sets the flag with no live timer', async () => {
+    const { ack } = await createWithIdentity();
+    const { identity: maya } = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.playerId, 'A');
+    seed(ack.sessionId, { status: 'between-rounds' });
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('FACILITATOR_PAUSE');
+    const state = await statePromise;
+    expect(state.pausedAt).not.toBeNull();
+    expect(state.pauseKind).toBe('facilitator');
+    expect(state.status).toBe('between-rounds'); // status untouched (orthogonal)
+  });
+
+  it('a non-facilitator pause → NOT_FACILITATOR, store byte-identical', async () => {
+    const { ack } = await createWithIdentity();
+    const maya = await joinWithIdentity(ack.joinCode, 'Maya');
+    seed(ack.sessionId, {});
+    const before = store.data.get(sessionKey(ack.sessionId));
+    const errorPromise = nextEvent<ErrorPayload>(maya.socket, 'ERROR');
+    maya.socket.emit('FACILITATOR_PAUSE');
+    expect((await errorPromise).code).toBe('NOT_FACILITATOR');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(before);
+  });
+
+  it('a facilitator-kind pause resumes freely and re-arms the timer', async () => {
+    const { ack } = await createWithIdentity();
+    const { identity: maya } = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.playerId, 'A');
+    seed(ack.sessionId, { pausedAt: 100, pauseKind: 'facilitator' });
+    await store.setJSON(timerKey(ack.sessionId, 'A'), { ...runningTimer(), pausedAt: 100 });
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('FACILITATOR_RESUME');
+    const state = await statePromise;
+    expect(state.pausedAt).toBeNull();
+    const timer = JSON.parse(store.data.get(timerKey(ack.sessionId, 'A'))!) as TimerState;
+    expect(timer.pausedAt).toBeNull(); // resumed
+  });
+
+  it('a disconnect-kind pause refuses resume until all participants are ready', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket: mayaSock, identity: maya } = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.playerId, 'A');
+    // Seed a disconnect pause with Maya NOT ready.
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    store.data.set(
+      sessionKey(ack.sessionId),
+      JSON.stringify({
+        ...live,
+        status: 'active',
+        roundNumber: 1,
+        pausedAt: 100,
+        pauseKind: 'disconnect',
+        disconnectedPlayerIds: [],
+        players: { ...live.players, [maya.playerId]: { ...live.players[maya.playerId], isReady: false } },
+      }),
+    );
+
+    const errPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('FACILITATOR_RESUME');
+    expect((await errPromise).code).toBe('PLAYERS_NOT_READY');
+
+    // Maya readies up (PLAYER_READY widened to the disconnect-paused phase, Task 7).
+    const readyBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    mayaSock.emit('PLAYER_READY', { isReady: true });
+    const readied = await readyBc;
+    expect(readied.players[maya.playerId]!.isReady).toBe(true);
+
+    // Now resume succeeds.
+    const okPromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('FACILITATOR_RESUME');
+    const resumed = await okPromise;
+    expect(resumed.pausedAt).toBeNull();
+  });
+
+  it('a mid-round participant disconnect auto-pauses the round (amber/who-dropped)', async () => {
+    const { ack } = await createWithIdentity();
+    const maya = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.identity.playerId, 'A');
+    seed(ack.sessionId, {});
+    await store.setJSON(timerKey(ack.sessionId, 'A'), runningTimer());
+
+    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    maya.socket.disconnect();
+    const state = await statePromise;
+    expect(state.pausedAt).not.toBeNull();
+    expect(state.pauseKind).toBe('disconnect');
+    expect(state.disconnectedPlayerIds).toContain(maya.identity.playerId);
+    const timer = JSON.parse(store.data.get(timerKey(ack.sessionId, 'A'))!) as TimerState;
+    expect(timer.pausedAt).not.toBeNull(); // clock frozen, key kept
+  });
+
+  it('a reconnecting mid-round participant is re-sent BOMB_INIT and cleared from the dropped list', async () => {
+    const { ack } = await createWithIdentity();
+    const maya = await joinWithIdentity(ack.joinCode, 'Maya');
+    await assign(maya.identity.playerId, 'A');
+    // Seed active+paused-disconnect with Maya dropped, and a stored bomb for Team A.
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    store.data.set(
+      sessionKey(ack.sessionId),
+      JSON.stringify({
+        ...live,
+        status: 'active',
+        roundNumber: 1,
+        pausedAt: 100,
+        pauseKind: 'disconnect',
+        disconnectedPlayerIds: [maya.identity.playerId],
+      }),
+    );
+    await store.setJSON(bombKey(ack.sessionId, 'A'), { modules: [], strikes: 0 } as never);
+    maya.socket.disconnect();
+
+    // The restore broadcasts a cleared SESSION_STATE to the room — assert via the
+    // facilitator (reliable, no listener-attach race), and confirm Maya's reconnect
+    // socket lands in Team A's room (proves the team-room re-join half of FR13).
+    const facCleared = new Promise<SessionState>((resolve) => {
+      const onState = (s: SessionState) => {
+        if (!s.disconnectedPlayerIds.includes(maya.identity.playerId)) {
+          facilitator.off('SESSION_STATE', onState);
+          resolve(s);
+        }
+      };
+      facilitator.on('SESSION_STATE', onState);
+    });
+    const reconnect = await server.connectClient({
+      sessionId: ack.sessionId,
+      reattachToken: maya.identity.reattachToken,
+    });
+    const after = await facCleared;
+    expect(after.disconnectedPlayerIds).not.toContain(maya.identity.playerId);
+    expect(after.pausedAt).not.toBeNull(); // STILL paused — facilitator resumes
+
+    const teamA = await server.io.in(teamRoom(ack.sessionId, 'A')).fetchSockets();
+    expect(teamA.map((s) => s.data.playerId)).toContain(maya.identity.playerId);
+    expect(reconnect.connected).toBe(true);
+  });
+});

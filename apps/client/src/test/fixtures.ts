@@ -57,6 +57,9 @@ export function makeSession(overrides: Partial<SessionState> = {}): SessionState
     players: {},
     teams: {},
     roundNumber: 0,
+    pausedAt: null,
+    pauseKind: null,
+    disconnectedPlayerIds: [],
     ...overrides,
   };
 }
