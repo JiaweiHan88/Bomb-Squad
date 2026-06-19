@@ -8,7 +8,7 @@ import { useVoiceStore } from '../voiceStore.js';
  * transition clears it so no stale dots survive a drop.
  */
 beforeEach(() => {
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false });
 });
 
 describe('voiceStore.activeSpeakers', () => {
@@ -69,5 +69,41 @@ describe('voiceStore.muted', () => {
     useVoiceStore.getState().setMuted(true);
     useVoiceStore.getState().reset();
     expect(useVoiceStore.getState().muted).toBe(false);
+  });
+});
+
+/**
+ * voiceStore blocked-autoplay flag (Story 3.6). `audioBlocked` composes WITH
+ * `connected` (a connected-but-silent participant) and is cleared on every
+ * non-connected transition so a stale flag can't survive a reconnect.
+ */
+describe('voiceStore.audioBlocked', () => {
+  it('defaults to false', () => {
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('setAudioBlocked flips the flag both ways', () => {
+    useVoiceStore.getState().setAudioBlocked(true);
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+    useVoiceStore.getState().setAudioBlocked(false);
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('setConnecting clears audioBlocked (no stale flag on reconnect)', () => {
+    useVoiceStore.getState().setAudioBlocked(true);
+    useVoiceStore.getState().setConnecting();
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('setUnavailable clears audioBlocked', () => {
+    useVoiceStore.getState().setAudioBlocked(true);
+    useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('reset clears audioBlocked', () => {
+    useVoiceStore.getState().setAudioBlocked(true);
+    useVoiceStore.getState().reset();
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
   });
 });

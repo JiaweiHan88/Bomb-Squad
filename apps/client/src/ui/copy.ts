@@ -119,6 +119,11 @@ export const VOICE_CONNECTED = 'Bomb Room voice connected.';
 // Non-blocking failure microcopy — the game keeps running (AC #4); dismissible.
 export const VOICE_UNAVAILABLE = 'Voice unavailable — game continues without it';
 export const VOICE_DISMISS = 'Dismiss';
+// Graceful degradation (Story 3.6). Manual reconnect after a drop/failure — stays
+// reachable even after the banner is dismissed (no auto-backoff; that's 10-3).
+// The blocked-autoplay affordance restores remote audio with a user gesture.
+export const VOICE_RECONNECT = 'Reconnect voice';
+export const VOICE_ENABLE_AUDIO = 'Click to enable audio';
 
 // Spectator Lounge listen-only voice (Story 3.3) — a spectator HEARS the Bomb
 // Room but cannot speak into it (EXPERIENCE.md Flow 4), so the copy says

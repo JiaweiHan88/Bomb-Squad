@@ -82,13 +82,13 @@ beforeEach(() => {
     bomb: { strikes: 0 } as never,
     connection: 'connected',
   });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useGameStore.setState({ session: null, bomb: null, timer: null, connection: 'disconnected' });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false });
 });
 
 // ── The load-bearing independence test (AC #3) ───────────────────────────────
@@ -568,6 +568,136 @@ describe('setMuted (self-mute publish toggle)', () => {
 
     await controller.setMuted(true);
     await controller.setMuted(false);
+
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+});
+
+// ── TURN relay rtcConfig + force-relay (Story 3.6, AC #3) ────────────────────
+// A grant carrying iceServers makes connect() receive { rtcConfig: { iceServers } };
+// a grant without it keeps the unchanged connect(url, token) (no third arg). The
+// dev force-relay toggle adds iceTransportPolicy: 'relay'.
+
+const ICE = [
+  { urls: ['turn:localhost:3478?transport=udp', 'turn:localhost:3478?transport=tcp'], username: '999:self-1', credential: 'abc==' },
+];
+function okTokenWithIce(): TokenResult {
+  return { ok: true, grant: { ...GRANT, iceServers: ICE } };
+}
+
+describe('TURN relay rtcConfig', () => {
+  it('passes grant iceServers to connect() as rtcConfig.iceServers', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okTokenWithIce() });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, { rtcConfig: { iceServers: ICE } });
+  });
+
+  it('a TURN-less grant calls connect(url, token) with NO third arg (no regression)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token);
+    expect(connect.mock.calls[0]).toHaveLength(2); // exactly two args
+  });
+
+  it('force-relay adds iceTransportPolicy: relay (alongside iceServers when present)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okTokenWithIce(),
+      forceRelay: () => true,
+    });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, {
+      rtcConfig: { iceServers: ICE, iceTransportPolicy: 'relay' },
+    });
+  });
+
+  it('force-relay applies even with a TURN-less grant (relay-only, no iceServers)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okToken(),
+      forceRelay: () => true,
+    });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, {
+      rtcConfig: { iceTransportPolicy: 'relay' },
+    });
+  });
+});
+
+// ── Blocked-autoplay recovery (Story 3.6, AC #6/#7) ──────────────────────────
+// A rejected startAudio() on connect surfaces as voiceStore.audioBlocked (the
+// connection still succeeds → connected). resumeAudio() retries startAudio and
+// clears the flag on success, leaves it set on failure, and never throws. The
+// whole path never mutates gameStore.
+
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+describe('blocked-autoplay (audioBlocked) recovery', () => {
+  it('a rejected startAudio on connect sets audioBlocked but stays connected', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().status).toBe('connected'); // NOT unavailable
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+  });
+
+  it('a resolved startAudio on connect leaves audioBlocked false', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('resumeAudio() retries startAudio and clears the flag on success', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+
+    await controller.resumeAudio(); // startAudio now resolves (default mock)
+    expect(startAudio).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('resumeAudio() leaves the flag set (and never throws) when startAudio still rejects', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('blocked on connect'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+
+    startAudio.mockRejectedValueOnce(new Error('still blocked'));
+    await expect(controller.resumeAudio()).resolves.toBeUndefined(); // swallowed
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+  });
+
+  it('resumeAudio() before connect is a no-op (not connected → nothing to resume)', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.resumeAudio();
+    expect(startAudio).not.toHaveBeenCalled();
+  });
+
+  it('the blocked-autoplay path never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    await controller.resumeAudio();
 
     const after = useGameStore.getState();
     expect(after.session).toBe(before.session);

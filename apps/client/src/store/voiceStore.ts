@@ -44,17 +44,30 @@ interface VoiceState {
    * reconnect (a fresh connect always starts un-muted).
    */
   muted: boolean;
+  /**
+   * Remote-audio autoplay was blocked by the browser (Story 3.6). A participant
+   * can be genuinely `connected` (transport up, tracks subscribed) yet silent
+   * because `room.startAudio()` was rejected without a user gesture. This is NOT
+   * a failure state — it composes WITH `connected` and never trips the
+   * `unavailable` banner; the in-round `AudioUnblockPrompt` surfaces a
+   * click-to-resume affordance while it is `true`. Written ONLY by `connectVoice`
+   * (set on a blocked `startAudio`, cleared on a successful resume). Cleared on
+   * every non-connected transition so a stale flag can't survive a reconnect.
+   */
+  audioBlocked: boolean;
 
-  /** idle/unavailable → connecting. Clears any prior room/identity/error + speakers + mute. */
+  /** idle/unavailable → connecting. Clears any prior room/identity/error + speakers + mute + audioBlocked. */
   setConnecting: () => void;
   /** connecting → connected. Records the room + identity from the token grant. */
   setConnected: (info: { room: string; identity: string }) => void;
-  /** any → unavailable. Drops room/identity/speakers/mute; keeps an optional non-secret error string. */
+  /** any → unavailable. Drops room/identity/speakers/mute/audioBlocked; keeps an optional non-secret error string. */
   setUnavailable: (error?: string) => void;
   /** Replace the set of currently-speaking durable player ids. */
   setActiveSpeakers: (ids: string[]) => void;
   /** Set the local self-mute flag (Story 3.4). */
   setMuted: (muted: boolean) => void;
+  /** Set the blocked-autoplay flag (Story 3.6). */
+  setAudioBlocked: (blocked: boolean) => void;
   /** back to idle (clean disconnect / teardown). */
   reset: () => void;
 }
@@ -66,13 +79,15 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   error: undefined,
   activeSpeakers: [],
   muted: false,
+  audioBlocked: false,
 
   setConnecting: () =>
-    set({ status: 'connecting', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false }),
+    set({ status: 'connecting', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false }),
   setConnected: ({ room, identity }) => set({ status: 'connected', room, identity, error: undefined }),
   setUnavailable: (error) =>
-    set({ status: 'unavailable', room: undefined, identity: undefined, error, activeSpeakers: [], muted: false }),
+    set({ status: 'unavailable', room: undefined, identity: undefined, error, activeSpeakers: [], muted: false, audioBlocked: false }),
   setActiveSpeakers: (ids) => set({ activeSpeakers: ids }),
   setMuted: (muted) => set({ muted }),
-  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false }),
+  setAudioBlocked: (audioBlocked) => set({ audioBlocked }),
+  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false }),
 }));

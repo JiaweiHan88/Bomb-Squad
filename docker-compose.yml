@@ -86,6 +86,16 @@ services:
       - "--fingerprint"
       - "--no-tlsv1"
       - "--no-tlsv1_1"
+      # Advertised relay address in XOR-RELAYED-ADDRESS (Story 3.6). Without it,
+      # coturn advertises the container-internal RFC1918 IP and external clients
+      # send relay traffic to an unroutable address. Env-driven: set
+      # TURN_EXTERNAL_IP to the host's PUBLIC IP in production. Defaults to the
+      # loopback so the published-port localhost dev stack (host:3478 →
+      # container, host:40000-40031 → container) advertises a host-reachable
+      # address out of the box — an empty `--external-ip=` arg is malformed, so a
+      # concrete default beats an empty value (a wider NAT/TLS-turns hardening is
+      # Story 10-3).
+      - "--external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}"
     ports:
       - "3478:3478"
       - "3478:3478/udp"

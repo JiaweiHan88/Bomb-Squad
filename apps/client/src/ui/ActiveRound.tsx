@@ -9,6 +9,7 @@ import ResolutionBanner from './ResolutionBanner.js';
 import VoiceController from './VoiceController.js';
 import SpeakerIndicator from './SpeakerIndicator.js';
 import MuteControl from './MuteControl.js';
+import AudioUnblockPrompt from './AudioUnblockPrompt.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM } from './copy.js';
 
 /**
@@ -70,6 +71,7 @@ export default function ActiveRound() {
           (top-center/right) is reserved for Stories 4.4/4.5 — pill stays clear. */}
       <SpeakerIndicator />
       <MuteControl />
+      <AudioUnblockPrompt />
       <VoiceController />
     </div>
   );

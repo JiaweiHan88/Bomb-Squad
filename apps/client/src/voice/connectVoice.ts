@@ -1,4 +1,4 @@
-import { Room, RoomEvent, Track, type RemoteTrack } from 'livekit-client';
+import { Room, RoomEvent, Track, type RemoteTrack, type RoomConnectOptions } from 'livekit-client';
 import type {
   VoiceTokenRequestPayload,
   VoiceTokenGrantPayload,
@@ -48,7 +48,9 @@ interface SpeakingParticipant {
 export interface VoiceRoom {
   on(event: RoomEvent, listener: (...args: never[]) => void): this;
   off(event: RoomEvent, listener: (...args: never[]) => void): this;
-  connect(url: string, token: string): Promise<void>;
+  // `options` carries the Story 3.6 `rtcConfig` (TURN iceServers + optional
+  // force-relay). Optional so a TURN-less connect calls `connect(url, token)`.
+  connect(url: string, token: string, options?: RoomConnectOptions): Promise<void>;
   disconnect(): Promise<void>;
   startAudio(): Promise<void>;
   readonly localParticipant: {
@@ -66,6 +68,14 @@ export interface VoiceControllerDeps {
   createRoom: () => VoiceRoom;
   /** Requests a FRESH voice token (AC #6 — never cached/reused). Default: `requestVoiceToken`. */
   requestToken: () => Promise<TokenResult>;
+  /**
+   * Dev-only verification toggle (Story 3.6): when it returns `true`, the connect
+   * forces `iceTransportPolicy: 'relay'` so ALL media must traverse the coturn
+   * relay — the only honest proof the TURN path actually works (on localhost,
+   * default ICE always picks a host candidate and never touches TURN). Default
+   * reads `VITE_FORCE_TURN_RELAY` / a `?relay` query param; OFF in production.
+   */
+  forceRelay?: () => boolean;
 }
 
 /**
@@ -219,7 +229,22 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
       return;
     }
-    const { url, token, room: roomName, identity } = result.grant;
+    const { url, token, room: roomName, identity, iceServers } = result.grant;
+
+    // Assemble the optional RTCConfiguration (Story 3.6): TURN iceServers from the
+    // grant (corporate-NAT relay path) + the dev force-relay toggle. When neither
+    // applies we call `connect(url, token)` with NO third arg — the unchanged
+    // pre-3.6 path (and what the existing connect-args assertions expect).
+    const forceRelay = deps.forceRelay?.() ?? false;
+    let connectOptions: RoomConnectOptions | undefined;
+    if ((iceServers && iceServers.length > 0) || forceRelay) {
+      connectOptions = {
+        rtcConfig: {
+          ...(iceServers && iceServers.length > 0 ? { iceServers } : {}),
+          ...(forceRelay ? { iceTransportPolicy: 'relay' as const } : {}),
+        },
+      };
+    }
 
     const r = deps.createRoom();
     onSubscribed = (track: RemoteTrack) => {
@@ -288,8 +313,13 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     r.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected as (...args: never[]) => void);
 
     try {
-      // url + token from the ack; never logged.
-      await r.connect(url, token);
+      // url + token from the ack; never logged. Pass rtcConfig only when present
+      // so a TURN-less connect stays exactly `connect(url, token)` (no regression).
+      if (connectOptions !== undefined) {
+        await r.connect(url, token, connectOptions);
+      } else {
+        await r.connect(url, token);
+      }
       // Publish the mic ONLY for a Bomb Room participant — needs the user gesture
       // + permission (Task 4 calls connect() from a click handler). A listen-only
       // spectator (publish === false) skips this entirely: getUserMedia is never
@@ -326,11 +356,40 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     published = publish;
     useVoiceStore.getState().setConnected({ room: roomName, identity });
 
-    // Best-effort autoplay recovery (Task 2 autoplay note): we are inside the
-    // connect gesture chain, so resuming the AudioContext here unblocks remote
-    // playback. Blocked playback must NOT fail the connection — the participant
-    // is still connected and publishing, so a startAudio() rejection is ignored.
-    void r.startAudio().catch(() => undefined);
+    // Best-effort autoplay recovery (Story 3.2): we are inside the connect gesture
+    // chain, so resuming the AudioContext here unblocks remote playback. Blocked
+    // playback must NOT fail the connection — the participant is still connected.
+    // Story 3.6: instead of swallowing a rejection, surface it as
+    // `voiceStore.audioBlocked` so the `AudioUnblockPrompt` can offer a
+    // click-to-resume affordance. Epoch-guarded so a late resolve/reject can't
+    // write the flag onto a torn-down / reconnected store.
+    void r.startAudio().then(
+      () => {
+        if (epoch === connectEpoch) useVoiceStore.getState().setAudioBlocked(false);
+      },
+      () => {
+        if (epoch === connectEpoch) useVoiceStore.getState().setAudioBlocked(true);
+      },
+    );
+  }
+
+  /**
+   * Resume blocked remote audio (Story 3.6, AC #6). Called from the
+   * `AudioUnblockPrompt`'s user gesture when `voiceStore.audioBlocked` is true.
+   * Only acts while connected; a successful `startAudio()` clears the flag, a
+   * rejection leaves it set. Try/catch-wrapped like teardown — never throws into
+   * the UI. Writes ONLY voiceStore.
+   */
+  async function resumeAudio(): Promise<void> {
+    if (phase !== 'connected' || !room) return;
+    try {
+      await room.startAudio();
+    } catch {
+      // Still blocked (e.g. gesture not honored) — leave the flag set so the
+      // affordance stays visible; never throw.
+      return;
+    }
+    useVoiceStore.getState().setAudioBlocked(false);
   }
 
   /**
@@ -394,13 +453,28 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     useVoiceStore.getState().setMuted(muted);
   }
 
-  return { connect, disconnect, setMuted };
+  return { connect, disconnect, setMuted, resumeAudio };
+}
+
+/**
+ * Resolve the dev-only force-relay toggle (Story 3.6) for the real singleton.
+ * `VITE_FORCE_TURN_RELAY === '1'` (build/env) OR a `?relay` query param (handy
+ * for an ad-hoc browser check). Defaults OFF — never forces relay in production.
+ */
+function defaultForceRelay(): boolean {
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  if (env?.VITE_FORCE_TURN_RELAY === '1') return true;
+  if (typeof window !== 'undefined') {
+    return new URLSearchParams(window.location.search).has('relay');
+  }
+  return false;
 }
 
 // App-wide singleton: the real LiveKit Room + the real VOICE_TOKEN request.
 const controller = createVoiceController({
   createRoom: () => new Room(),
   requestToken: requestVoiceToken,
+  forceRelay: defaultForceRelay,
 });
 
 /** Connect the local participant to their server-assigned voice room. MUST be
@@ -418,3 +492,8 @@ export const disconnectVoice = (): Promise<void> => controller.disconnect();
  * non-publishing / not-connected client (it simply does nothing). The caller (the
  * publisher-only MuteControl) owns the decision; no role branching here. */
 export const setVoiceMuted = (muted: boolean): Promise<void> => controller.setMuted(muted);
+
+/** Resume blocked remote audio (Story 3.6). Call from a user gesture when
+ * `voiceStore.audioBlocked` is true; clears the flag on success, no-ops when not
+ * connected. Safe to call repeatedly. */
+export const resumeVoiceAudio = (): Promise<void> => controller.resumeAudio();

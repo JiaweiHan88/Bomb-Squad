@@ -21,6 +21,7 @@ export type {
   VoiceTokenRequestPayload,
   VoiceTokenGrantPayload,
   VoiceTokenErrorPayload,
+  IceServer,
   PlayerRemovePayload,
   PlayerReadyPayload,
   SessionIdentityPayload,

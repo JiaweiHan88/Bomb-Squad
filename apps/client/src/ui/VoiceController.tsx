@@ -12,6 +12,7 @@ import {
   VOICE_LOUNGE_CONNECTED,
   VOICE_UNAVAILABLE,
   VOICE_DISMISS,
+  VOICE_RECONNECT,
 } from './copy.js';
 
 /**
@@ -33,6 +34,13 @@ import {
  *
  * Non-blocking (AC #4): a voice failure renders as dismissible microcopy and
  * never blocks the game — there is no modal and no game-state coupling.
+ *
+ * Graceful degradation (Story 3.6): the `unavailable` state also offers a manual
+ * "Reconnect voice" affordance that re-runs `connectVoice` with a FRESH token in
+ * the player's existing role mode. The reconnect control stays reachable even
+ * after the banner is dismissed — dismissing only hides the message line, never
+ * the ability to re-attempt voice. There is no auto-backoff loop here (that
+ * hardening is Story 10-3).
  */
 export default function VoiceController() {
   const session = useGameStore((s) => s.session);
@@ -97,16 +105,26 @@ export default function VoiceController() {
         </p>
       )}
 
-      {status === 'unavailable' && !dismissed && (
+      {status === 'unavailable' && (
+        // The banner message + Dismiss hide once dismissed, but the Reconnect
+        // affordance ALWAYS stays reachable while unavailable (AC #1/#2): a
+        // dismissed banner must never strip the ability to re-attempt voice.
         <div className="flex items-center gap-2 rounded-md bg-surface-raised px-3 py-2">
-          <p className="font-mono text-xs text-ink-muted">{VOICE_UNAVAILABLE}</p>
-          <button
-            type="button"
-            onClick={() => setDismissed(true)}
-            className="font-mono text-xs uppercase tracking-widest text-ink-muted underline hover:text-ink-primary"
-          >
-            {VOICE_DISMISS}
-          </button>
+          {!dismissed && (
+            <>
+              <p className="font-mono text-xs text-ink-muted">{VOICE_UNAVAILABLE}</p>
+              <button
+                type="button"
+                onClick={() => setDismissed(true)}
+                className="font-mono text-xs uppercase tracking-widest text-ink-muted underline hover:text-ink-primary"
+              >
+                {VOICE_DISMISS}
+              </button>
+            </>
+          )}
+          <Button variant="secondary" onClick={() => void connectVoice({ publish })}>
+            {VOICE_RECONNECT}
+          </Button>
         </div>
       )}
     </div>
