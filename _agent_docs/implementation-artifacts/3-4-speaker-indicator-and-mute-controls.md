@@ -10,7 +10,7 @@ context:
 
 # Story 3.4: Speaker Indicator & Mute Controls
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
