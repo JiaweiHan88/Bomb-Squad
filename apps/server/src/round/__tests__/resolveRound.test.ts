@@ -85,7 +85,13 @@ async function makeHarness(opts?: {
   if (opts?.withSession ?? true) await store.setJSON(sessionKey(SID), session);
 
   if (opts?.withRound ?? true) {
-    const round: RoundState = { roundNumber: ROUND_NUMBER, status: 'active', defusers: { A: 'p1' }, retry: false };
+    const round: RoundState = {
+      roundNumber: ROUND_NUMBER,
+      status: 'active',
+      defusers: { A: 'p1' },
+      outcomes: {},
+      retry: false,
+    };
     await store.setJSON(roundKey(SID, ROUND_NUMBER), round);
   }
 
@@ -132,7 +138,11 @@ describe('resolveRound — defuse (AC-1)', () => {
       {
         room: `session:${SID}`,
         event: 'SCOREBOARD',
-        payload: { teams: { A: { cumulativeTimeMs: 61_000, rounds: [1_000, 60_000] } }, winnerTeamId: 'A' },
+        payload: {
+          teams: { A: { cumulativeTimeMs: 61_000, rounds: [1_000, 60_000] } },
+          winnerTeamId: 'A',
+          failedTeams: [], // defused → no retry offered (Story 8.8)
+        },
       },
     ]);
   });
@@ -163,6 +173,64 @@ describe('resolveRound — failures (AC-2)', () => {
     expect((await loadRound(h))!.status).toBe('exploded');
     expect((await loadSession(h))!.teams.A!.cumulativeTimeMs).toBe(30_000);
     expect(h.emitted[0]).toMatchObject({ event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: 30_000 } });
+  });
+});
+
+describe('resolveRound — per-team outcomes + retry better-of-two (Story 8.8)', () => {
+  /** Overwrite the seeded round with retry: true (a re-attempt resolution). */
+  const markRetry = async (h: Harness) => {
+    const round = (await loadRound(h))!;
+    await h.store.setJSON(roundKey(SID, ROUND_NUMBER), { ...round, retry: true });
+  };
+
+  it('records the per-team outcome on the RoundState (gates ROUND_RETRY)', async () => {
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
+    await resolveRound(h.deps, SID, 'A', 'time-expired', TIMER_MS + 1);
+    expect((await loadRound(h))!.outcomes).toEqual({ A: 'time-expired' });
+  });
+
+  it('a FIRST attempt appends (retry: false unchanged)', async () => {
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
+    await resolveRound(h.deps, SID, 'A', 'defused', 60_000);
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([60_000]);
+  });
+
+  it('a faster retry REPLACES the round time in place (better-of-two) and shifts cumulative', async () => {
+    // Seed a failed round-1 time of 60s, then retry and defuse in 40s.
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0), cumulativeTimeMs: 60_000 });
+    await markRetry(h);
+    await resolveRound(h.deps, SID, 'A', 'defused', 40_000);
+
+    const team = (await loadSession(h))!.teams.A!;
+    expect(team.roundTimesMs).toEqual([40_000]); // replaced, not appended
+    expect(team.cumulativeTimeMs).toBe(40_000); // shifted by (40k - 60k)
+    // Invariant preserved.
+    expect(team.cumulativeTimeMs).toBe(team.roundTimesMs.reduce((a, b) => a + b, 0));
+  });
+
+  it('a slower/again-failed retry leaves the recorded time UNCHANGED (keeps the better)', async () => {
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0), cumulativeTimeMs: 40_000 });
+    await markRetry(h);
+    await resolveRound(h.deps, SID, 'A', 'time-expired', TIMER_MS + 1); // elapsed = TIMER_MS (worse)
+
+    const team = (await loadSession(h))!.teams.A!;
+    expect(team.roundTimesMs).toEqual([40_000]); // unchanged
+    expect(team.cumulativeTimeMs).toBe(40_000);
+  });
+
+  it('retry never grows roundTimesMs (no double-listing the same round)', async () => {
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0), cumulativeTimeMs: 50_000 });
+    await markRetry(h);
+    await resolveRound(h.deps, SID, 'A', 'defused', 30_000);
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toHaveLength(1);
+  });
+
+  it('desync: a retry with no prior slot to replace falls back to append (logged, no throw)', async () => {
+    // retry: true but the team has no recorded round time (roundTimesMs empty).
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) }); // cumulative 0 → roundTimesMs []
+    await markRetry(h);
+    await expect(resolveRound(h.deps, SID, 'A', 'defused', 30_000)).resolves.toBeUndefined();
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([30_000]); // appended fallback
   });
 });
 

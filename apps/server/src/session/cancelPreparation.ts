@@ -17,9 +17,15 @@ import type { SessionState, TeamId, TeamState } from '@bomb-squad/shared';
  * `currentDefuserIndex` advance that `openPreparation` applied (−1), so
  * open∘cancel is the identity and a cancel + re-advance lands on the same Defuser.
  *
- * Note (Story 8.8 — retry): retry reuses a roundNumber, so when retry lands it
- * must reconcile its roundNumber handling with this monotonic open/cancel
- * derivation (a retried round must not be mistaken for a fresh advance here).
+ * RETRY RECONCILE (Story 8.8 — resolves deferred-work.md:7): a retry preparation
+ * (entered via `retryRound`, not `openPreparation`) reuses the SAME `roundNumber`
+ * and does NOT advance the rotation pointer. So the monotonic `roundNumber >= 2`
+ * derivation + blind `−1` reversal below would CORRUPT the relay if applied to a
+ * cancelled retry prep (it would wrongly decrement `roundNumber` and every
+ * `currentDefuserIndex`). We detect a retry prep by its `retryingTeamId` marker
+ * and cancel it cleanly: return to 'between-rounds' clearing the marker, with
+ * `roundNumber` AND every pointer UNCHANGED. The non-retry open∘cancel identity
+ * is preserved exactly for normal preps.
  *
  * Why this exists: a facilitator who opens prep before assigning anyone to a
  * team (or who simply changes their mind) was otherwise stranded — prep had no
@@ -31,6 +37,14 @@ import type { SessionState, TeamId, TeamState } from '@bomb-squad/shared';
  */
 export function cancelPreparation(state: SessionState): SessionState {
   if (state.status !== 'preparation') return state;
+
+  // Retry prep (Story 8.8): clear the marker, return to between-rounds, leave
+  // roundNumber + every currentDefuserIndex untouched (retryRound never advanced
+  // them). Strip retryingTeamId via rest-destructure (immutable).
+  if (state.retryingTeamId !== undefined) {
+    const { retryingTeamId: _consumed, ...rest } = state;
+    return { ...rest, status: 'between-rounds' };
+  }
 
   const returnTo = state.roundNumber >= 2 ? 'between-rounds' : 'lobby';
 

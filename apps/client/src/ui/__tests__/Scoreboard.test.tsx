@@ -8,7 +8,7 @@ import { useGameStore } from '../../store/gameStore.js';
 vi.mock('../../net/socket.js', () => ({ getSocket: vi.fn(), createSocket: vi.fn() }));
 import { getSocket } from '../../net/socket.js';
 import Scoreboard from '../Scoreboard.js';
-import { START_NEXT_ROUND, BETWEEN_ROUNDS_WAITING, SCOREBOARD_LEADING } from '../copy.js';
+import { START_NEXT_ROUND, BETWEEN_ROUNDS_WAITING, SCOREBOARD_LEADING, RETRY_ROUND } from '../copy.js';
 
 let mock: MockSocket;
 
@@ -25,12 +25,16 @@ function seedBetweenRounds(viewer: 'fac' | 'p1') {
     players: {
       fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
       p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+      p1b: makePlayer({ playerId: 'p1b', displayName: 'Mara', role: 'expert', teamId: 'A' }),
       p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'defuser', teamId: 'B' }),
+      p2b: makePlayer({ playerId: 'p2b', displayName: 'Dana', role: 'expert', teamId: 'B' }),
     },
     teams: {
-      // Distinct per-round + total values so each rendered time string is unique.
-      A: makeTeam('A', ['p1'], { cumulativeTimeMs: 61_000, roundTimesMs: [40_000, 21_000] }),
-      B: makeTeam('B', ['p2'], { cumulativeTimeMs: 130_000, roundTimesMs: [70_000, 60_000] }),
+      // 2-player teams at index 0 → a natural round still remains (NOT relay-complete),
+      // so the facilitator's "Start next round" advance shows. Distinct time values
+      // keep each rendered string unique.
+      A: makeTeam('A', ['p1', 'p1b'], { cumulativeTimeMs: 61_000, roundTimesMs: [40_000, 21_000] }),
+      B: makeTeam('B', ['p2', 'p2b'], { cumulativeTimeMs: 130_000, roundTimesMs: [70_000, 60_000] }),
     },
   });
   useGameStore.setState({ session, myPlayerId: viewer, scoreboard: null });
@@ -92,5 +96,131 @@ describe('Scoreboard (Story 8.6)', () => {
       });
     });
     expect(screen.getByRole('alert')).toHaveTextContent('Assign at least one player to a team first.');
+  });
+});
+
+describe('Scoreboard — retry a failed round (Story 8.8)', () => {
+  /** Seed between-rounds and set the SCOREBOARD payload's failedTeams. */
+  function seedWithFailedTeams(viewer: 'fac' | 'p1', failedTeams: ('A' | 'B')[]) {
+    seedBetweenRounds(viewer);
+    const teams = useGameStore.getState().scoreboard?.teams ?? {};
+    useGameStore.setState({ scoreboard: { teams, failedTeams } });
+  }
+
+  it('facilitator sees a Retry-round control for a failed team; confirming emits ROUND_RETRY', async () => {
+    seedWithFailedTeams('fac', ['A']);
+    render(<Scoreboard />);
+
+    const retry = screen.getByRole('button', { name: RETRY_ROUND });
+    await userEvent.click(retry); // arm the two-step confirm
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    expect(mock.emit).toHaveBeenCalledWith('ROUND_RETRY', { teamId: 'A' });
+  });
+
+  it('no Retry control when no team failed (a defused round)', () => {
+    seedWithFailedTeams('fac', []);
+    render(<Scoreboard />);
+    expect(screen.queryByRole('button', { name: RETRY_ROUND })).not.toBeInTheDocument();
+  });
+
+  it('a non-facilitator never sees the Retry control', () => {
+    seedWithFailedTeams('p1', ['A']);
+    render(<Scoreboard />);
+    expect(screen.queryByRole('button', { name: RETRY_ROUND })).not.toBeInTheDocument();
+  });
+
+  it('both teams failed → a per-team Retry control each', () => {
+    seedWithFailedTeams('fac', ['A', 'B']);
+    render(<Scoreboard />);
+    // Two labelled retry buttons (the single-team unlabelled form is not used).
+    expect(screen.getByRole('button', { name: /retry round — team a/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry round — team b/i })).toBeInTheDocument();
+  });
+});
+
+describe('Scoreboard — relay completion & odd-team equalisation (Story 8.9)', () => {
+  /** A 1v1 between-rounds at index 0 → both teams exhausted, nothing owed → relay complete. */
+  function seedRelayComplete(viewer: 'fac' | 'p1') {
+    const session = makeSession({
+      status: 'between-rounds',
+      roundNumber: 1,
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'defuser', teamId: 'B' }),
+      },
+      teams: {
+        A: makeTeam('A', ['p1'], { currentDefuserIndex: 0, cumulativeTimeMs: 40_000, roundTimesMs: [40_000] }),
+        B: makeTeam('B', ['p2'], { currentDefuserIndex: 0, cumulativeTimeMs: 70_000, roundTimesMs: [70_000] }),
+      },
+    });
+    useGameStore.setState({ session, myPlayerId: viewer, scoreboard: null });
+  }
+
+  /**
+   * An odd 2v1 with naturals exhausted (index 1): A=[p1,p1b] len2 (done), B=[p2]
+   * len1 → B owes 1 equalisation round. `volunteer` optionally pre-designates B's pick.
+   */
+  function seedEqualisation(viewer: 'fac' | 'p1', volunteer?: string) {
+    const session = makeSession({
+      status: 'between-rounds',
+      roundNumber: 2,
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'expert', teamId: 'A' }),
+        p1b: makePlayer({ playerId: 'p1b', displayName: 'Mara', role: 'expert', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'expert', teamId: 'B' }),
+      },
+      teams: {
+        A: makeTeam('A', ['p1', 'p1b'], { currentDefuserIndex: 1, roundTimesMs: [40_000, 21_000], cumulativeTimeMs: 61_000 }),
+        B: makeTeam('B', ['p2'], { currentDefuserIndex: 1, roundTimesMs: [70_000], cumulativeTimeMs: 70_000, equalisationVolunteerId: volunteer }),
+      },
+    });
+    useGameStore.setState({ session, myPlayerId: viewer, scoreboard: null });
+  }
+
+  it('relay complete → shows the completion notice and NO Start-next-round button', () => {
+    seedRelayComplete('fac');
+    render(<Scoreboard />);
+    expect(screen.getByTestId('relay-complete')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: START_NEXT_ROUND })).not.toBeInTheDocument();
+  });
+
+  it('surfaces a RELAY_COMPLETE server refusal as an alert', () => {
+    seedBetweenRounds('fac');
+    render(<Scoreboard />);
+    act(() => {
+      mock.fire('ERROR', { code: 'RELAY_COMPLETE', message: 'The relay is complete — end the session.', recoverable: true });
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('The relay is complete');
+  });
+
+  it('equalisation phase → shows the volunteer picker; Start is gated until a volunteer is chosen', () => {
+    seedEqualisation('fac'); // no volunteer yet
+    render(<Scoreboard />);
+    expect(screen.getByTestId('equalisation-B')).toBeInTheDocument();
+    // Start is disabled until the facilitator picks a volunteer.
+    expect(screen.getByRole('button', { name: START_NEXT_ROUND })).toBeDisabled();
+  });
+
+  it('clicking a volunteer emits TEAM_ASSIGN(role: defuser) for the owing team', async () => {
+    seedEqualisation('fac');
+    render(<Scoreboard />);
+    await userEvent.click(screen.getByRole('button', { name: 'Devon' }));
+    expect(mock.emit).toHaveBeenCalledWith('TEAM_ASSIGN', { playerId: 'p2', teamId: 'B', role: 'defuser' });
+  });
+
+  it('once a volunteer is designated, Start is enabled', () => {
+    seedEqualisation('fac', 'p2'); // Devon pre-designated
+    render(<Scoreboard />);
+    expect(screen.getByRole('button', { name: START_NEXT_ROUND })).toBeEnabled();
+  });
+
+  it('a non-facilitator sees neither the equalisation picker nor Start', () => {
+    seedEqualisation('p1');
+    render(<Scoreboard />);
+    expect(screen.queryByTestId('equalisation-B')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: START_NEXT_ROUND })).not.toBeInTheDocument();
   });
 });

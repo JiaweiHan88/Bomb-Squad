@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { ErrorPayload, TeamId, TeamState } from '@bomb-squad/shared';
+import { isRelayComplete, naturalRoundRemains, equalisationRoundsOwed } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import { formatTimerDisplay } from '../scenes/timerLcd.js';
 import ConfirmButton from './ConfirmButton.js';
+import Button from './Button.js';
 import PauseOverlay from './PauseOverlay.js';
 import {
   SCOREBOARD_EYEBROW,
@@ -13,6 +15,12 @@ import {
   SCOREBOARD_ROUND_LABEL,
   START_NEXT_ROUND,
   BETWEEN_ROUNDS_WAITING,
+  RETRY_ROUND,
+  RETRY_ROUND_TEAM,
+  EQUALISATION_HEADING,
+  EQUALISATION_PROMPT,
+  EQUALISATION_NEEDS_VOLUNTEER,
+  RELAY_COMPLETE_NOTICE,
   TEAM_A,
   TEAM_B,
 } from './copy.js';
@@ -20,12 +28,24 @@ import {
 const TEAM_LABELS: Record<TeamId, string> = { A: TEAM_A, B: TEAM_B };
 const TEAM_ORDER: TeamId[] = ['A', 'B'];
 
-/** PREPARATION_OPEN rejections this surface owns (same discipline as Preparation). */
+/**
+ * PREPARATION_OPEN + ROUND_RETRY + equalisation rejections this surface owns
+ * (same discipline as Preparation). The retry codes (Story 8.8) and the relay /
+ * equalisation codes (Story 8.9) paint the same inline alert so nothing fails
+ * silently.
+ */
 const ADVANCE_ERROR_CODES: ReadonlySet<string> = new Set([
   'NOT_IN_SESSION',
   'NOT_FACILITATOR',
   'CANNOT_OPEN_PREP',
   'PREPARATION_OPEN_FAILED',
+  'CANNOT_RETRY',
+  'ROUND_NOT_FAILED',
+  'ROUND_RETRY_FAILED',
+  'RELAY_COMPLETE',
+  'EQUALISATION_VOLUNTEER_REQUIRED',
+  'NO_EQUALISATION_ROUND',
+  'INVALID_VOLUNTEER',
 ]);
 
 /**
@@ -66,6 +86,9 @@ function provisionalLeader(teams: TeamState[]): TeamId | undefined {
 export default function Scoreboard() {
   const session = useGameStore((s) => s.session);
   const selfId = useGameStore((s) => s.myPlayerId);
+  // The one-shot SCOREBOARD payload carries which team(s) failed the just-resolved
+  // round (Story 8.8) — drives the facilitator's "Retry round" affordance.
+  const scoreboard = useGameStore((s) => s.scoreboard);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
 
   // PREPARATION_OPEN has no ack — rejections arrive as typed ERRORs. Only
@@ -95,6 +118,35 @@ export default function Scoreboard() {
   const advance = () => {
     setAdvanceError(null);
     getSocket().emit('PREPARATION_OPEN');
+  };
+
+  // Teams whose just-resolved round failed (Story 8.8). Only the facilitator gets
+  // the confirm-gated "Retry round" affordance, and only for a failed team — a
+  // defused round offers no retry (AC-3). The server re-checks eligibility.
+  const failedTeams = (scoreboard?.failedTeams ?? []).filter((id) => session.teams[id] !== undefined);
+  const retryRound = (teamId: TeamId) => {
+    setAdvanceError(null);
+    getSocket().emit('ROUND_RETRY', { teamId });
+  };
+
+  // Relay orchestration (Story 8.9) — derived from the SAME shared predicates the
+  // server authority uses, so the facilitator UI can never drift from the server.
+  const relayComplete = isRelayComplete(session);
+  const owed = equalisationRoundsOwed(session);
+  // Equalisation phase: every natural rotation is exhausted but the shorter team
+  // still owes an extra round (with a Facilitator-chosen volunteer Defuser).
+  const equalisationPhase = !relayComplete && !naturalRoundRemains(session);
+  const owingTeams = TEAM_ORDER.filter(
+    (id) => session.teams[id] !== undefined && (owed[id] ?? 0) > 0,
+  );
+  const needsVolunteer =
+    equalisationPhase && owingTeams.some((id) => session.teams[id]!.equalisationVolunteerId === undefined);
+
+  // Designate the equalisation volunteer (reuses TEAM_ASSIGN — the server routes a
+  // between-rounds role-only assign to the volunteer designation, Story 8.9).
+  const designateVolunteer = (teamId: TeamId, playerId: string) => {
+    setAdvanceError(null);
+    getSocket().emit('TEAM_ASSIGN', { playerId, teamId, role: 'defuser' });
   };
 
   return (
@@ -169,7 +221,68 @@ export default function Scoreboard() {
           </p>
         )}
         {isFacilitator ? (
-          <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} />
+          <>
+            {/* Retry a failed round (Story 8.8): one confirm-gated button per
+                failed team. Single team → unlabelled "Retry round"; both failed →
+                per-team labels so the facilitator picks. Available even at relay
+                completion (a failed final round is still retryable). */}
+            {failedTeams.map((teamId) => (
+              <ConfirmButton
+                key={teamId}
+                label={failedTeams.length > 1 ? RETRY_ROUND_TEAM(TEAM_LABELS[teamId]) : RETRY_ROUND}
+                onConfirm={() => retryRound(teamId)}
+              />
+            ))}
+
+            {relayComplete ? (
+              /* Relay done — everyone defused. No advance (session-end is 8.10);
+                 show a clear notice instead of a dead button (Story 8.9 fix). */
+              <p data-testid="relay-complete" className="text-sm text-ink-muted">
+                {RELAY_COMPLETE_NOTICE}
+              </p>
+            ) : equalisationPhase ? (
+              /* Odd-team equalisation (Story 8.9): the shorter team plays an extra
+                 round with a Facilitator-chosen volunteer Defuser. Pick first, then
+                 start — the advance is gated until a volunteer is chosen. */
+              <>
+                {owingTeams.map((teamId) => {
+                  const team = session.teams[teamId]!;
+                  const chosen = team.equalisationVolunteerId;
+                  return (
+                    <div
+                      key={teamId}
+                      data-testid={`equalisation-${teamId}`}
+                      className="flex flex-col items-center gap-2"
+                    >
+                      <p className="font-mono text-xs uppercase tracking-widest text-brass">
+                        {EQUALISATION_HEADING}
+                      </p>
+                      <p className="text-sm text-ink-muted">
+                        {EQUALISATION_PROMPT(TEAM_LABELS[teamId])}
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {team.relayOrder.map((pid) => (
+                          <Button
+                            key={pid}
+                            variant={pid === chosen ? 'primary' : 'secondary'}
+                            onClick={() => designateVolunteer(teamId, pid)}
+                          >
+                            {session.players[pid]?.displayName ?? pid}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                {needsVolunteer && (
+                  <p className="text-sm text-ink-muted">{EQUALISATION_NEEDS_VOLUNTEER}</p>
+                )}
+                <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} disabled={needsVolunteer} />
+              </>
+            ) : (
+              <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} />
+            )}
+          </>
         ) : (
           <p className="text-sm text-ink-muted">{BETWEEN_ROUNDS_WAITING}</p>
         )}

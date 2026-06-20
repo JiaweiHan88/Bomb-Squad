@@ -16,6 +16,7 @@ import {
   START_THE_ROUND,
   PREP_MANUAL_LINE,
   BACK_TO_LOBBY,
+  RESTING_THIS_ROUND,
   TEAM_A,
   TEAM_B,
 } from './copy.js';
@@ -28,6 +29,9 @@ const START_ERROR_CODES: ReadonlySet<string> = new Set([
   'NOT_FACILITATOR',
   'CANNOT_START_ROUND',
   'ROUND_START_FAILED',
+  // Story 8.9: an equalisation round refused for want of a volunteer Defuser —
+  // surface it here too (belt-and-suspenders; the Scoreboard picks the volunteer).
+  'EQUALISATION_VOLUNTEER_REQUIRED',
   // PREPARATION_CANCEL rejections share this surface's banner (Story 8.3).
   'CANNOT_CANCEL_PREP',
   'PREPARATION_CANCEL_FAILED',
@@ -111,8 +115,10 @@ export default function Preparation() {
                 <span className="rounded-full border border-ink-muted px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-ink-muted">
                   {TEAM_LABELS[teamId]}
                 </span>
-                <span className="font-semibold">
-                  {playerId !== null ? (session.players[playerId]?.displayName ?? '—') : '—'}
+                <span className={playerId !== null ? 'font-semibold' : 'text-sm italic text-ink-muted'}>
+                  {playerId !== null
+                    ? (session.players[playerId]?.displayName ?? '—')
+                    : RESTING_THIS_ROUND}
                 </span>
               </li>
             ))}

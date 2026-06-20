@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ErrorPayload, PlayerInfo, PlayerRole, TeamId } from '@bomb-squad/shared';
+import { undersizedTeams } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
 import { useVoiceStore } from '../store/voiceStore.js';
 import { getSocket } from '../net/socket.js';
@@ -11,6 +12,7 @@ import { buildShareLink } from './shareLink.js';
 import {
   OPEN_PREPARATION,
   PREP_NEEDS_TEAM,
+  PREP_TEAM_TOO_SMALL,
   BRING_THEM_IN,
   SHARE_SUB,
   COPY_LINK,
@@ -148,9 +150,14 @@ export default function Lobby() {
   // Prep can only open once someone can defuse — at least one team must hold a
   // rostered player. Mirrors the server's hasPopulatedTeam guard so the button
   // disables before the emit ever fails (the server stays the authority).
-  const canOpenPrep = Object.values(session.teams).some((team) =>
+  const hasPopulatedTeam = Object.values(session.teams).some((team) =>
     team.relayOrder.some((id) => session.players[id] !== undefined),
   );
+  // Min-team-size gate (Story 8.9 follow-up): a populated team of 1 can't play (a
+  // lone Defuser with no Expert). Uses the SAME shared predicate the server gates
+  // on. A single-team session is allowed if its one team has ≥2.
+  const tooSmallTeams = undersizedTeams(session);
+  const canOpenPrep = hasPopulatedTeam && tooSmallTeams.length === 0;
 
   // Clear any stale rejection on the facilitator's own next action — not on
   // room broadcasts, which fire for any participant's activity (a join would
@@ -377,7 +384,11 @@ export default function Lobby() {
           // Two-step confirm: opening prep moves every player off the lobby —
           // major phase change, same affordance grammar as other commits.
           <div className="mt-6 flex flex-col items-end gap-2">
-            {!canOpenPrep && <p className="text-sm text-ink-muted">{PREP_NEEDS_TEAM}</p>}
+            {!canOpenPrep && (
+              <p className="text-sm text-ink-muted">
+                {hasPopulatedTeam && tooSmallTeams.length > 0 ? PREP_TEAM_TOO_SMALL : PREP_NEEDS_TEAM}
+              </p>
+            )}
             <ConfirmButton
               label={OPEN_PREPARATION}
               onConfirm={openPreparation}

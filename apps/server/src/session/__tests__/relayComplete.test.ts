@@ -6,6 +6,7 @@ import {
   maxRelayLength,
   naturalRoundRemains,
 } from '../relayComplete.js';
+import { undersizedTeams, MIN_TEAM_SIZE } from '@bomb-squad/shared';
 import { createSessionState } from '../createSession.js';
 
 /**
@@ -32,6 +33,22 @@ describe('maxRelayLength', () => {
   it('is the longer team length (0 when no team)', () => {
     expect(maxRelayLength(session(team('A', 3, 2), team('B', 2, 1)))).toBe(3);
     expect(maxRelayLength(session())).toBe(0);
+  });
+});
+
+describe('undersizedTeams (min-team-size guard, Story 8.9 follow-up)', () => {
+  it('flags a populated team of 1 (a lone Defuser with no Expert)', () => {
+    expect(MIN_TEAM_SIZE).toBe(2);
+    expect(undersizedTeams(session(team('A', 1, 0)))).toEqual(['A']);
+    expect(undersizedTeams(session(team('A', 2, 0), team('B', 1, 0)))).toEqual(['B']);
+  });
+
+  it('does NOT flag teams of 2+ or empty teams (single-team session is allowed)', () => {
+    expect(undersizedTeams(session(team('A', 2, 0), team('B', 3, 0)))).toEqual([]);
+    // Single populated team of 3, no opponent → allowed.
+    expect(undersizedTeams(session(team('A', 3, 0)))).toEqual([]);
+    // No teams at all → nothing to flag.
+    expect(undersizedTeams(session())).toEqual([]);
   });
 });
 

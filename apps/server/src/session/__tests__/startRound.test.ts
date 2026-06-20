@@ -49,6 +49,7 @@ describe('startRound', () => {
       roundNumber: 1,
       status: 'active',
       defusers: { A: 'sock-maya', B: 'sock-ana' },
+      outcomes: {},
       retry: false,
     });
   });
@@ -235,6 +236,61 @@ describe('startRound — odd-team equalisation round (Story 8.9)', () => {
       ok: false,
       reason: 'EQUALISATION_VOLUNTEER_REQUIRED',
     });
+  });
+});
+
+describe('startRound — retry round (Story 8.8)', () => {
+  /** A retry prep: preparation with the retryingTeamId marker set (via retryRound). */
+  const retryPrep = (teamId: 'A' | 'B'): SessionState => ({ ...prepState(), retryingTeamId: teamId });
+
+  it('arms ONLY the retried team with its SAME Defuser, retry: true, outcomes: {}', () => {
+    const result = startRound(retryPrep('A'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.round.defusers).toEqual({ A: 'sock-maya' }); // same Defuser, B absent
+    expect(result.round.retry).toBe(true);
+    expect(result.round.outcomes).toEqual({});
+    expect(result.round.roundNumber).toBe(1); // unchanged
+  });
+
+  it('rests the other team (absent from defusers) and demotes its stale defuser', () => {
+    // Retry Team B → Team A rests; Maya (lobby defuser on A) is demoted to expert.
+    const result = startRound(retryPrep('B'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.round.defusers).toEqual({ B: 'sock-ana' });
+    expect(result.round.defusers.A).toBeUndefined();
+    expect(result.state.players['sock-ana']!.role).toBe('defuser');
+    expect(result.state.players['sock-maya']!.role).toBe('expert');
+  });
+
+  it('clears the retryingTeamId marker and leaves pointers + counters UNCHANGED', () => {
+    const result = startRound(retryPrep('A'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.retryingTeamId).toBeUndefined();
+    expect(result.state.teams.A!.currentDefuserIndex).toBe(0);
+    expect(result.state.teams.A!.equalisationRoundsPlayed).toBe(0);
+    expect(result.state.roundNumber).toBe(1);
+  });
+
+  it('refuses when the retried team is exhausted (failed equalisation round — V1 limitation)', () => {
+    // An exhausted index (the original was an equalisation/volunteer round) yields
+    // no natural same-Defuser pick → NO_POPULATED_TEAM (documented V1 limitation).
+    const exhausted: SessionState = {
+      ...prepState(),
+      retryingTeamId: 'B',
+      teams: { ...prepState().teams, B: { ...prepState().teams.B!, currentDefuserIndex: 2 } },
+    };
+    expect(startRound(exhausted)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+  });
+
+  it('does not mutate the input (deep-frozen input must not throw)', () => {
+    const frozen = deepFreeze(retryPrep('A'));
+    const result = startRound(frozen);
+    expect(result.ok).toBe(true);
+    expect(frozen.status).toBe('preparation');
+    expect(frozen.retryingTeamId).toBe('A');
   });
 });
 

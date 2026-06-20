@@ -48,6 +48,22 @@ export type StartRoundResult =
  * - Any OTHER 'defuser' on that team becomes 'expert' (incl. on a resting team).
  * - The facilitator and off-team players are never touched.
  *
+ * RETRY round (Story 8.8, FR14) — takes priority over the three outcomes above
+ * when `state.retryingTeamId` is set (the Facilitator triggered a retry of a
+ * FAILED round via `retryRound`). ONLY the retrying team is armed, with its SAME
+ * Defuser as the original attempt: because `retryRound` left `currentDefuserIndex`
+ * UNADVANCED, the raw index `relayOrder[currentDefuserIndex]` still points at the
+ * round's committed Defuser (correct for a natural-round retry). The other team
+ * RESTS (absent from `round.defusers`, stale 'defuser' demoted — same posture as
+ * REST above). The `RoundState` is built with `retry: true` so `resolveRound`
+ * records the BETTER of the two times in place. The marker is cleared in the
+ * returned state; `equalisationRoundsPlayed` and every pointer are UNTOUCHED.
+ * Limitation (deferred, V1): retry of a *failed equalisation round* (whose
+ * original Defuser was a Facilitator volunteer, not `relayOrder[idx]`) is NOT
+ * supported — the exhausted index yields no natural pick, so the retry refuses
+ * NO_POPULATED_TEAM. Equalisation rounds are the rare odd-team tail; the common
+ * retry target is a natural round. Carry the volunteer to support it later.
+ *
  * Integrity guard: a team whose selected NATURAL relayOrder entry is missing from
  * `players` is skipped rather than crashing; if every team ends with no committed
  * Defuser the start is refused.
@@ -86,6 +102,11 @@ function hasNaturalSlot(team: TeamState): boolean {
 
 export function startRound(state: SessionState): StartRoundResult {
   if (state.status !== 'preparation') return { ok: false, reason: 'NOT_IN_PREPARATION' };
+
+  // (0) RETRY branch (Story 8.8) — priority over the natural/equalisation routing.
+  // Arm ONLY the retrying team with its SAME Defuser (raw, unadvanced index); the
+  // other team rests. retry: true drives the resolveRound better-of-two reconcile.
+  if (state.retryingTeamId !== undefined) return startRetryRound(state, state.retryingTeamId);
 
   const naturalPhase = Object.values(state.teams).some((team) => hasNaturalSlot(team));
   const owed = equalisationRoundsOwed(state);
@@ -154,7 +175,60 @@ export function startRound(state: SessionState): StartRoundResult {
       roundNumber: state.roundNumber,
       status: 'active',
       defusers,
+      outcomes: {}, // no team resolved yet (Story 8.8).
       retry: false, // Story 8.8 owns retry.
+    },
+  };
+}
+
+/**
+ * Commit a RETRY round (Story 8.8): arm ONLY the retrying team with its SAME
+ * Defuser (raw index — `retryRound` left the pointer unadvanced, so it still
+ * points at the original round's Defuser), rest the other team, and clear the
+ * `retryingTeamId` marker. `roundNumber`, every `currentDefuserIndex`, and every
+ * `equalisationRoundsPlayed` are UNCHANGED (a retry is the same round, not a new
+ * one). Pure — same discipline as `startRound`.
+ */
+function startRetryRound(state: SessionState, retryingTeamId: TeamId): StartRoundResult {
+  const team = state.teams[retryingTeamId];
+  // Same-Defuser pick via the raw, unadvanced index. Out-of-range (an exhausted
+  // index — i.e. the original was an equalisation round) yields no natural pick:
+  // retry of a failed equalisation round is not supported in V1 (see header).
+  const defuserId =
+    team !== undefined && hasNaturalSlot(team) ? team.relayOrder[team.currentDefuserIndex] : undefined;
+  if (defuserId === undefined || state.players[defuserId] === undefined) {
+    return { ok: false, reason: 'NO_POPULATED_TEAM' };
+  }
+
+  const defusers: Partial<Record<TeamId, string>> = { [retryingTeamId]: defuserId };
+
+  // Role pass: reconcile EVERY populated team to the single-Defuser rule — the
+  // retrying team's pick is 'defuser'; every other 'defuser' on either team
+  // (including the entire resting team) is demoted to 'expert' so resting players
+  // are not stranded on the bomb surface (the Story 8.9 resting posture).
+  const players: Record<string, PlayerInfo> = { ...state.players };
+  for (const player of Object.values(state.players)) {
+    if (player.teamId === undefined) continue;
+    if (player.playerId === defuserId) {
+      if (player.role !== 'defuser') players[player.playerId] = { ...player, role: 'defuser' };
+    } else if (player.role === 'defuser') {
+      players[player.playerId] = { ...player, role: 'expert' };
+    }
+  }
+
+  // Clear the consumed retry marker (immutable rest-destructure). roundNumber,
+  // pointers, and equalisation counters are untouched.
+  const { retryingTeamId: _consumed, ...rest } = state;
+
+  return {
+    ok: true,
+    state: { ...rest, status: 'active', players },
+    round: {
+      roundNumber: state.roundNumber,
+      status: 'active',
+      defusers,
+      outcomes: {},
+      retry: true,
     },
   };
 }

@@ -82,7 +82,13 @@ async function seedSession(store: MemoryRedisStore, timerMs = 10_000): Promise<v
     teams: { A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 } },
   };
   await store.setJSON(sessionKey(SID), session);
-  const round: RoundState = { roundNumber: ROUND_NUMBER, status: 'active', defusers: { A: 'p1' }, retry: false };
+  const round: RoundState = {
+    roundNumber: ROUND_NUMBER,
+    status: 'active',
+    defusers: { A: 'p1' },
+    outcomes: {},
+    retry: false,
+  };
   await store.setJSON(roundKey(SID, ROUND_NUMBER), round);
 }
 

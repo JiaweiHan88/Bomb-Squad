@@ -2,7 +2,8 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockSocket, type MockSocket } from '../../test/mockSocket.js';
-import { makePlayer, makeSession } from '../../test/fixtures.js';
+import { makePlayer, makeSession, makeTeam } from '../../test/fixtures.js';
+import { OPEN_PREPARATION, PREP_TEAM_TOO_SMALL } from '../copy.js';
 import { useGameStore } from '../../store/gameStore.js';
 import { useVoiceStore } from '../../store/voiceStore.js';
 
@@ -65,6 +66,39 @@ describe('Lobby', () => {
       teamId: 'A',
       role: 'defuser',
     });
+  });
+});
+
+describe('Lobby — min-team-size gate (Story 8.9 follow-up)', () => {
+  it('a 1-player team disables Open Preparation and shows the min-size hint', () => {
+    const session = makeSession({
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+      },
+      teams: { A: makeTeam('A', ['p1']) },
+    });
+    useGameStore.setState({ session, myPlayerId: 'fac' });
+    render(<Lobby />);
+
+    expect(screen.getByText(PREP_TEAM_TOO_SMALL)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: OPEN_PREPARATION })).toBeDisabled();
+  });
+
+  it('a 2-player team enables Open Preparation (a single-team session is allowed)', () => {
+    const session = makeSession({
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Mara', role: 'expert', teamId: 'A' }),
+      },
+      teams: { A: makeTeam('A', ['p1', 'p2']) },
+    });
+    useGameStore.setState({ session, myPlayerId: 'fac' });
+    render(<Lobby />);
+
+    expect(screen.queryByText(PREP_TEAM_TOO_SMALL)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: OPEN_PREPARATION })).toBeEnabled();
   });
 });
 

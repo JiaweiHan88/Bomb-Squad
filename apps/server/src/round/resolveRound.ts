@@ -162,22 +162,52 @@ async function resolveRoundCeremony(
   // flip the session phase only when this resolution completes the round.
   // Immutable: spread new TeamState/SessionState, never mutate in place (project
   // rule). The maintained invariant is cumulativeTimeMs === sum(roundTimesMs).
+  //
+  // RETRY (Story 8.8, AC-2): a re-attempt (round.retry === true) must NOT append a
+  // second entry for the same round — it REPLACES this round's recorded time with
+  // the BETTER (lower) of the two attempts in place, shifting cumulativeTimeMs by
+  // the (non-positive) delta. roundTimesMs.length stays stable and the invariant
+  // holds. A first attempt (retry === false) appends exactly as before.
+  const idx = roundNumber - 1; // roundTimesMs[i] is round i+1's time
+  let roundTimesMs: number[];
+  let cumulativeTimeMs: number;
+  if (round.retry && idx >= 0 && idx < team.roundTimesMs.length) {
+    const previous = team.roundTimesMs[idx]!;
+    const best = Math.min(previous, elapsedMs);
+    roundTimesMs = team.roundTimesMs.map((t, i) => (i === idx ? best : t));
+    cumulativeTimeMs = team.cumulativeTimeMs + (best - previous); // delta ≤ 0
+  } else {
+    if (round.retry) {
+      // Desync: a retry resolution with no existing slot to replace. Best-effort
+      // append rather than throw (the 8.5/8.6 reducer/handler no-throw posture).
+      deps.log.error(
+        { sessionId, teamId, roundNumber, historyLen: team.roundTimesMs.length },
+        'retry resolution with no prior round time — appending (desync fallback)',
+      );
+    }
+    roundTimesMs = [...team.roundTimesMs, elapsedMs];
+    cumulativeTimeMs = team.cumulativeTimeMs + elapsedMs;
+  }
+
   const updatedSession: SessionState = {
     ...session,
     status: enteringBetweenRounds ? 'between-rounds' : session.status,
     teams: {
       ...session.teams,
-      [teamId]: {
-        ...team,
-        cumulativeTimeMs: team.cumulativeTimeMs + elapsedMs,
-        roundTimesMs: [...team.roundTimesMs, elapsedMs],
-      },
+      [teamId]: { ...team, cumulativeTimeMs, roundTimesMs },
     },
   };
   await deps.redis.setJSON(sessionKey(sessionId), updatedSession);
 
-  // (c) Record the round-level outcome (last-writer-wins across teams; see header).
-  await deps.redis.setJSON(roundKey(sessionId, roundNumber), { ...round, status: outcome });
+  // (c) Record the round-level outcome (last-writer-wins across teams; see header)
+  // PLUS the authoritative per-team outcome (Story 8.8) the retry-eligibility gate
+  // reads (ROUND_RETRY allows only a team whose outcome was a failure).
+  const updatedRound: RoundState = {
+    ...round,
+    status: outcome,
+    outcomes: { ...round.outcomes, [teamId]: outcome },
+  };
+  await deps.redis.setJSON(roundKey(sessionId, roundNumber), updatedRound);
 
   // (d) Announce this team's result. BOMB_DEFUSED for a defuse; BOMB_EXPLODED for
   // both failure outcomes (DETONATED vs TIME EXPIRED is a client-side label, not
@@ -193,9 +223,16 @@ async function resolveRoundCeremony(
   // Persist-then-emit (the persist already happened in step b). The next round
   // does not start automatically — it waits on the facilitator's PREPARATION_OPEN.
   if (enteringBetweenRounds) {
+    // Teams whose just-resolved round failed (Story 8.8) — drives the Facilitator's
+    // "Retry round" affordance. Derived from the now-complete per-team outcomes.
+    const failedTeams = (Object.entries(updatedRound.outcomes) as [TeamId, RoundOutcome][])
+      .filter(([, o]) => o === 'exploded' || o === 'time-expired')
+      .map(([t]) => t);
     deps.io.to(sessionRoom(sessionId)).emit('SESSION_STATE', updatedSession);
-    deps.io.to(sessionRoom(sessionId)).emit('SCOREBOARD', buildScoreboard(updatedSession));
-    deps.log.info({ sessionId, roundNumber }, 'between-rounds — scoreboard preview emitted');
+    deps.io
+      .to(sessionRoom(sessionId))
+      .emit('SCOREBOARD', { ...buildScoreboard(updatedSession), failedTeams });
+    deps.log.info({ sessionId, roundNumber, failedTeams }, 'between-rounds — scoreboard preview emitted');
   }
 }
 

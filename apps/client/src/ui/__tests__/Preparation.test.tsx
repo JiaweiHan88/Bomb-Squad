@@ -17,7 +17,7 @@ vi.mock('../PrepBombView.js', () => ({
 }));
 
 import Preparation from '../Preparation.js';
-import { PREP_MANUAL_LINE } from '../copy.js';
+import { PREP_MANUAL_LINE, RESTING_THIS_ROUND } from '../copy.js';
 
 let mock: MockSocket;
 
@@ -122,5 +122,30 @@ describe('Preparation', () => {
     seedFacilitatorPrep();
     render(<Preparation />);
     expect(screen.queryByTestId('prep-bomb-view')).not.toBeInTheDocument();
+  });
+
+  // Story 8.9 — a team with no upcoming Defuser (exhausted / resting this round)
+  // is labelled clearly, not a bare em-dash that reads as a bug.
+  it('labels a resting team "Resting this round" instead of a bare dash', () => {
+    const session = makeSession({
+      status: 'preparation',
+      roundNumber: 3,
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'expert', teamId: 'B' }),
+      },
+      teams: {
+        // A still has a natural pick at index 2; B is exhausted (index past its
+        // single player) → B rests this round.
+        A: makeTeam('A', ['p1', 'p1', 'p1'], { currentDefuserIndex: 2 }),
+        B: makeTeam('B', ['p2'], { currentDefuserIndex: 2 }),
+      },
+    });
+    useGameStore.setState({ session, myPlayerId: 'fac' });
+    render(<Preparation />);
+
+    const upcoming = screen.getByTestId('upcoming-defusers');
+    expect(within(upcoming).getByText(RESTING_THIS_ROUND)).toBeInTheDocument();
   });
 });

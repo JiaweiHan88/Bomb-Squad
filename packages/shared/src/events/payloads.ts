@@ -126,6 +126,14 @@ export interface ScoreboardPayload {
    */
   teams: Partial<Record<TeamId, { cumulativeTimeMs: number; rounds: number[] }>>;
   winnerTeamId?: TeamId;
+  /**
+   * Teams whose JUST-RESOLVED round was a failure (`exploded` / `time-expired`)
+   * — Story 8.8. Drives the Facilitator's "Retry round" affordance on the
+   * between-rounds scoreboard (a defused round offers no retry). Empty/absent
+   * when no team failed the round. The server remains the authority — the
+   * `ROUND_RETRY` handler re-checks eligibility regardless of what the client shows.
+   */
+  failedTeams?: TeamId[];
 }
 
 export interface LifelineToastPayload {

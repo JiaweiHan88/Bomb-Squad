@@ -81,6 +81,25 @@ describe('cancelPreparation', () => {
     },
   );
 
+  // Story 8.8 retry reconcile (resolves deferred-work.md:7): a retry prep reuses
+  // the SAME roundNumber and never advanced the pointer, so cancel must NOT apply
+  // the blind roundNumber-- / pointer-- inverse.
+  it('cancelling a RETRY prep clears the marker and leaves roundNumber + pointers UNCHANGED', () => {
+    const retryPrep: SessionState = {
+      ...betweenRoundsWithTeams(),
+      status: 'preparation',
+      retryingTeamId: 'B',
+      // roundNumber stays at the failed round; pointers NOT advanced by retryRound.
+    };
+    const next = cancelPreparation(retryPrep);
+    expect(next.status).toBe('between-rounds');
+    expect(next.retryingTeamId).toBeUndefined();
+    expect(next.roundNumber).toBe(retryPrep.roundNumber); // NOT decremented
+    expect(next.teams.A!.currentDefuserIndex).toBe(0); // NOT reversed
+    expect(next.teams.B!.currentDefuserIndex).toBe(0);
+    expect(next.teams).toEqual(retryPrep.teams);
+  });
+
   it('does not mutate the input state (deep-frozen input must not throw)', () => {
     const frozen = deepFreeze(openPreparation(lobbyState()));
     const next = cancelPreparation(frozen);

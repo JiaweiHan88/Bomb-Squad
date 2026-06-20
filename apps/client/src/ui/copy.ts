@@ -72,6 +72,10 @@ export const COPIED = 'Copied';
 // it by starting the round (GDD A9: 2–5 min is guidance, not enforcement).
 export const OPEN_PREPARATION = 'Open preparation';
 export const PREP_NEEDS_TEAM = 'Assign at least one player to a team first.';
+// Min-team-size gate (Story 8.9 follow-up) — a team of 1 is a lone Defuser with
+// no Expert to read the manual. A single-team session is fine if that team has ≥2.
+export const PREP_TEAM_TOO_SMALL =
+  'Each team needs at least 2 players — one defuses while the rest read the manual.';
 export const BACK_TO_LOBBY = 'Back to lobby';
 export const PREP_HEADING = 'Preparation';
 export const PREP_GUIDANCE =
@@ -110,6 +114,25 @@ export const SCOREBOARD_ROUND_LABEL = 'Round';
 export const START_NEXT_ROUND = 'Start next round';
 // Non-facilitator standby line while the scoreboard is up.
 export const BETWEEN_ROUNDS_WAITING = 'Waiting for the facilitator to start the next round.';
+
+// Odd-team equalisation + relay completion (Story 8.9, FR43/FR44) — facilitator
+// surfaces on the between-rounds scoreboard. The shorter team plays one extra
+// round with a Facilitator-chosen volunteer Defuser; once everyone has defused
+// the relay is complete (session-end is Story 8.10).
+export const EQUALISATION_HEADING = 'Equalisation round';
+export const EQUALISATION_PROMPT = (team: string): string =>
+  `${team} plays an extra round to even the count. Choose the volunteer Defuser:`;
+export const EQUALISATION_NEEDS_VOLUNTEER = 'Choose a volunteer Defuser to start the equalisation round.';
+export const RELAY_COMPLETE_NOTICE = 'The relay is complete — every player has defused once.';
+export const RESTING_THIS_ROUND = 'Resting this round';
+
+// Retry a failed round (Story 8.8, FR14) — facilitator-only affordance shown on
+// the between-rounds scoreboard when a team failed the just-resolved round. The
+// retry re-runs the IDENTICAL bomb (same seed) and keeps the better of the two
+// times. Operator-world voice; the action is confirm-gated (ConfirmButton).
+export const RETRY_ROUND = 'Retry round';
+/** `team` is the already-formatted label (e.g. "Team A"). */
+export const RETRY_ROUND_TEAM = (team: string): string => `Retry round — ${team}`;
 
 // Bomb Room voice (Story 3.2) — the join affordance + EXPERIENCE.md voice
 // microcopy. The speaker pill + mute toggle are Story 3.4, not here.

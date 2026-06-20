@@ -9,6 +9,7 @@ import type {
   TeamId,
   BombState,
   TimerState,
+  RoundState,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
 import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../state/keys.js';
@@ -30,7 +31,9 @@ import { setPlayerReady } from '../session/setPlayerReady.js';
 import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
+import { retryRound } from '../session/retryRound.js';
 import { isRelayComplete } from '../session/relayComplete.js';
+import { undersizedTeams } from '@bomb-squad/shared';
 import { designateEqualisationVolunteer } from '../session/equalisationVolunteer.js';
 import { pauseSession, resumeSession, canResume, clearDisconnectedPlayer } from '../session/pauseSession.js';
 import { freezeRoundTimers, resumeRoundTimers } from '../timer/pauseTimers.js';
@@ -311,6 +314,26 @@ export function parsePlayerReadyPayload(payload: unknown): PlayerReadyParseResul
     return { ok: false, message: 'isReady must be a boolean' };
   }
   return { ok: true, isReady };
+}
+
+type RoundRetryParseResult =
+  | { ok: true; teamId: TeamId }
+  | { ok: false; message: string };
+
+/**
+ * Boundary validation for the untrusted ROUND_RETRY payload (Story 8.8).
+ * `teamId` MUST be 'A' or 'B'; rebuilds a fresh object so unknown extra keys are
+ * inert. Authority + failed-round eligibility are the handler's job.
+ */
+export function parseRoundRetryPayload(payload: unknown): RoundRetryParseResult {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'payload must be an object' };
+  }
+  const { teamId } = payload as { teamId?: unknown };
+  if (teamId !== 'A' && teamId !== 'B') {
+    return { ok: false, message: 'teamId must be A or B' };
+  }
+  return { ok: true, teamId };
 }
 
 /** Retry cap for join-code collisions (36^6 codes — collisions are theoretical). */
@@ -991,6 +1014,24 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
+        // Minimum-team-size guard (Story 8.9 follow-up): a populated team of 1 is a
+        // lone Defuser with no Expert to read the manual — it can never solve a
+        // bomb (the Defuser↔Expert split IS the game). Refuse the round; a
+        // single-team session is fine as long as that team has ≥2. Lobby-phase
+        // only — team membership is locked once the relay starts, so round 2+
+        // cannot regress below the minimum.
+        if (state.status === 'lobby') {
+          const tooSmall = undersizedTeams(state);
+          if (tooSmall.length > 0) {
+            socket.emit('ERROR', {
+              code: 'TEAM_TOO_SMALL',
+              message: 'Each team needs at least 2 players — one defuses while the rest read the manual.',
+              recoverable: true,
+            });
+            return;
+          }
+        }
+
         const next = openPreparation(state);
         if (next === state) return;
 
@@ -1288,6 +1329,85 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           message: 'Could not start the round. Try again.',
           recoverable: true,
         });
+      }
+    });
+
+    // Facilitator retries a FAILED round (Story 8.8, FR14). No ack (frozen
+    // contract): success is the SESSION_STATE broadcast (re-entering preparation
+    // at the SAME roundNumber), failure a typed ERROR. Two-click flow symmetric
+    // with the normal advance: ROUND_RETRY re-enters preparation, then the
+    // facilitator's ROUND_START regenerates the IDENTICAL bomb (same roundNumber →
+    // same seeds) and arms only the retried team. Same authority-gate-first →
+    // phase guard → eligibility gate → pure transition → persist → broadcast
+    // pipeline as every other facilitator action.
+    socket.on('ROUND_RETRY', async (payload) => {
+      const parsed = parseRoundRetryPayload(payload);
+      if (!parsed.ok) {
+        socket.emit('ERROR', { code: 'INVALID_PAYLOAD', message: parsed.message, recoverable: true });
+        return;
+      }
+
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+          return;
+        }
+
+        // Authority gate FIRST (a non-facilitator probe learns nothing — not even
+        // whether the round failed). Resolve by durable playerId, never socket.id.
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', { code: 'NOT_FACILITATOR', message: 'Only the facilitator retries a round.', recoverable: true });
+          return;
+        }
+
+        // Phase guard: retry is offered only between rounds (the round fully
+        // resolved). A duplicate while already in preparation falls through to the
+        // pure function's same-reference no-op.
+        if (state.status !== 'between-rounds') {
+          socket.emit('ERROR', {
+            code: 'CANNOT_RETRY',
+            message: 'You can only retry between rounds.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Eligibility gate (AC-3): only a team whose most-recent round outcome was
+        // a FAILURE may retry. Load the persisted RoundState and read the
+        // authoritative per-team outcome (Story 8.8 `outcomes`).
+        const round = await deps.redis.getJSON<RoundState>(roundKey(sessionId, state.roundNumber));
+        const outcome = round?.outcomes[parsed.teamId];
+        if (outcome !== 'exploded' && outcome !== 'time-expired') {
+          socket.emit('ERROR', {
+            code: 'ROUND_NOT_FAILED',
+            message: "That round wasn't failed — there's nothing to retry.",
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = retryRound(state, parsed.teamId);
+        if (next === state) return; // guard no-op
+
+        // Persist then emit. Single-key write — nothing partial to roll back. The
+        // identical-bomb regeneration + timer arm happen on the subsequent
+        // ROUND_START (startRound routes to its retry branch via retryingTeamId).
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        deps.log.info(
+          { sessionId, roundNumber: state.roundNumber, teamId: parsed.teamId, by: socket.data.playerId },
+          'round retry — re-entered preparation',
+        );
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'ROUND_RETRY failed');
+        socket.emit('ERROR', { code: 'ROUND_RETRY_FAILED', message: 'Could not retry the round. Try again.', recoverable: true });
       }
     });
 

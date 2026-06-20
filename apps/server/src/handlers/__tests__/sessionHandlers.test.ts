@@ -9,6 +9,8 @@ import type {
   RoundState,
   TimerState,
   BombState,
+  TeamId,
+  TeamState,
 } from '@bomb-squad/shared';
 import {
   registerSessionHandlers,
@@ -49,6 +51,28 @@ function createSession(
   return new Promise((resolve) => {
     socket.emit('SESSION_CREATE', payload, resolve);
   });
+}
+
+/**
+ * Pad every populated team to the min size of 2 (Story 8.9 follow-up guard) with a
+ * SYNTHETIC, socketless Expert, via a direct store write (no broadcast). Used by
+ * setups that form 1-player-per-team via the lobby flow, which the guard now
+ * refuses. The pad is never the Defuser (rotation picks index 0 = the real player)
+ * and has no socket, so team-room membership and per-team assertions are unchanged
+ * — it only satisfies `undersizedTeams`. Call AFTER team assignment, BEFORE
+ * PREPARATION_OPEN.
+ */
+async function padTeamsToMinSize(store: MemoryRedisStore, sessionId: string): Promise<void> {
+  const s = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+  const players = { ...s.players };
+  const teams = { ...s.teams };
+  for (const [teamId, team] of Object.entries(teams) as [TeamId, TeamState][]) {
+    if (team.relayOrder.length >= 2) continue;
+    const padId = `pad-${teamId}`;
+    players[padId] = { playerId: padId, displayName: `Pad-${teamId}`, role: 'expert', teamId, isReady: true };
+    teams[teamId] = { ...team, relayOrder: [...team.relayOrder, padId] };
+  }
+  await store.setJSON(sessionKey(sessionId), { ...s, players, teams });
 }
 
 describe('SESSION_CREATE handler', () => {
@@ -1033,7 +1057,12 @@ describe('PREPARATION_OPEN handler', () => {
   const everyone = () =>
     Promise.all([facilitator, joiner].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')));
 
-  /** Create a session, join Maya, assign her to Team A — all broadcasts drained. */
+  /**
+   * Create a session, join Maya, assign her to Team A, then pad the team to the
+   * min size of 2 (Story 8.9 guard) with a synthetic Expert — all broadcasts
+   * drained. The pad is a direct store write (no broadcast); the test's own
+   * PREPARATION_OPEN reads the padded state.
+   */
   async function sessionWithTeam(): Promise<{ sessionId: string; joinCode: string }> {
     const ack = await createSession(facilitator);
     let bc = everyone();
@@ -1042,6 +1071,7 @@ describe('PREPARATION_OPEN handler', () => {
     bc = everyone();
     facilitator.emit('TEAM_ASSIGN', { playerId: idOf(joined, 'Maya'), teamId: 'A', role: 'expert' });
     await bc;
+    await padTeamsToMinSize(store, ack.sessionId);
     return ack;
   }
 
@@ -1168,6 +1198,26 @@ describe('PREPARATION_OPEN handler', () => {
     expect(facSpy).not.toHaveBeenCalled();
   });
 
+  it('a 1-player team → TEAM_TOO_SMALL, no broadcast (min-team-size guard, Story 8.9 follow-up)', async () => {
+    // A lone Defuser with no Expert to read the manual can never solve a bomb.
+    const ack = await createSession(facilitator);
+    const joined = await joinAs(joiner, ack.joinCode, 'Maya');
+    const bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(joined, 'Maya'), teamId: 'A', role: 'expert' });
+    await bc;
+    const storedBefore = store.data.get(sessionKey(ack.sessionId));
+
+    const facSpy = jest.fn();
+    facilitator.on('SESSION_STATE', facSpy);
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    const error = await errorPromise;
+
+    expect(error.code).toBe('TEAM_TOO_SMALL');
+    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
+    expect(facSpy).not.toHaveBeenCalled();
+  });
+
   it('persist failure → PREPARATION_OPEN_FAILED, no broadcast', async () => {
     const ack = await sessionWithTeam();
     const realSet = store.setJSON.bind(store);
@@ -1218,7 +1268,7 @@ describe('PREPARATION_CANCEL handler', () => {
   const everyone = () =>
     Promise.all([facilitator, joiner].map((s) => nextEvent<SessionState>(s, 'SESSION_STATE')));
 
-  /** Create a session, join + team-assign Maya, then open prep. Returns the ack. */
+  /** Create, join + assign Maya to Team A, pad to min size 2 (guard), then open prep. */
   async function openedPrep(): Promise<{ sessionId: string; joinCode: string }> {
     const ack = await createSession(facilitator);
     let bc = everyone();
@@ -1227,6 +1277,7 @@ describe('PREPARATION_CANCEL handler', () => {
     bc = everyone();
     facilitator.emit('TEAM_ASSIGN', { playerId: idOf(joined, 'Maya'), teamId: 'A', role: 'expert' });
     await bc;
+    await padTeamsToMinSize(store, ack.sessionId);
     bc = everyone();
     facilitator.emit('PREPARATION_OPEN');
     await bc;
@@ -1345,6 +1396,9 @@ describe('ROUND_START handler', () => {
     done = everyone();
     facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'B', role: 'expert' });
     await done;
+    // Each team is 1 player via the lobby flow; pad to the min size of 2 (synthetic
+    // socketless Expert) so the guard admits the round without altering the picks.
+    await padTeamsToMinSize(store, ack.sessionId);
     done = everyone();
     facilitator.emit('PREPARATION_OPEN');
     await done;
@@ -1371,6 +1425,7 @@ describe('ROUND_START handler', () => {
       roundNumber: 1,
       status: 'active',
       defusers: { A: mayaId, B: devonId },
+      outcomes: {},
       retry: false,
     });
 
@@ -1617,6 +1672,9 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
     done = everyone();
     facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'B', role: 'expert' });
     await done;
+    // Pad each 1-player team to the min size of 2 (Story 8.9 guard) without
+    // altering the Defuser picks or team-room membership.
+    await padTeamsToMinSize(store, ack.sessionId);
     done = everyone();
     facilitator.emit('PREPARATION_OPEN');
     await done;
@@ -2512,6 +2570,176 @@ describe('Relay orchestration & odd-team equalisation (Story 8.9)', () => {
     const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
     maya.emit('PREPARATION_OPEN');
     expect((await errorPromise).code).toBe('NOT_FACILITATOR');
+  });
+});
+
+describe('Retry a failed round (Story 8.8)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let facilitator: TestClientSocket;
+  let maya: TestClientSocket;
+  let devon: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+      }),
+    );
+    facilitator = await server.connectClient();
+    maya = await server.connectClient();
+    devon = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  async function joinAssign(socket: TestClientSocket, joinCode: string, name: string, teamId: 'A' | 'B'): Promise<void> {
+    const joined = nextEvent<SessionState>(socket, 'SESSION_STATE');
+    socket.emit('SESSION_JOIN', { joinCode, displayName: name, role: 'expert' });
+    const state = await joined;
+    const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(state, name), teamId, role: 'expert' });
+    await facBc;
+  }
+
+  /**
+   * Run round 1 to active (capturing each team's generated bomb), then seed the
+   * post-resolution between-rounds snapshot: Team A FAILED (time-expired,
+   * 300s recorded), Team B DEFUSED (20s recorded). roundNumber stays 1.
+   */
+  async function setupFailedRoundOne(): Promise<{
+    sessionId: string;
+    mayaId: string;
+    devonId: string;
+    bombA: BombState;
+  }> {
+    const ack = await createSession(facilitator);
+    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
+    await joinAssign(devon, ack.joinCode, 'Devon', 'B');
+    const seeded = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    const mayaId = idOf(seeded, 'Maya');
+    const devonId = idOf(seeded, 'Devon');
+
+    // Pad each 1-player team to the min size of 2 (Story 8.9 guard) — synthetic
+    // socketless Experts; the Defusers (Maya/Devon) and team rooms are unchanged.
+    await padTeamsToMinSize(store, ack.sessionId);
+
+    let bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    await bc;
+    bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    await bc;
+
+    // The bomb generated for Team A this round (the artefact a retry must reproduce).
+    const bombA = JSON.parse(store.data.get(bombKey(ack.sessionId, 'A'))!) as BombState;
+
+    // Seed the between-rounds snapshot a real resolution would leave: A failed,
+    // B defused; roundNumber unchanged at 1; the live timer keys cleared.
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    store.data.set(
+      sessionKey(ack.sessionId),
+      JSON.stringify({
+        ...live,
+        status: 'between-rounds',
+        roundNumber: 1,
+        teams: {
+          A: { ...live.teams.A!, cumulativeTimeMs: 300_000, roundTimesMs: [300_000] },
+          B: { ...live.teams.B!, cumulativeTimeMs: 20_000, roundTimesMs: [20_000] },
+        },
+      }),
+    );
+    const round = JSON.parse(store.data.get(roundKey(ack.sessionId, 1))!) as RoundState;
+    store.data.set(
+      roundKey(ack.sessionId, 1),
+      JSON.stringify({ ...round, status: 'time-expired', outcomes: { A: 'time-expired', B: 'defused' } }),
+    );
+    await store.del(timerKey(ack.sessionId, 'A'));
+    await store.del(timerKey(ack.sessionId, 'B'));
+
+    return { sessionId: ack.sessionId, mayaId, devonId, bombA };
+  }
+
+  it('retry of a FAILED team re-enters preparation at the SAME roundNumber with retryingTeamId set', async () => {
+    const { sessionId } = await setupFailedRoundOne();
+
+    const bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_RETRY', { teamId: 'A' });
+    const state = await bc;
+
+    expect(state.status).toBe('preparation');
+    expect(state.retryingTeamId).toBe('A');
+    expect(state.roundNumber).toBe(1); // SAME round
+  });
+
+  it('the retry ROUND_START regenerates the IDENTICAL bomb and arms only the retried team', async () => {
+    const { sessionId, mayaId, bombA } = await setupFailedRoundOne();
+
+    let bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_RETRY', { teamId: 'A' });
+    await bc;
+    bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    await bc;
+
+    // Bit-for-bit identical bomb (same roundNumber → same seeds) — AC-1.
+    const bombARetry = JSON.parse(store.data.get(bombKey(sessionId, 'A'))!) as BombState;
+    expect(bombARetry).toEqual(bombA);
+
+    // Only Team A is armed; Team B rests (absent from defusers), retry: true.
+    const round = JSON.parse(store.data.get(roundKey(sessionId, 1))!) as RoundState;
+    expect(round.defusers).toEqual({ A: mayaId });
+    expect(round.retry).toBe(true);
+    // Resting team B has no live timer; Team A does.
+    expect(store.data.has(timerKey(sessionId, 'A'))).toBe(true);
+    expect(store.data.has(timerKey(sessionId, 'B'))).toBe(false);
+  });
+
+  it('retry of a DEFUSED team → ROUND_NOT_FAILED, store byte-identical', async () => {
+    const { sessionId } = await setupFailedRoundOne();
+    const before = store.data.get(sessionKey(sessionId));
+
+    const err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_RETRY', { teamId: 'B' }); // B defused
+    expect((await err).code).toBe('ROUND_NOT_FAILED');
+    expect(store.data.get(sessionKey(sessionId))).toBe(before);
+  });
+
+  it('a non-facilitator retry → NOT_FACILITATOR before any round load, store byte-identical', async () => {
+    const { sessionId } = await setupFailedRoundOne();
+    const before = store.data.get(sessionKey(sessionId));
+
+    const err = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('ROUND_RETRY', { teamId: 'A' });
+    expect((await err).code).toBe('NOT_FACILITATOR');
+    expect(store.data.get(sessionKey(sessionId))).toBe(before);
+  });
+
+  it('retry outside between-rounds → CANNOT_RETRY', async () => {
+    const { sessionId } = await setupFailedRoundOne();
+    // Flip back to active to violate the phase guard.
+    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    store.data.set(sessionKey(sessionId), JSON.stringify({ ...live, status: 'active' }));
+
+    const err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_RETRY', { teamId: 'A' });
+    expect((await err).code).toBe('CANNOT_RETRY');
+  });
+
+  it('invalid teamId → INVALID_PAYLOAD', async () => {
+    await setupFailedRoundOne();
+    const err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('ROUND_RETRY', { teamId: 'Z' } as unknown as { teamId: 'A' | 'B' });
+    expect((await err).code).toBe('INVALID_PAYLOAD');
   });
 });
 

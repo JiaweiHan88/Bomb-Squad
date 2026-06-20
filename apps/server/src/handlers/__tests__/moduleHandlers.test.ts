@@ -114,10 +114,12 @@ describe('MODULE_INTERACT handler (Story 4.7)', () => {
   }
 
   /**
-   * Bring the session to an active round (Maya = defuser Team A, Devon = Team B)
-   * and replace Team A's bomb with `bomb`. Returns once Maya has received all of
-   * ROUND_START's broadcasts (TIMER_UPDATE is last to her), so a later listener
-   * can't race a stale snapshot.
+   * Bring the session to an active round and replace Team A's bomb with `bomb`.
+   * Maya (Defuser) + Devon (Expert) are BOTH on Team A — a valid 2-player team
+   * (the min-team-size guard requires ≥2: one defuses, the other reads the
+   * manual). A single-team session is allowed; these module tests only exercise
+   * Team A's bomb. Returns once Maya has received all of ROUND_START's broadcasts
+   * (TIMER_UPDATE is last to her) so a later listener can't race a stale snapshot.
    */
   async function activeRound(bomb: BombState): Promise<{ sessionId: string }> {
     const ack = await createSession(facilitator);
@@ -132,7 +134,7 @@ describe('MODULE_INTERACT handler (Story 4.7)', () => {
     facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'expert' });
     await done;
     done = everyone();
-    facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'B', role: 'expert' });
+    facilitator.emit('TEAM_ASSIGN', { playerId: devonId, teamId: 'A', role: 'expert' });
     await done;
     done = everyone();
     facilitator.emit('PREPARATION_OPEN');

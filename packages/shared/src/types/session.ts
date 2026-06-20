@@ -102,4 +102,18 @@ export interface SessionState {
    * unless `pauseKind === 'disconnect'`.
    */
   disconnectedPlayerIds: string[];
+  /**
+   * Transient retry intent (Story 8.8, FR14). Set by the pure `retryRound`
+   * transition when the Facilitator triggers a retry of a FAILED round
+   * (`between-rounds → preparation`, reusing the SAME `roundNumber` so the seed
+   * chain reproduces the identical bomb). Names the single team re-attempting the
+   * round; the other team rests (reusing the Story 8.9 resting-team machinery).
+   * Consumed and cleared by `startRound` when the retry round arms (and by
+   * `cancelPreparation` if the retry prep is cancelled). Undefined when no retry
+   * is pending. ORTHOGONAL to the rotation pointer — a retry does NOT advance
+   * `currentDefuserIndex` or `roundNumber` (it is the same round, same Defuser).
+   * Mirrors the `TeamState.equalisationVolunteerId` "explicit intent consumed by
+   * startRound" precedent.
+   */
+  retryingTeamId?: TeamId;
 }
