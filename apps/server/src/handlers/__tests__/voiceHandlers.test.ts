@@ -37,6 +37,8 @@ const CONFIG: VoiceConfig = {
   LIVEKIT_API_KEY: 'devkey',
   LIVEKIT_API_SECRET: 'devsecret-at-least-32-chars-long!!',
   TURN_TTL: 3600,
+  TURN_SECRET: 'turn-secret-test',
+  // No TURN_URL by default → grant must omit iceServers (pre-3.6 behavior).
 };
 
 type VoiceAck = VoiceTokenGrantPayload | VoiceTokenErrorPayload;
@@ -286,6 +288,84 @@ describe('VOICE_TOKEN handler', () => {
 
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
+      expect(line).not.toContain(res.token);
+    }
+  });
+
+  // ── TURN relay path (Story 3.6, AC #3) ─────────────────────────────────────
+
+  it('omits iceServers when no TURN_URL is configured (no regression)', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true);
+    if (!isGrant(res)) return;
+    expect(res.iceServers).toBeUndefined();
+  });
+});
+
+describe('VOICE_TOKEN handler — TURN relay configured (Story 3.6)', () => {
+  const TURN_CONFIG: VoiceConfig = { ...CONFIG, TURN_URL: 'turn:localhost:3478' };
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let client: TestClientSocket;
+  let lines: string[];
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    const cap = captureLog();
+    lines = cap.lines;
+    server = await startTestSocketServer((io) => {
+      registerSessionHandlers(io, {
+        redis: store,
+        log: cap.log,
+        timer: createTestScheduler({ redis: store, io, log: cap.log }),
+      });
+      registerVoiceHandlers(io, { redis: store, log: cap.log, config: TURN_CONFIG });
+    });
+    client = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('advertises the coturn relay (udp+tcp) with a TURN-REST credential', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true);
+    if (!isGrant(res)) return;
+
+    expect(res.iceServers).toBeDefined();
+    expect(res.iceServers).toHaveLength(1);
+    const [ice] = res.iceServers!;
+    expect(ice.urls).toEqual([
+      'turn:localhost:3478?transport=udp',
+      'turn:localhost:3478?transport=tcp',
+    ]);
+    // username binds the durable identity (not socket.id); credential is present.
+    expect(ice.username).toMatch(new RegExp(`:${playerId}$`));
+    expect(ice.credential).toBeTruthy();
+  });
+
+  it('never logs the TURN credential (secret-leak guard)', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
+
+    const res = await requestVoiceToken(client);
+    expect(isGrant(res)).toBe(true);
+    if (!isGrant(res)) return;
+
+    const credential = res.iceServers![0].credential!;
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).not.toContain(credential);
       expect(line).not.toContain(res.token);
     }
   });

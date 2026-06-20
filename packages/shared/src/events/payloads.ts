@@ -193,6 +193,22 @@ export interface VoiceTokenRequestPayload {
 }
 
 /**
+ * A single ICE server the client passes to LiveKit's `rtcConfig.iceServers`
+ * (Story 3.6). Structurally a WebRTC `RTCIceServer`. For a TURN relay the
+ * `username`/`credential` are short-TTL coturn TURN-REST credentials the server
+ * derives from `TURN_SECRET` (HMAC-SHA1). NEVER log `credential` — like the
+ * LiveKit token it is a secret (project-context Security).
+ */
+export interface IceServer {
+  /** One or more ICE URLs (e.g. `turn:host:3478?transport=udp`). */
+  urls: string[];
+  /** TURN username (coturn TURN-REST: `<unixExpiry>:<identity>`). Absent for STUN. */
+  username?: string;
+  /** TURN credential (base64 HMAC-SHA1 of `username` under the static auth secret). Secret. */
+  credential?: string;
+}
+
+/**
  * VOICE_TOKEN success response, delivered via the event's ack callback (the
  * requester needs a direct reply, not a broadcast). The `token` is a short-TTL
  * LiveKit JWT scoped to exactly `room` with exactly the caller's role grants.
@@ -207,6 +223,13 @@ export interface VoiceTokenGrantPayload {
   room: string;
   /** The participant identity baked into the token (the server-side player id). */
   identity: string;
+  /**
+   * TURN ICE servers for the corporate-NAT relay path (Story 3.6). Present only
+   * when the server has `TURN_URL` configured; absent otherwise (the client then
+   * connects with no explicit TURN — LiveKit's own ICE, unchanged pre-3.6
+   * behavior). The `credential` fields are secrets — never logged.
+   */
+  iceServers?: IceServer[];
 }
 
 /** VOICE_TOKEN failure response (ack), used when no token can be minted. */

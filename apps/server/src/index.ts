@@ -128,6 +128,8 @@ async function start(): Promise<void> {
       LIVEKIT_API_KEY: config.LIVEKIT_API_KEY,
       LIVEKIT_API_SECRET: config.LIVEKIT_API_SECRET,
       TURN_TTL: config.TURN_TTL,
+      TURN_SECRET: config.TURN_SECRET,
+      TURN_URL: config.TURN_URL,
     },
   });
 

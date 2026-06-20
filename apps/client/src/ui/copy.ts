@@ -55,6 +55,9 @@ export const WAITING_FOR_TEAM = 'Waiting for your team.';
 // Accessible labels for the per-row speaker dot (never icon-only).
 export const SPEAKING = 'speaking';
 export const MIC_QUIET = 'quiet';
+// Pill fallback when a transmitting voice identity isn't in the durable roster
+// (non-roster participant / momentarily stale roster) — never show a raw id.
+export const SPEAKER_UNKNOWN = 'Someone';
 
 // Team assignment (Story 2.4) — mockup "6. Facilitator Dashboard" team badges.
 export const TEAM_A = 'Team A';
@@ -119,6 +122,26 @@ export const VOICE_CONNECTED = 'Bomb Room voice connected.';
 // Non-blocking failure microcopy — the game keeps running (AC #4); dismissible.
 export const VOICE_UNAVAILABLE = 'Voice unavailable — game continues without it';
 export const VOICE_DISMISS = 'Dismiss';
+// Graceful degradation (Story 3.6). Manual reconnect after a drop/failure — stays
+// reachable even after the banner is dismissed (no auto-backoff; that's 10-3).
+// The blocked-autoplay affordance restores remote audio with a user gesture.
+export const VOICE_RECONNECT = 'Reconnect voice';
+export const VOICE_ENABLE_AUDIO = 'Click to enable audio';
+
+// Spectator Lounge listen-only voice (Story 3.3) — a spectator HEARS the Bomb
+// Room but cannot speak into it (EXPERIENCE.md Flow 4), so the copy says
+// "listen", never "connect to"/"in" the Bomb Room. Failure reuses the shared
+// VOICE_UNAVAILABLE + VOICE_DISMISS. No speaker pill, no mute toggle (Story 3.4).
+export const VOICE_LOUNGE_CTA = 'Listen to the Bomb Room';
+export const VOICE_LOUNGE_CONNECTING = 'Connecting to the Bomb Room…';
+export const VOICE_LOUNGE_CONNECTED = 'Listening to the Bomb Room.';
+
+// In-round speaker indicator + self-mute (Story 3.4). The pill always shows the
+// name (never icon-only); SPEAKING is reused for its accessible label. The mute
+// control carries an aria-label that flips with state — operator-world, dry.
+export const MUTE_SELF = 'Mute';
+export const UNMUTE_SELF = 'Unmute';
+export const MUTED_STATUS = 'Muted';
 
 // Round configuration dashboard (Story 8.1) — facilitator-only panel in the
 // lobby. Operator-world voice; no bomb-chassis vocabulary.

@@ -23,6 +23,7 @@ import type { RedisStore } from '../state/redis.js';
 import { sessionKey } from '../state/keys.js';
 import type { SessionLog, SessionSocketData } from './sessionHandlers.js';
 import { mintVoiceToken, VoiceScopeError } from '../voice/mintToken.js';
+import { mintTurnIceServers } from '../voice/turnCredentials.js';
 
 /** Typed server alias declared locally to avoid an import cycle with index.ts. */
 type VoiceIOServer = SocketIOServer<
@@ -41,6 +42,10 @@ export interface VoiceConfig {
   LIVEKIT_API_SECRET: string;
   /** Upper bound for the minted token's lifetime, in seconds. */
   TURN_TTL: number;
+  /** coturn static auth secret — signs the short-TTL TURN-REST credential (Story 3.6). */
+  TURN_SECRET: string;
+  /** Optional browser-reachable TURN URI; absent ⇒ no TURN advertised in the grant (Story 3.6). */
+  TURN_URL?: string;
 }
 
 export interface VoiceHandlerDeps {
@@ -121,15 +126,29 @@ export function registerVoiceHandlers(io: VoiceIOServer, deps: VoiceHandlerDeps)
           },
         );
 
+        // Corporate-NAT relay path (Story 3.6, AC #3): when TURN is configured,
+        // mint short-TTL TURN-REST credentials (HMAC-SHA1 over TURN_SECRET) and
+        // advertise the coturn relay as ICE servers. Absent TURN_URL ⇒ undefined ⇒
+        // grant omits `iceServers` (client connects via LiveKit's own ICE).
+        const iceServers = mintTurnIceServers({
+          turnUrl: deps.config.TURN_URL,
+          turnSecret: deps.config.TURN_SECRET,
+          identity: playerId,
+          ttlSeconds,
+          nowSeconds: Math.floor(Date.now() / 1000),
+        });
+
         const grant: VoiceTokenGrantPayload = {
           url: deps.config.LIVEKIT_URL,
           token,
           room,
           identity: playerId,
+          ...(iceServers !== undefined ? { iceServers } : {}),
         };
-        // Log only non-secret facts — NEVER the token (project-context Security).
+        // Log only non-secret facts — NEVER the token OR the TURN credential
+        // (project-context Security). `turn` here is a boolean, not the secret.
         deps.log.info(
-          { sessionId, playerId, role: player.role, room },
+          { sessionId, playerId, role: player.role, room, turn: iceServers !== undefined },
           'VOICE_TOKEN minted',
         );
         ack(grant);
