@@ -24,14 +24,41 @@ const TEAM_IDS: readonly TeamId[] = ['A', 'B'];
 
 export interface SwarmOptions {
   url: string;
-  /** Number of teams (1 or 2). */
+  /** Number of teams (1 or 2). Ignored when `sizes` is set. */
   teams: number;
-  /** Players per team. */
+  /** Players per team (uniform). Ignored when `sizes` is set. */
   perTeam: number;
+  /**
+   * Explicit per-team sizes for ASYMMETRIC teams, e.g. `[3, 2]` → 3 on A, 2 on B.
+   * Overrides `teams`/`perTeam`. `sizes[i]` maps to TEAM_IDS[i] (A, then B). Use
+   * this to exercise odd-team equalisation (the smallest valid odd case is 3v2 —
+   * a team of 1 is unplayable and the server now refuses it).
+   */
+  sizes?: number[];
   /** What each Defuser does per round. */
   outcome: Outcome;
   pacingMs?: number;
   log?: (msg: string) => void;
+}
+
+/**
+ * The per-player team assignment plan: one TeamId per bot, grouped by team in
+ * A-then-B order. Derived from `sizes` when present, else `teams × perTeam`
+ * uniform. Used by BOTH `makePlayers` (naming) and `assignTeams` (assignment) so
+ * names and team membership always agree.
+ */
+function resolveTeamPlan(opts: SwarmOptions): TeamId[] {
+  const sizes =
+    opts.sizes && opts.sizes.length > 0
+      ? opts.sizes
+      : Array.from({ length: opts.teams }, () => opts.perTeam);
+  const plan: TeamId[] = [];
+  sizes.forEach((count, teamIndex) => {
+    const teamId = TEAM_IDS[teamIndex];
+    if (teamId === undefined) return; // ignore sizes beyond the 2 supported teams
+    for (let i = 0; i < count; i++) plan.push(teamId);
+  });
+  return plan;
 }
 
 export interface Swarm {
@@ -40,25 +67,20 @@ export interface Swarm {
   all: BotClient[];
 }
 
-function makePlayers(opts: SwarmOptions): BotClient[] {
-  const players: BotClient[] = [];
-  // Flat round-robin order so the display name matches the team `assignTeams`
-  // will give each bot (player i → team i % teams).
-  const total = opts.teams * opts.perTeam;
-  for (let i = 0; i < total; i++) {
-    const teamId = TEAM_IDS[i % opts.teams];
-    const idxInTeam = Math.floor(i / opts.teams) + 1;
-    players.push(
-      new BotClient({
-        url: opts.url,
-        displayName: `Bot-${teamId}${idxInTeam}`,
-        outcome: opts.outcome,
-        pacingMs: opts.pacingMs,
-        log: opts.log,
-      }),
-    );
-  }
-  return players;
+function makePlayers(opts: SwarmOptions, plan: TeamId[]): BotClient[] {
+  // Name each bot by its planned team + index (Bot-A1, Bot-A2, …, Bot-B1), so the
+  // display name matches the team `assignTeams` gives it.
+  const seenPerTeam: Record<string, number> = {};
+  return plan.map((teamId) => {
+    const idxInTeam = (seenPerTeam[teamId] = (seenPerTeam[teamId] ?? 0) + 1);
+    return new BotClient({
+      url: opts.url,
+      displayName: `Bot-${teamId}${idxInTeam}`,
+      outcome: opts.outcome,
+      pacingMs: opts.pacingMs,
+      log: opts.log,
+    });
+  });
 }
 
 /**
@@ -69,11 +91,11 @@ function makePlayers(opts: SwarmOptions): BotClient[] {
  * read-modify-write and only the last write survives — so we await each
  * assignment's reflection in the facilitator snapshot before the next.
  */
-async function assignTeams(facilitator: BotClient, players: BotClient[], teams: number): Promise<void> {
+async function assignTeams(facilitator: BotClient, players: BotClient[], plan: TeamId[]): Promise<void> {
   const seenPerTeam: Record<string, number> = {};
   for (let i = 0; i < players.length; i++) {
     const bot = players[i];
-    const teamId = TEAM_IDS[i % teams];
+    const teamId = plan[i]!;
     const count = (seenPerTeam[teamId] ??= 0);
     facilitator.assignTeam(bot.playerId!, teamId, count === 0 ? 'defuser' : 'expert');
     seenPerTeam[teamId] = count + 1;
@@ -96,15 +118,17 @@ export async function buildAutonomousSwarm(
   const { joinCode } = await facilitator.createSession(config);
   log(`[swarm] session created, join code ${joinCode}`);
 
-  const players = makePlayers(opts);
+  const plan = resolveTeamPlan(opts);
+  const players = makePlayers(opts, plan);
   for (const bot of players) {
     await bot.connect();
     await bot.join(joinCode, 'defuser');
     bot.ready(true);
   }
 
-  await assignTeams(facilitator, players, opts.teams);
-  log(`[swarm] ${players.length} players assigned across ${opts.teams} team(s)`);
+  await assignTeams(facilitator, players, plan);
+  const teamCount = new Set(plan).size;
+  log(`[swarm] ${players.length} players assigned across ${teamCount} team(s)`);
 
   return { facilitator, players, all: [facilitator, ...players], joinCode };
 }
@@ -117,7 +141,7 @@ export async function buildAutonomousSwarm(
  */
 export async function buildJoinSwarm(opts: SwarmOptions, joinCode: string): Promise<Swarm> {
   const log = opts.log ?? (() => {});
-  const players = makePlayers(opts);
+  const players = makePlayers(opts, resolveTeamPlan(opts));
   for (const bot of players) {
     await bot.connect();
     await bot.join(joinCode, 'defuser');

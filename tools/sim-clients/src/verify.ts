@@ -129,8 +129,10 @@ async function run(): Promise<void> {
 
     // 2. BUTTON — exercises PRESS/RELEASE + the timer-digit HOLD loop over sockets.
     {
+      // Single team of 2 (the min size — a lone Defuser has no Expert): players[0]
+      // defuses, players[1] is the Expert. Story 8.9 min-team-size guard.
       const swarm = await buildAutonomousSwarm(
-        { url: server.url, teams: 1, perTeam: 1, outcome: 'defuse', pacingMs: 40, log },
+        { url: server.url, teams: 1, perTeam: 2, outcome: 'defuse', pacingMs: 40, log },
         { modulePool: ['the-button'], moduleCount: 3, timerMs: 300_000 },
       );
       await playRound(swarm);
@@ -140,8 +142,9 @@ async function run(): Promise<void> {
 
     // 3. STRIKE — one deliberately-wrong wire cut.
     {
+      // Single team of 2 (min size, Story 8.9): players[0] is the Defuser.
       const swarm = await buildAutonomousSwarm(
-        { url: server.url, teams: 1, perTeam: 1, outcome: 'strike', pacingMs: 40, log },
+        { url: server.url, teams: 1, perTeam: 2, outcome: 'strike', pacingMs: 40, log },
         { modulePool: ['wires'], moduleCount: 3, timerMs: 300_000 },
       );
       swarm.facilitator!.openPreparation();

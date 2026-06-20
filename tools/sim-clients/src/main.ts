@@ -17,6 +17,7 @@ interface Args {
   create: boolean;
   teams: number;
   perTeam: number;
+  sizes?: number[];
   outcome: Outcome;
   rounds: number;
   help: boolean;
@@ -41,6 +42,13 @@ function parseArgs(argv: string[]): Args {
       case '--create': args.create = true; break;
       case '--teams': args.teams = Number(next()); break;
       case '--per-team': args.perTeam = Number(next()); break;
+      // Asymmetric teams, e.g. --sizes 3,2 → 3 on A, 2 on B. Overrides --teams/--per-team.
+      case '--sizes':
+        args.sizes = next()
+          .split(',')
+          .map((n) => Number(n.trim()))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        break;
       case '--outcome': args.outcome = next() as Outcome; break;
       case '--rounds': args.rounds = Number(next()); break;
       case '--help': case '-h': args.help = true; break;
@@ -63,6 +71,9 @@ Options:
   --create            Spawn a bot Facilitator that creates + drives the session
   --teams <n>          Number of teams, 1 or 2 (default 2)
   --per-team <n>       Players per team (default 2)
+  --sizes <a,b>        Asymmetric team sizes, e.g. 3,2 (3 on A, 2 on B). Overrides
+                       --teams/--per-team. Smallest valid odd case is 3,2 — a team
+                       of 1 is unplayable (no Expert) and the server refuses it.
   --outcome <o>        defuse | strike | timeout (default defuse)
   --rounds <n>         (--create only) rounds to play (default 1)
   -h, --help           Show this help
@@ -87,6 +98,7 @@ async function main(): Promise<void> {
     url: args.url,
     teams: args.teams,
     perTeam: args.perTeam,
+    ...(args.sizes ? { sizes: args.sizes } : {}),
     outcome: args.outcome,
     log: (m) => console.log(m),
   };

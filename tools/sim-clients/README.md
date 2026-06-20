@@ -46,9 +46,16 @@ pnpm --filter @bomb-squad/sim-clients sim --create --teams 2 --per-team 2 --roun
 | `--code <joinCode>` | — | Join an existing human-created session (hybrid mode) |
 | `--create` | off | Spawn a bot Facilitator that creates + drives the session |
 | `--teams <n>` | `2` | Number of teams (1 or 2) |
-| `--per-team <n>` | `2` | Players per team |
+| `--per-team <n>` | `2` | Players per team (uniform) |
+| `--sizes <a,b>` | — | Asymmetric team sizes, e.g. `3,2` (3 on A, 2 on B). Overrides `--teams`/`--per-team`. |
 | `--outcome <o>` | `defuse` | `defuse` \| `strike` \| `timeout` |
 | `--rounds <n>` | `1` | (`--create` only) rounds to play |
+
+> **Min team size is 2.** The game is the Defuser↔Expert split (the Defuser sees
+> the bomb but not the manual; an Expert reads the manual). A team of 1 can't
+> play, so the server refuses to start a round with one — the smallest valid
+> *odd* case is `--sizes 3,2`. A single-team session is fine if that team has ≥2
+> (e.g. `--sizes 2` or `--teams 1 --per-team 2`).
 
 `--outcome`:
 - **defuse** — the Defuser bot solves every module (cuts the right wire, taps/holds
