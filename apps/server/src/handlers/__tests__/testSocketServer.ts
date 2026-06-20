@@ -226,10 +226,18 @@ export async function startTestSocketServer(
           socket.once(name as keyof ServerToClientEvents, (p: unknown) => resolve(p)),
         );
       }
-      await new Promise<void>((resolve, reject) => {
-        socket.once('connect', () => resolve());
-        socket.once('connect_error', (err) => reject(err));
-      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          socket.once('connect', () => resolve());
+          socket.once('connect_error', (err) => reject(err));
+        });
+      } catch (err) {
+        // Handshake failed: the function rejects (the caller never receives
+        // `events`), but the half-initialized socket would linger in `clients`
+        // with dangling `once` listeners — tear it down before propagating.
+        socket.disconnect();
+        throw err;
+      }
       return { socket, events };
     },
     async close(): Promise<void> {

@@ -92,6 +92,17 @@ The fix deliberately reuses `BOMB_INIT` rather than minting a new snapshot event
 - The four I/O-matrix scenarios + the resolved-team regression test.
   [`sessionHandlers.test.ts:1949`](../../apps/server/src/handlers/__tests__/sessionHandlers.test.ts#L1949)
 
+## Review Findings (code review 2026-06-20)
+
+### Patch (all applied 2026-06-20 — `tsc` clean, full server suite 433/433)
+- [x] [Review][Patch] Timer-present / bomb-absent half-replay [`sessionHandlers.ts`] — (blind+edge+auditor; was decision → **both-or-neither**) Both emits now gated on the bomb being present (read timer→bomb; replay both or neither); a live timer with no bomb no longer leaves the client ticking over DEV placeholders. Aligns with AC1. Added `(bomb✗ timer✓)` regression test.
+- [x] [Review][Patch] Stale pre-await `snapshot` for the replay decision [`sessionHandlers.ts`] — (blind+edge) Replay now decides on a `latest` state var updated from the restored/`fresh` read, so a team assignment or round resolution landing across the restore awaits is observed.
+- [x] [Review][Patch] Replay Redis reads not isolated [`sessionHandlers.ts`] — (edge) Wrapped the bomb/timer reads in their own try/catch; a corrupt key now skips just the replay (logged) without mislabeling the already-emitted SESSION_STATE/identity restore as failed.
+- [x] [Review][Patch] Test helper leaves a half-init client on `connect_error` [`testSocketServer.ts`] — (blind) Handshake failure now disconnects the socket before propagating, so it doesn't linger in `clients` with dangling listeners.
+
+### Deferred
+- [x] [Review][Defer] Paused-timer replay sends no `PAUSED` signal [`apps/server/src/handlers/sessionHandlers.ts:447-451`] — deferred, depends on unshipped pause/resume (Story 8.7). A refresh during a paused round would replay a frozen `TimerState` with no pause flag; latent until pause/resume is wired.
+
 ## Completion Notes
 
 - **Root cause:** `restoreReattachedSocket` only restored lobby-phase reconnects; mid-round reattaches were re-sent `SESSION_STATE` but never re-joined to the team room nor re-sent the bomb, so the client's `bomb` stayed `null` and `BombScene` rendered `DEV_PLACEHOLDER_MODULES` (the 6 empty placeholders).

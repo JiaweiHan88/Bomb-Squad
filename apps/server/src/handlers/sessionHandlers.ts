@@ -385,6 +385,10 @@ async function restoreReattachedSocket(
 
     await socket.join(sessionRoom(sessionId));
 
+    // Track the freshest state we observe; the mid-round replay below decides on
+    // this rather than the pre-await `snapshot`, which can go stale across the
+    // restore awaits (a team assignment or round resolution landing in between).
+    let latest: SessionState = snapshot;
     let restored = false;
     if (snapshot.players[playerId] === undefined && snapshot.status === 'lobby' && reattachToken !== null) {
       const record = await resolveReattachRecord(deps.redis, sessionId, reattachToken);
@@ -410,6 +414,7 @@ async function restoreReattachedSocket(
         );
         if (result.kind === 'restored') {
           io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+          latest = result.state;
           restored = true;
         }
       }
@@ -417,7 +422,10 @@ async function restoreReattachedSocket(
 
     if (!restored) {
       const fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
-      if (fresh !== null) socket.emit('SESSION_STATE', fresh);
+      if (fresh !== null) {
+        socket.emit('SESSION_STATE', fresh);
+        latest = fresh;
+      }
     }
     // Re-emit the identity (token unchanged) so the client refreshes its store.
     if (reattachToken !== null) {
@@ -438,17 +446,32 @@ async function restoreReattachedSocket(
     // resolved-team refresh would otherwise replay a stale, still-playable-looking
     // bomb and (via the client's setBomb) wipe its result banner. A live timer ⟺
     // the team is still playing this round. Replaying the resolution banner itself
-    // on a resolved-team refresh is mid-round sync (Epic 8), out of scope here. A
-    // missing key just skips the replay — never throws.
-    if (snapshot.status === 'active') {
-      const teamId = snapshot.players[playerId]?.teamId;
+    // on a resolved-team refresh is mid-round sync (Epic 8), out of scope here.
+    //
+    // Bomb and timer are replayed both-or-neither: a live timer with no bomb
+    // snapshot (e.g. only the bomb key evicted) would leave the client ticking
+    // over the DEV placeholder modules — the very desync this fix prevents. The
+    // reads are self-guarded so a missing OR corrupt key just skips the replay and
+    // never fails the already-emitted SESSION_STATE/identity restore.
+    if (latest.status === 'active') {
+      const teamId = latest.players[playerId]?.teamId;
       if (teamId !== undefined) {
         await socket.join(teamRoom(sessionId, teamId));
-        const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
-        if (timer !== null) {
-          const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
-          if (bomb !== null) socket.emit('BOMB_INIT', bomb);
-          socket.emit('TIMER_UPDATE', timer);
+        try {
+          const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+          const bomb =
+            timer !== null
+              ? await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId))
+              : null;
+          if (timer !== null && bomb !== null) {
+            socket.emit('BOMB_INIT', bomb);
+            socket.emit('TIMER_UPDATE', timer);
+          }
+        } catch (replayErr) {
+          deps.log.info(
+            { replayErr, sessionId, playerId, teamId },
+            'mid-round bomb/timer replay skipped',
+          );
         }
       }
     }

@@ -2051,6 +2051,22 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
     rejoined.disconnect();
   });
 
+  it('reattach with a live timer but absent bomb key replays neither (both-or-neither gate)', async () => {
+    // If only the bomb key is evicted while the timer is still live, a timer-only
+    // replay would leave the client ticking over the DEV placeholder modules — the
+    // very desync this fix prevents. Both emits are gated on the bomb being present.
+    const { ack, identity } = await setupActiveDefuser({ writeBomb: false, writeTimer: true });
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['SESSION_STATE', 'BOMB_INIT', 'TIMER_UPDATE'],
+    );
+    expect(await events['SESSION_STATE']).toBeDefined();
+    await expect(raceTimeout(events['BOMB_INIT'], 100)).resolves.toBe('timeout');
+    await expect(raceTimeout(events['TIMER_UPDATE'], 100)).resolves.toBe('timeout');
+    rejoined.disconnect();
+  });
+
   it('a lobby reattach replays no bomb (the replay is status-gated to active)', async () => {
     const { ack } = await createWithIdentity();
     const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
