@@ -179,7 +179,7 @@ One server process owns many concurrent sessions. There is no per-session proces
 - **Identity:** every session has a `sessionId` (server-generated UUID) and a human-facing `joinCode` (≥6 chars, `crypto.randomBytes`-derived, unguessable — never sequential).
 - **Socket.IO rooms:** each session uses rooms namespaced by id:
   - `session:{sessionId}` — all participants (broadcast scoreboard, session events)
-  - `session:{sessionId}:team:{teamId}` — team-scoped bomb state (the other team must not receive a team's bomb state mid-round; sequential relay means only the active team's bomb is live, but team-scoping prevents leakage and supports spectators-of-other-team)
+  - `session:{sessionId}:team:{teamId}` — team-scoped bomb state (the other team must not receive a team's bomb state mid-round; sequential relay means only the active team's bomb is live, but team-scoping prevents leakage and supports spectators-of-other-team). **Implementing story: 8.11 (Sequential Round Orchestration)** — this "only the active team's bomb is live" property is load-bearing; do not implement concurrent ("parallel") arming (parallel defuse is deferred per `gdd.md:758`).
   - `session:{sessionId}:role:{role}` — role-gated payloads (e.g. manual chapter assignments to Experts)
 - **State residence:** all session/bomb/round state lives in Redis keyed by `sessionId`. The process holds **no authoritative in-memory game state** — only transient socket bookkeeping. This keeps the process restart-tolerant and makes a future Socket.IO Redis-adapter scale-out a non-breaking change.
 - **Concurrency:** sessions are fully independent; there is no global lock. Per-session mutations are serialized through that session's handler path (see Pattern 4).

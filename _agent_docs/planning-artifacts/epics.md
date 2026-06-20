@@ -42,7 +42,7 @@ This document provides the complete epic and story breakdown for Bomb Squad, dec
 - FR16: Each bomb is rendered in real-time 3D in-browser; the Defuser can orbit (drag), zoom (scroll), focus a module (click → camera dolly), and return to overview (ESC).
 - FR17: Each bomb has metadata used by module rules: serial number (last character always a digit), battery count, indicators (subset of {SND,CLR,CAR,IND,FRQ,SIG,NSA,MSA,TRN,BOB,FRK} lit/unlit), and ports (subset of {DVI-D,Parallel,PS/2,RJ-45,Serial,Stereo RCA}) — all randomised per team per round.
 - FR18: Bomb contains 3–11 modules, defusable in any order; a green LED indicates a disarmed module; all modules disarmed = bomb defused.
-- FR19: Module values are independently randomised per team per round via a deterministic seed chain; both teams receive identical layouts with independent values.
+- FR19: Module values are independently randomised per team per round via a deterministic seed chain; both teams receive identical layouts with independent values. (Under sequential play the identical layout is shared per **matched turn-pair** — `templateSeed` keyed by `pairIndex` — not per turn; see Story 8.11.)
 - FR20: Defuser interacts with modules via mouse click only (wire cut = click; button press = mousedown+up; button hold = sustained; keypad/maze/memory = click; Morse = click TX); voice is the communication channel.
 - FR21: Module — **Wires** (3–6 wires, per-wire-count rule tables) with Defuser view, Expert manual pages, and server-side solve validation.
 - FR22: Module — **The Button** (press/hold decision table + colour-strip release-on-timer-digit rule).
@@ -76,7 +76,7 @@ This document provides the complete epic and story breakdown for Bomb Squad, dec
 - FR42: [Lifelines on] Spectators earn 1 token per round spectated (max 3 held); spending a token pushes a pre-defined hint prompt (from a fixed list, no free text) to Defuser + Experts as an 8s non-blocking toast; Facilitator can disable per session.
 
 **Relay, Scoring & Scoreboard**
-- FR43: Sessions run as a sequential relay; both teams play the same rounds; every player defuses at least once.
+- FR43: Sessions run as a sequential relay; both teams play the same layouts (one team at a time, snake turn order — Story 8.11); every player defuses at least once.
 - FR44: Odd team sizes — the shorter team plays one extra round (Facilitator assigns a volunteer Defuser) to equalise round count.
 - FR45: Time-based scoring — elapsed defuse time recorded per round; failed rounds record time at the moment of failure; lowest cumulative time wins.
 - FR46: Between-round scoreboard preview and an end-of-session final scoreboard with a round-by-round breakdown.
@@ -672,6 +672,28 @@ So that a WebRTC failure never blocks play.
 **When** a participant joins voice
 **Then** connection is attempted via the TURN relay path and the connecting microcopy is distinct from the game-socket connecting state.
 
+### Story 3.7: Bomb Room → Spectator Lounge One-Way Audio Bridge
+
+As a spectator or resting-team player,
+I want to hear the active team's Bomb Room from the Spectator Lounge,
+So that spectating the live round is meaningful (and the lifeline economy has something to watch).
+
+> **Why this story exists (gap found 2026-06-20):** `game-architecture.md:332` specifies a one-way bridge forwarding Bomb Room audio into the lounge, but no bridge/egress code exists — so "the spectator hears the Bomb Room" (Story 3.3 AC) and "the resting team can spectate" (Story 8.11) are currently non-functional. The lounge today carries only the facilitator's voice. Required once sequential play (Story 8.11) makes the resting team an audience.
+
+**Acceptance Criteria:**
+
+**Given** an active round
+**When** spectators / resting-team players are in `spectator-lounge:{sessionId}`
+**Then** the active team's Bomb Room audio is forwarded one-way into the lounge so lounge participants hear it. (`game-architecture.md:332`.)
+
+**Given** a lounge participant (spectator or resting-team player)
+**When** they are connected to the lounge
+**Then** they may speak to each other within the lounge but their audio is never injected back into any Bomb Room — the one-way boundary is enforced at the token-grant / topology level, not the UI. (Resolves the "spectators can talk to each other, just not into the bomb room" requirement and the facilitator-sits-in-lounge intent.)
+
+**Given** relay rotation changes a player's effective role (active ↔ resting)
+**When** the turn flips
+**Then** their voice token is re-minted to the correct room (Bomb Room ↔ Lounge) — never reused across the change. (Pairs with Story 3.5.)
+
 ---
 
 ## Epic 4: Bomb Renderer & HUD
@@ -1132,7 +1154,7 @@ So that we solve a timing-interpretation module by decoding a word to a frequenc
 
 ## Epic 8: Game Loop & Scoring
 
-The full relay race: Facilitator configures and runs rounds, the server owns the clock and strike escalation, bombs generate per-team from the seed chain, pause/disconnect/retry work, and cumulative time produces a scoreboard. (FR8–FR15, FR19, FR33, FR34, FR43–FR46; AR6, AR7, AR11, UX-DR11, UX-DR12)
+The full relay race: Facilitator configures and runs rounds, the server owns the clock and strike escalation, bombs generate per-team from the seed chain, pause/disconnect/retry work, and cumulative time produces a scoreboard. Rounds play **sequentially** — one team's bomb is live at a time while the other team spectates (Story 8.11; `game-architecture.md:182`). (FR8–FR15, FR19, FR33, FR34, FR43–FR46; AR6, AR7, AR11, UX-DR11, UX-DR12)
 
 ### Story 8.1: Round Configuration & Difficulty Gating
 
@@ -1166,6 +1188,8 @@ So that both teams get identical layouts with independent, fair values.
 **When** the server generates bombs
 **Then** both teams derive the same `templateSeed` (identical layout) and distinct `teamSeed`s (independent values), assembling `BombContext` then all modules in one synchronous pass.
 
+> **Note (Story 8.11, sequential play):** the deterministic generator is unchanged, but the round identifier fed to `templateSeed` becomes `pairIndex = ceil(roundNumber/2)` (not the per-turn `roundNumber`), and the two teams' bombs are generated on their **own turns** rather than in a single shared `ROUND_START`. Same identifier ⇒ same layout still holds — it is now keyed per matched turn-pair.
+
 **Given** the generated `BombContext`
 **When** it is passed to modules
 **Then** it is frozen read-only and never mutated by any module.
@@ -1190,6 +1214,10 @@ So that the team orients and the relay rotation is honoured.
 **When** I start the round
 **Then** the next player in rotation is assigned Defuser and `ROUND_START` (Facilitator-only) begins the round, routing players to their surfaces and voice channels.
 
+**Given** a sequential round
+**When** `ROUND_START` fires
+**Then** only the active team's bomb is armed; players on the non-active (resting) team are routed to the spectate surface / Spectator Lounge, never to a live bomb. (Mechanism owned by Story 8.11; `game-architecture.md:182`.)
+
 ### Story 8.4: Server-Authoritative Timer & Strike Escalation
 
 As a team,
@@ -1200,7 +1228,7 @@ So that timing is fair, tamper-proof, and pressure escalates with mistakes.
 
 **Given** a round starts
 **When** the timer begins
-**Then** the server is the sole authority on expiry and broadcasts a `TimerState` descriptor only on change (start/strike/pause/resume).
+**Then** the server is the sole authority on expiry of the **single active round's** timer (one live clock per round — the active team's — not one per team) and broadcasts a `TimerState` descriptor only on change (start/strike/pause/resume).
 
 **Given** a strike is recorded
 **When** the timer rebases
@@ -1230,6 +1258,10 @@ So that our result and time are recorded correctly.
 **When** it resolves
 **Then** the scoreboard never appears mid-round.
 
+**Given** sequential play
+**When** a round resolves
+**Then** resolution applies to the active team's round only; the resting team holds in spectate. (Story 8.11.)
+
 ### Story 8.6: Between-Round Flow & Scoreboard Preview
 
 As a Facilitator and players,
@@ -1244,7 +1276,7 @@ So that everyone sees standing before the next round and I control pacing.
 
 **Given** the between-rounds phase
 **When** the Facilitator advances
-**Then** the next round's Preparation phase begins for the next Defuser in rotation.
+**Then** the next round's Preparation phase begins for the next team's turn in the alternation (its next Defuser in rotation). (Alternation mechanism: Story 8.11.)
 
 ### Story 8.7: Pause — Facilitator & Disconnect
 
@@ -1294,9 +1326,10 @@ So that every player defuses at least once and the competition is fair.
 **When** the shorter team has fewer natural rounds
 **Then** it plays one extra round with a Facilitator-assigned volunteer Defuser to equalise round count.
 
-**Given** both teams
-**When** rounds run
-**Then** they play the same rounds sequentially (not in parallel), with the resting team able to spectate.
+**Given** the relay
+**When** it runs
+**Then** there is a single shared round number and a single between-rounds gate (never two independent relays). The per-round **serialisation** — only the active team's bomb is live while the non-active team spectates — is specified and owned by **Story 8.11 (Sequential Round Orchestration)**, which 8.9 must not contradict.
+_Rationale (do not re-erode): parallel defuse is **explicitly deferred** — `gdd.md:758`, `gdd.md:137`, `game-architecture.md:182` ("sequential relay means only the active team's bomb is live")._
 
 ### Story 8.10: Scoring, Final Scoreboard & Session-End Persistence
 
@@ -1317,6 +1350,38 @@ So that we learn who won and the session is recorded.
 **Given** the session ends
 **When** persistence runs
 **Then** session metadata, per-round per-team times, and the final scoreboard are written to Postgres in a single transaction (no writes occurred during play).
+
+### Story 8.11: Sequential Round Orchestration
+
+As a Facilitator and players,
+I want each round played by one team at a time while the other team spectates,
+So that attention stays on one bomb, the competition is a clean comparison, and the spectator experience (lounge, lifelines) works as designed.
+
+> **Why this story exists (root-cause fix):** the "sequential, not parallel" requirement was design-confirmed in `gdd.md:137`, deferred-its-alternative in `gdd.md:758` ("parallel defuse — deferred"), and specified technically in `game-architecture.md:182` ("sequential relay means only the active team's bomb is live"). It had **no owning story** — it lived as one ambiguous AC clause on Story 8.9 (rotation/equalisation) and was reinterpreted into concurrent ("parallel") arming during 8.3/8.9 implementation. This story gives the serialisation mechanism an accountable owner so it cannot erode again.
+
+**Acceptance Criteria:**
+
+**Given** a round starts
+**When** `ROUND_START` fires
+**Then** exactly one team's bomb is armed (`round.defusers` contains only the active team); the non-active team has no armed bomb and no timer. (Corrects 8.3's all-populated-teams arming; `game-architecture.md:182`.)
+
+**Given** a round resolves
+**When** the Facilitator advances
+**Then** the next active team is chosen by the **snake order** (`pairIndex = ceil(roundNumber/2)`; odd pair → A then B, even pair → B then A, giving `A,B,B,A,A,B…`) so the second-mover spectating advantage alternates; a single shared round number is preserved. (Decision: Jay, 2026-06-21.)
+
+**Given** the two teams' matched turns in a pair
+**When** their bombs are generated
+**Then** both use the same `templateSeed` = `hash(sessionId + ":" + pairIndex)` — **identical module layout** — while `deriveTeamSeed` diverges per team for **independent values** (FR19 preserved; the seed-chain functions are unchanged, only `pairIndex` is fed instead of the per-turn round number).
+
+**Given** a team is not active
+**When** the round is live
+**Then** its players are routed to the spectate surface and the Spectator Lounge (voice), never a dead bomb; they receive the active team's team-scoped snapshot only while spectating. (`game-architecture.md:319`; depends on the Epic 3 Spectator-Lounge audio bridge, Story 3.7.)
+
+**Given** a single active team
+**When** the timer runs
+**Then** there is exactly one authoritative clock for the live round (not one per team).
+
+> **Implementation note:** lands in the `worktree-s5-epic8-relay` worktree **after Stories 8.9 + 8.7**, so master only ever sees Model B (sequential). Reuses 8.9's rotation / `isRelayComplete` / equalisation logic unchanged; changes `startRound` + the `ROUND_START` handler to select the active team and arm only its bomb/timer. 8.9's interactive re-verification (its Task 8) runs after this story lands.
 
 ---
 
@@ -1349,6 +1414,8 @@ So that Experts must coordinate with each other as well as the Defuser.
 As a Spectator,
 I want to earn and hold lifeline tokens,
 So that I can meaningfully contribute when I have one to spend.
+
+> **Depends on Story 8.11** (single active bomb): the "1 token per round spectated" economy assumes one live bomb with a watching audience, not concurrent bombs.
 
 **Acceptance Criteria:**
 
@@ -1389,6 +1456,8 @@ So that I can help without coaching via free text.
 As a Spectator,
 I want a composed lounge screen showing the active team's bomb and the Expert's current manual page,
 So that I can follow exactly what the team is working on and decide when to spend a lifeline.
+
+> **Depends on Story 8.11** (single active bomb) and **Story 3.7** (lounge audio bridge): the split-pane "active team's bomb" view and the resting-team audience both assume one live bomb at a time. This is the canonical surface a resting-team player and the facilitator use while spectating.
 
 **Acceptance Criteria:**
 
