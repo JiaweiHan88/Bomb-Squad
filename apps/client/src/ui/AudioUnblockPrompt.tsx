@@ -15,6 +15,11 @@ import { VOICE_ENABLE_AUDIO } from './copy.js';
  *
  * Self-gates: renders ONLY when `connected && audioBlocked`, so mounting it
  * unconditionally in the HUD (any in-round role) is safe.
+ *
+ * Placement: centered but lifted a row above the bottom controls (`bottom-20`),
+ * so it never overlaps the mute control (bottom-left) or the connect/reconnect CTA
+ * (bottom-right) even on a narrow viewport, and stays clear of the top-left pills
+ * and the top-center/right timer zone (Stories 4.4/4.5).
  */
 export default function AudioUnblockPrompt() {
   const status = useVoiceStore((s) => s.status);
@@ -23,7 +28,7 @@ export default function AudioUnblockPrompt() {
   if (status !== 'connected' || !audioBlocked) return null;
 
   return (
-    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
+    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-10 -translate-x-1/2">
       <button
         type="button"
         aria-label={VOICE_ENABLE_AUDIO}

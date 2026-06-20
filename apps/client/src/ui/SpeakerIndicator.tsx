@@ -1,6 +1,6 @@
 import { useGameStore } from '../store/gameStore.js';
 import { useVoiceStore } from '../store/voiceStore.js';
-import { SPEAKING } from './copy.js';
+import { SPEAKING, SPEAKER_UNKNOWN } from './copy.js';
 
 /**
  * In-round speaker indicator (Story 3.4) — the richer cousin of the Story 2.5
@@ -46,9 +46,10 @@ export default function SpeakerIndicator() {
     >
       {activeSpeakers.map((id) => {
         const isSelf = id === selfId;
-        // Name always visible (never icon-only). Fall back to the id only if the
-        // roster somehow lacks this speaker — still a name, never a bare dot.
-        const name = players?.[id]?.displayName ?? id;
+        // Name always visible (never icon-only). If the roster somehow lacks this
+        // speaker, fall back to a generic label — never leak a raw playerId as a
+        // human name (still a name, never a bare dot).
+        const name = players?.[id]?.displayName ?? SPEAKER_UNKNOWN;
         const dotColor = isSelf ? 'bg-speaker-self' : 'bg-speaker-active';
         const textColor = isSelf ? 'text-speaker-self' : 'text-speaker-active';
         return (

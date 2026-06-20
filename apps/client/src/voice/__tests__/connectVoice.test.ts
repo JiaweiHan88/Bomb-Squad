@@ -210,6 +210,41 @@ describe('voiceStore status state machine', () => {
     expect(s.room).toBe(GRANT.room);
     expect(s.identity).toBe(GRANT.identity);
   });
+
+  // Review fix (3.6): a self-heal must not silently un-mute a muted publisher.
+  // onReconnecting captures the mute intent before setUnavailable() wipes it;
+  // onReconnected re-asserts the mic + restores voiceStore.muted so the glyph
+  // never lies about whether the mic is live.
+  it('a self-heal reconciles a muted publisher (re-asserts mic + restores muted flag)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect(); // publish: true
+    await controller.setMuted(true);
+    expect(useVoiceStore.getState().muted).toBe(true);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    room.emit(RoomEvent.Reconnecting, undefined); // setUnavailable clears muted → false
+    expect(useVoiceStore.getState().muted).toBe(false);
+
+    room.emit(RoomEvent.Reconnected, undefined);
+    await Promise.resolve(); // flush the re-assert microtask chain
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false); // mic re-muted
+    expect(useVoiceStore.getState().muted).toBe(true); // flag restored
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  // A self-heal of an UN-muted publisher must not spuriously toggle the mic.
+  it('a self-heal does not touch the mic when the publisher was not muted', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    setMicrophoneEnabled.mockClear();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    room.emit(RoomEvent.Reconnected, undefined);
+    await Promise.resolve();
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
 });
 
 // ── Manual reconnect (Story 3.6, AC #2) ──────────────────────────────────────

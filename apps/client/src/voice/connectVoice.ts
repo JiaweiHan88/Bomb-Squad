@@ -127,6 +127,10 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   // safe no-op for them (Story 3.4) — `setMuted` only touches the mic when this is
   // `true`. Reset on every teardown so a stale value can't leak across reconnects.
   let published = false;
+  // Captured on `Reconnecting` (before the banner clears voiceStore.muted) so a
+  // self-heal via `Reconnected` can re-assert the mic + restore the mute flag,
+  // keeping the MuteControl glyph honest across a transient blip (Story 3.6 review).
+  let mutedBeforeReconnect = false;
   // Bumped by every disconnect/teardown (and superseded by any newer connect) so
   // an in-flight connect can detect, after each await, that it was torn down and
   // abort+dispose its room instead of leaking a live SFU connection + hot mic.
@@ -277,6 +281,11 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     // room's late event can't write the store.
     onReconnecting = () => {
       if (epoch !== connectEpoch) return;
+      // Remember the mute intent BEFORE setUnavailable() wipes voiceStore.muted,
+      // so a self-heal can reconcile the glyph with the real mic (see below). The
+      // room is kept alive, so the local mic track keeps its disabled state across
+      // the resume — we re-assert it on `Reconnected` to guarantee they agree.
+      mutedBeforeReconnect = useVoiceStore.getState().muted;
       useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
     };
     onReconnected = () => {
@@ -284,6 +293,23 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       // clears; ActiveSpeakersChanged will repopulate the pills).
       if (epoch !== connectEpoch) return;
       useVoiceStore.getState().setConnected({ room: roomName, identity });
+      // Reconcile mute: setUnavailable() cleared voiceStore.muted to false during
+      // the blip, but the participant's real intent (and the kept-alive mic track)
+      // may have been muted. Re-assert the mic publish state and restore the store
+      // flag so the MuteControl glyph never lies about whether the mic is live.
+      // Only for a publisher (a listen-only spectator has no mic). Best-effort —
+      // a failed re-assert must not throw into the UI (mirror setMuted's try/catch).
+      if (published && mutedBeforeReconnect && room) {
+        const r = room;
+        void r.localParticipant
+          .setMicrophoneEnabled(false)
+          .then(() => {
+            if (epoch !== connectEpoch) return;
+            useVoiceStore.getState().setMuted(true);
+          })
+          .catch(() => undefined);
+      }
+      mutedBeforeReconnect = false;
     };
     // Speaker presence (Story 2.5): LiveKit delivers the CURRENT speaking set on
     // each change. Map to durable playerId (== participant.identity, set by the
@@ -499,11 +525,14 @@ export function createVoiceController(deps: VoiceControllerDeps) {
 
 /**
  * Resolve the dev-only force-relay toggle (Story 3.6) for the real singleton.
- * `VITE_FORCE_TURN_RELAY === '1'` (build/env) OR a `?relay` query param (handy
- * for an ad-hoc browser check). Defaults OFF — never forces relay in production.
+ * `VITE_FORCE_TURN_RELAY === '1'` (build/env) OR a `?relay` query param. BOTH are
+ * gated to dev builds (`import.meta.env.DEV`) so neither can force relay — and
+ * thus self-deny voice when TURN is unconfigured — for a real user in production.
  */
 function defaultForceRelay(): boolean {
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  // Production builds never honour the toggle, by either mechanism.
+  if (!env?.DEV) return false;
   if (env?.VITE_FORCE_TURN_RELAY === '1') return true;
   if (typeof window !== 'undefined') {
     return new URLSearchParams(window.location.search).has('relay');

@@ -55,6 +55,9 @@ export const WAITING_FOR_TEAM = 'Waiting for your team.';
 // Accessible labels for the per-row speaker dot (never icon-only).
 export const SPEAKING = 'speaking';
 export const MIC_QUIET = 'quiet';
+// Pill fallback when a transmitting voice identity isn't in the durable roster
+// (non-roster participant / momentarily stale roster) — never show a raw id.
+export const SPEAKER_UNKNOWN = 'Someone';
 
 // Team assignment (Story 2.4) — mockup "6. Facilitator Dashboard" team badges.
 export const TEAM_A = 'Team A';
