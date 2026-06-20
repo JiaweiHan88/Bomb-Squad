@@ -1946,6 +1946,125 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
     expect(newbie).toBeDefined();
   });
 
+  // ── Mid-round reattach replay (bomb-view refresh fix) ────────────────────────
+  // A refresh during an active round must re-join the team room AND replay the
+  // live bomb + timer, or the client renders the DEV placeholder modules and goes
+  // stale on the next team-scoped broadcast.
+  const SAMPLE_BOMB: BombState = {
+    context: { serialNumber: 'AB1', batteryCount: 2, indicators: [], ports: [] },
+    modules: [],
+    strikes: 0,
+    solved: false,
+  };
+  const SAMPLE_TIMER: TimerState = {
+    startedAt: 1000,
+    remainingAtStart: 300_000,
+    speedMultiplier: 1,
+    pausedAt: null,
+  };
+
+  /** Settle to 'received' if `p` resolves first, else 'timeout' after `ms`. */
+  const raceTimeout = (p: Promise<unknown>, ms: number): Promise<'received' | 'timeout'> =>
+    Promise.race([
+      p.then(() => 'received' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms)),
+    ]);
+
+  /** Join Maya, assign her to Team A as defuser, then force the session active.
+   * A live timer key means the team is still playing; resolveRound deletes it on
+   * defuse/explosion while leaving the bomb key — so `writeTimer: false` models a
+   * resolved team within a still-active (multi-team) session. */
+  async function setupActiveDefuser(
+    opts: { writeBomb?: boolean; writeTimer?: boolean } = {},
+  ): Promise<{ ack: SessionCreatedPayload; identity: SessionIdentityPayload; socket: TestClientSocket }> {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    const assigned = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: identity.playerId, teamId: 'A', role: 'defuser' });
+    await assigned;
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+    if (opts.writeBomb ?? true) await store.setJSON(bombKey(ack.sessionId, 'A'), SAMPLE_BOMB);
+    if (opts.writeTimer ?? true) await store.setJSON(timerKey(ack.sessionId, 'A'), SAMPLE_TIMER);
+    return { ack, identity, socket };
+  }
+
+  it('mid-round reattach re-joins the team room and replays BOMB_INIT + TIMER_UPDATE', async () => {
+    const { ack, identity, socket } = await setupActiveDefuser();
+    socket.disconnect(); // refresh
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['BOMB_INIT', 'TIMER_UPDATE'],
+    );
+    expect(await events['BOMB_INIT']).toEqual(SAMPLE_BOMB);
+    expect(await events['TIMER_UPDATE']).toEqual(SAMPLE_TIMER);
+
+    // Re-joined the team room so subsequent team-scoped broadcasts reach it.
+    const teamSockets = await server.io.in(teamRoom(ack.sessionId, 'A')).fetchSockets();
+    expect(teamSockets.some((s) => s.data.playerId === identity.playerId)).toBe(true);
+    rejoined.disconnect();
+  });
+
+  it('mid-round reattach with no team assignment replays neither bomb nor timer', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), { ...stored, status: 'active' });
+    socket.disconnect();
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['SESSION_STATE', 'BOMB_INIT'],
+    );
+    expect(await events['SESSION_STATE']).toBeDefined(); // snapshot still delivered
+    await expect(raceTimeout(events['BOMB_INIT'], 100)).resolves.toBe('timeout');
+    rejoined.disconnect();
+  });
+
+  it('mid-round reattach with bomb/timer keys absent restores without throwing and replays no bomb', async () => {
+    const { ack, identity } = await setupActiveDefuser({ writeBomb: false, writeTimer: false });
+    // Maya's socket from setup is still open; the reattach is a separate socket.
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['SESSION_STATE', 'BOMB_INIT'],
+    );
+    expect(await events['SESSION_STATE']).toBeDefined(); // restore ran — no throw
+    await expect(raceTimeout(events['BOMB_INIT'], 100)).resolves.toBe('timeout');
+    rejoined.disconnect();
+  });
+
+  it('reattach for a resolved team (timer key gone, bomb key kept) replays neither — no stale playable bomb', async () => {
+    // resolveRound deletes the timer on defuse/explosion but keeps the bomb while
+    // a sibling team keeps the session active. Replaying BOMB_INIT here would wipe
+    // the client's result banner (setBomb clears resolution) — so it must not.
+    const { ack, identity } = await setupActiveDefuser({ writeBomb: true, writeTimer: false });
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['SESSION_STATE', 'BOMB_INIT', 'TIMER_UPDATE'],
+    );
+    expect(await events['SESSION_STATE']).toBeDefined();
+    await expect(raceTimeout(events['BOMB_INIT'], 100)).resolves.toBe('timeout');
+    await expect(raceTimeout(events['TIMER_UPDATE'], 100)).resolves.toBe('timeout');
+    rejoined.disconnect();
+  });
+
+  it('a lobby reattach replays no bomb (the replay is status-gated to active)', async () => {
+    const { ack } = await createWithIdentity();
+    const { socket, identity } = await joinWithIdentity(ack.joinCode, 'Maya');
+    socket.disconnect();
+
+    const { socket: rejoined, events } = await server.connectClientCapturing(
+      { sessionId: ack.sessionId, reattachToken: identity.reattachToken },
+      ['SESSION_STATE', 'BOMB_INIT'],
+    );
+    expect(await events['SESSION_STATE']).toBeDefined();
+    await expect(raceTimeout(events['BOMB_INIT'], 100)).resolves.toBe('timeout');
+    rejoined.disconnect();
+  });
+
   // ── AR15: the reattach token is a secret ─────────────────────────────────────
   it('AR15: the reattach token never appears in a log line across create/join/remove/disconnect', async () => {
     const lines: string[] = [];

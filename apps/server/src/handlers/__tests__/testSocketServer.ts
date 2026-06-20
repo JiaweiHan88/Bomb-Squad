@@ -159,6 +159,15 @@ export interface TestSocketServer {
   connectClientCapturingState(
     auth: Record<string, unknown>,
   ): Promise<{ socket: TestClientSocket; state: SessionState }>;
+  /** Connect with `auth` and capture the FIRST payload of each named event. Every
+   * listener is attached before the handshake completes, so fast server-driven
+   * replay emits (e.g. a mid-round reattach's BOMB_INIT/TIMER_UPDATE) are never
+   * missed. Returns one promise per event; an event that never arrives stays
+   * pending (race it against a timeout to assert absence). */
+  connectClientCapturing(
+    auth: Record<string, unknown>,
+    eventNames: string[],
+  ): Promise<{ socket: TestClientSocket; events: Record<string, Promise<unknown>> }>;
   /** Disconnects all clients and closes server + HTTP listener. */
   close(): Promise<void>;
 }
@@ -202,6 +211,26 @@ export async function startTestSocketServer(
         socket.once('connect_error', (err) => reject(err));
       });
       return { socket, state: await statePromise };
+    },
+    async connectClientCapturing(
+      auth: Record<string, unknown>,
+      eventNames: string[],
+    ): Promise<{ socket: TestClientSocket; events: Record<string, Promise<unknown>> }> {
+      const socket: TestClientSocket = ioClient(url, { transports: ['websocket'], auth });
+      clients.push(socket);
+      // Attach every listener BEFORE connect resolves so a fast server-driven
+      // replay emit cannot slip through before the test starts listening.
+      const events: Record<string, Promise<unknown>> = {};
+      for (const name of eventNames) {
+        events[name] = new Promise((resolve) =>
+          socket.once(name as keyof ServerToClientEvents, (p: unknown) => resolve(p)),
+        );
+      }
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', () => resolve());
+        socket.once('connect_error', (err) => reject(err));
+      });
+      return { socket, events };
     },
     async close(): Promise<void> {
       for (const client of clients) client.disconnect();

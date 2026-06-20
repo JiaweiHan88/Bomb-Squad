@@ -7,9 +7,11 @@ import type {
   PlayerRole,
   SessionState,
   TeamId,
+  BombState,
+  TimerState,
 } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
-import { sessionKey, joinCodeKey, roundKey, timerKey } from '../state/keys.js';
+import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../state/keys.js';
 import { startSegment } from '../timer/timerCore.js';
 import type { TimerScheduler } from '../timer/timerScheduler.js';
 import { generateJoinCode } from '../session/joinCode.js';
@@ -421,6 +423,36 @@ async function restoreReattachedSocket(
     if (reattachToken !== null) {
       socket.emit('SESSION_IDENTITY', { sessionId, playerId, reattachToken });
     }
+
+    // Mid-round replay: a socket reattaching during an active round (a browser
+    // refresh) is only in the session room — it was never re-joined to its team
+    // room nor re-sent the bomb. Without this it renders the DEV placeholder
+    // modules and then goes stale on the next team-scoped MODULE_UPDATE/
+    // TIMER_UPDATE. Re-join the team room and unicast the live bomb + timer
+    // snapshot straight from Redis (read-only; ROUND_START remains the authority
+    // that first armed them).
+    //
+    // The replay is gated on the timer key still existing. resolveRound deletes a
+    // team's timer the instant it defuses/explodes/times out but keeps the session
+    // 'active' while another team plays, and it never deletes the bomb key — so a
+    // resolved-team refresh would otherwise replay a stale, still-playable-looking
+    // bomb and (via the client's setBomb) wipe its result banner. A live timer ⟺
+    // the team is still playing this round. Replaying the resolution banner itself
+    // on a resolved-team refresh is mid-round sync (Epic 8), out of scope here. A
+    // missing key just skips the replay — never throws.
+    if (snapshot.status === 'active') {
+      const teamId = snapshot.players[playerId]?.teamId;
+      if (teamId !== undefined) {
+        await socket.join(teamRoom(sessionId, teamId));
+        const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+        if (timer !== null) {
+          const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
+          if (bomb !== null) socket.emit('BOMB_INIT', bomb);
+          socket.emit('TIMER_UPDATE', timer);
+        }
+      }
+    }
+
     deps.log.info({ sessionId, playerId, restored }, 'socket reattached');
   } catch (err) {
     deps.log.error({ err, socketId: socket.id }, 'reattach restore failed');
