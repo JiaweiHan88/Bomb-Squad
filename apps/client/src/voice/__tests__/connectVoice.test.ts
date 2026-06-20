@@ -185,6 +185,75 @@ describe('voiceStore status state machine', () => {
     await Promise.resolve();
     expect(useVoiceStore.getState().status).toBe('unavailable');
   });
+
+  // LiveKit fires Reconnecting (its own resume window) ~30-60s BEFORE Disconnected
+  // when the SFU drops; surface the banner immediately rather than show a stale
+  // "connected". Reconnected (self-heal) restores it.
+  it('a Reconnecting RoomEvent → unavailable immediately (no stale connected)', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    expect(useVoiceStore.getState().status).toBe('connected');
+    room.emit(RoomEvent.Reconnecting, undefined);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+  });
+
+  it('a Reconnected RoomEvent → restores connected (LiveKit self-healed)', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+    room.emit(RoomEvent.Reconnected, undefined);
+    const s = useVoiceStore.getState();
+    expect(s.status).toBe('connected');
+    expect(s.room).toBe(GRANT.room);
+    expect(s.identity).toBe(GRANT.identity);
+  });
+});
+
+// ── Manual reconnect (Story 3.6, AC #2) ──────────────────────────────────────
+// reconnect() tears down any existing (possibly dead) room then connects fresh.
+// Critically it works even after onReconnecting kept the room with phase still
+// 'connected' — a plain connect() would no-op on its phase guard there.
+
+describe('reconnect() manual recovery', () => {
+  it('after a Reconnecting drop, reconnect() tears down + connects fresh (new token)', async () => {
+    const requestToken = vi.fn(async () => okToken());
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined); // room kept alive, phase still 'connected'
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+
+    await controller.reconnect();
+    // A plain connect() would have no-op'd here; reconnect() tore down first, so a
+    // SECOND token was requested and we reach connected again.
+    expect(requestToken).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  it('reconnect() from a hard-failed (idle) state still connects fresh', async () => {
+    const requestToken = vi.fn(async () => okToken());
+    const controller = createVoiceController({ createRoom: () => makeFakeRoom().room, requestToken });
+    await controller.disconnect(); // idle, no room
+    await controller.reconnect();
+    expect(requestToken).toHaveBeenCalledTimes(1);
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  it('reconnect never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    await controller.reconnect();
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
 });
 
 // ── Teardown / no-leak (AC #5) ───────────────────────────────────────────────

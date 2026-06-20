@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore.js';
 import { useVoiceStore } from '../store/voiceStore.js';
-import { connectVoice, disconnectVoice } from '../voice/connectVoice.js';
+import { connectVoice, disconnectVoice, reconnectVoice } from '../voice/connectVoice.js';
 import Button from './Button.js';
 import {
   VOICE_CONNECT_CTA,
@@ -122,7 +122,7 @@ export default function VoiceController() {
               </button>
             </>
           )}
-          <Button variant="secondary" onClick={() => void connectVoice({ publish })}>
+          <Button variant="secondary" onClick={() => void reconnectVoice({ publish })}>
             {VOICE_RECONNECT}
           </Button>
         </div>

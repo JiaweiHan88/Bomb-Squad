@@ -13,9 +13,10 @@ import { VOICE_UNAVAILABLE, VOICE_DISMISS, VOICE_RECONNECT } from '../copy.js';
  * it stays reachable even after the banner is dismissed. Connection logic is
  * mocked (covered in connectVoice tests) — here we pin the affordance + gate.
  */
-const connectVoice = vi.fn(async (_opts?: { publish?: boolean }) => undefined);
+const reconnectVoice = vi.fn(async (_opts?: { publish?: boolean }) => undefined);
 vi.mock('../../voice/connectVoice.js', () => ({
-  connectVoice: (opts?: { publish?: boolean }) => connectVoice(opts),
+  connectVoice: async () => undefined,
+  reconnectVoice: (opts?: { publish?: boolean }) => reconnectVoice(opts),
   disconnectVoice: async () => undefined,
 }));
 
@@ -30,7 +31,7 @@ function seedSelf(role: PlayerRole, teamId?: TeamId) {
 }
 
 beforeEach(() => {
-  connectVoice.mockClear();
+  reconnectVoice.mockClear();
   useVoiceStore.setState({ status: 'unavailable' });
 });
 
@@ -49,18 +50,18 @@ describe('VoiceController graceful degradation', () => {
     expect(screen.getByRole('button', { name: VOICE_RECONNECT })).toBeInTheDocument();
   });
 
-  it('Reconnect re-runs connectVoice in the publisher mode (publish: true)', () => {
+  it('Reconnect re-runs reconnectVoice in the publisher mode (publish: true)', () => {
     seedSelf('defuser', 'A');
     render(<VoiceController />);
     fireEvent.click(screen.getByRole('button', { name: VOICE_RECONNECT }));
-    expect(connectVoice).toHaveBeenCalledWith({ publish: true });
+    expect(reconnectVoice).toHaveBeenCalledWith({ publish: true });
   });
 
   it('a spectator reconnects listen-only (publish: false)', () => {
     seedSelf('spectator');
     render(<VoiceController />);
     fireEvent.click(screen.getByRole('button', { name: VOICE_RECONNECT }));
-    expect(connectVoice).toHaveBeenCalledWith({ publish: false });
+    expect(reconnectVoice).toHaveBeenCalledWith({ publish: false });
   });
 
   it('dismissing hides the banner message but KEEPS Reconnect reachable (AC #1/#2)', () => {

@@ -137,6 +137,8 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   let onSubscribed: ((track: RemoteTrack) => void) | null = null;
   let onUnsubscribed: ((track: RemoteTrack) => void) | null = null;
   let onDisconnected: (() => void) | null = null;
+  let onReconnecting: (() => void) | null = null;
+  let onReconnected: (() => void) | null = null;
   let onActiveSpeakers: ((participants: SpeakingParticipant[]) => void) | null = null;
   let onParticipantDisconnected: ((participant: SpeakingParticipant) => void) | null = null;
 
@@ -168,6 +170,8 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     if (onSubscribed) r.off(RoomEvent.TrackSubscribed, onSubscribed as (...args: never[]) => void);
     if (onUnsubscribed) r.off(RoomEvent.TrackUnsubscribed, onUnsubscribed as (...args: never[]) => void);
     if (onDisconnected) r.off(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
+    if (onReconnecting) r.off(RoomEvent.Reconnecting, onReconnecting as (...args: never[]) => void);
+    if (onReconnected) r.off(RoomEvent.Reconnected, onReconnected as (...args: never[]) => void);
     if (onActiveSpeakers)
       r.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
     if (onParticipantDisconnected)
@@ -178,6 +182,8 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     onSubscribed = null;
     onUnsubscribed = null;
     onDisconnected = null;
+    onReconnecting = null;
+    onReconnected = null;
     onActiveSpeakers = null;
     onParticipantDisconnected = null;
     clearSpeakerState();
@@ -260,6 +266,25 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       // Transport dropped mid-session → unavailable, game keeps running (AC #4).
       void disconnect('unavailable');
     };
+    // LiveKit drops the transport (e.g. the SFU goes away) and enters its own
+    // resume/retry BEFORE it ever fires `Disconnected` — that window is ~30-60s,
+    // during which the UI would otherwise show a stale "connected". Surface the
+    // drop IMMEDIATELY as the dismissible banner (AC #1: "drops mid-session →
+    // failure detected → banner"). The room is kept alive so LiveKit's built-in
+    // resume can self-heal a transient blip; `onReconnected` clears the banner if
+    // it does, and a permanent drop still ends in `Disconnected` → full teardown.
+    // Epoch-guarded (belt-and-suspenders with the off() on teardown) so a torn-down
+    // room's late event can't write the store.
+    onReconnecting = () => {
+      if (epoch !== connectEpoch) return;
+      useVoiceStore.getState().setUnavailable('Voice unavailable — game continues without it');
+    };
+    onReconnected = () => {
+      // LiveKit self-healed the transport — restore the connected UI (the banner
+      // clears; ActiveSpeakersChanged will repopulate the pills).
+      if (epoch !== connectEpoch) return;
+      useVoiceStore.getState().setConnected({ room: roomName, identity });
+    };
     // Speaker presence (Story 2.5): LiveKit delivers the CURRENT speaking set on
     // each change. Map to durable playerId (== participant.identity, set by the
     // server) and mirror into voiceStore. New speakers light immediately; a
@@ -309,6 +334,8 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     r.on(RoomEvent.TrackSubscribed, onSubscribed as (...args: never[]) => void);
     r.on(RoomEvent.TrackUnsubscribed, onUnsubscribed as (...args: never[]) => void);
     r.on(RoomEvent.Disconnected, onDisconnected as (...args: never[]) => void);
+    r.on(RoomEvent.Reconnecting, onReconnecting as (...args: never[]) => void);
+    r.on(RoomEvent.Reconnected, onReconnected as (...args: never[]) => void);
     r.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakers as (...args: never[]) => void);
     r.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected as (...args: never[]) => void);
 
@@ -430,6 +457,20 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   }
 
   /**
+   * Manual reconnect (Story 3.6, AC #2) — the "Reconnect voice" affordance.
+   * Tears down any existing room FIRST, then connects fresh. The teardown is
+   * essential: a drop surfaced via `onReconnecting` keeps the (now-dead) room
+   * with `phase === 'connected'`, so a plain `connect()` would no-op on its
+   * `phase !== 'idle'` guard. After `disconnect('idle')` resets phase, the fresh
+   * `connect()` requests a NEW token (never reuses the stale one) in the player's
+   * existing role mode. No auto-backoff loop — one explicit user-driven attempt.
+   */
+  async function reconnect(publish = true): Promise<void> {
+    await disconnect('idle');
+    await connect(publish);
+  }
+
+  /**
    * Toggle the local mic publish (Story 3.4 self-mute). A thin wrapper over
    * `setMicrophoneEnabled`: mute ⇒ `setMicrophoneEnabled(false)`, unmute ⇒
    * `setMicrophoneEnabled(true)`. Other clients observe the change naturally — a
@@ -453,7 +494,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     useVoiceStore.getState().setMuted(muted);
   }
 
-  return { connect, disconnect, setMuted, resumeAudio };
+  return { connect, disconnect, reconnect, setMuted, resumeAudio };
 }
 
 /**
@@ -486,6 +527,12 @@ export const connectVoice = (opts: { publish?: boolean } = {}): Promise<void> =>
 
 /** Disconnect + full teardown. Safe to call on unmount or repeatedly. */
 export const disconnectVoice = (): Promise<void> => controller.disconnect();
+
+/** Manual reconnect after a drop/failure (Story 3.6) — the "Reconnect voice"
+ * affordance. Tears down any dead room then connects fresh with a new token in
+ * the given role mode (`publish` defaults to `true`; `false` for a spectator). */
+export const reconnectVoice = (opts: { publish?: boolean } = {}): Promise<void> =>
+  controller.reconnect(opts.publish ?? true);
 
 /** Toggle the local self-mute (Story 3.4). `setVoiceMuted(true)` mutes the mic,
  * `false` unmutes. A no-op unless connected as a publisher — safe to call from a
