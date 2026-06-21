@@ -8,6 +8,7 @@ const team = (overrides: Partial<TeamState> & Pick<TeamState, 'teamId'>): TeamSt
   currentDefuserIndex: 0,
   cumulativeTimeMs: 0,
   roundTimesMs: [],
+  roundOutcomes: [],
   equalisationRoundsPlayed: 0,
   ...overrides,
 });

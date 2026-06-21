@@ -16,6 +16,7 @@ import type {
 } from '@bomb-squad/shared';
 import type { RedisStore, UpdateDecision } from '../../state/redis.js';
 import type { SessionLog, SessionSocketData } from '../sessionHandlers.js';
+import type { PostgresArchive, SessionArchiveRecord } from '../../persistence/index.js';
 import { createTimerScheduler, type TimerScheduler } from '../../timer/timerScheduler.js';
 
 export type TestIOServer = SocketIOServer<
@@ -107,6 +108,40 @@ export const noopLog: SessionLog = {
   info: () => {},
   error: () => {},
 };
+
+/**
+ * A spyable {@link PostgresArchive} for handler deps (Story 8.10). By default every
+ * method resolves to a no-op (sessions that never call SESSION_END ignore it). Tests
+ * that exercise SESSION_END read `archived` to assert what was written, or set
+ * `failNext = true` to make the next `archiveSession` reject (the persist-failure path).
+ */
+export interface SpyArchive extends PostgresArchive {
+  readonly archived: ReadonlyArray<SessionArchiveRecord>;
+  failNext: boolean;
+}
+
+export function createSpyArchive(): SpyArchive {
+  const archived: SessionArchiveRecord[] = [];
+  return {
+    archived,
+    failNext: false,
+    async ping() {
+      return true;
+    },
+    async ensureSchema() {},
+    async archiveSession(record) {
+      if (this.failNext) {
+        this.failNext = false;
+        throw new Error('archive failed (test)');
+      }
+      archived.push(record);
+    },
+    async close() {},
+  };
+}
+
+/** A shared no-op archive for the many handler tests that never end a session. */
+export const fakeArchive: PostgresArchive = createSpyArchive();
 
 /**
  * A {@link TimerScheduler} for handler tests: an injected mutable clock and a

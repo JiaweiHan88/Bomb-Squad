@@ -28,6 +28,9 @@ import {
   createMemoryRedisStore,
   createTestScheduler,
   noopLog,
+  fakeArchive,
+  createSpyArchive,
+  type SpyArchive,
   type TestSocketServer,
   type TestClientSocket,
   type MemoryRedisStore,
@@ -87,6 +90,7 @@ describe('SESSION_CREATE handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     client = await server.connectClient();
@@ -189,6 +193,7 @@ describe('SESSION_CREATE handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     client = await server.connectClient();
@@ -221,6 +226,7 @@ describe('SESSION_CREATE handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     client = await server.connectClient();
@@ -252,6 +258,7 @@ describe('SESSION_JOIN handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -408,7 +415,7 @@ describe('SESSION_JOIN handler', () => {
         'sock-d1': { playerId: 'sock-d1', displayName: 'Dee', role: 'defuser', isReady: true, teamId: 'A' },
       },
       teams: {
-        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000, roundTimesMs: [12_000], equalisationRoundsPlayed: 0 },
+        A: { teamId: 'A', relayOrder: ['sock-d1'], currentDefuserIndex: 0, cumulativeTimeMs: 12_000, roundTimesMs: [12_000], roundOutcomes: ['defused'], equalisationRoundsPlayed: 0 },
       },
     };
     await store.setJSON(sessionKey(ack.sessionId), seeded);
@@ -473,6 +480,7 @@ describe('SESSION_JOIN handler', () => {
         redis: raceStore,
         log: noopLog,
         timer: createTestScheduler({ redis: raceStore, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     try {
@@ -552,6 +560,7 @@ describe('SESSION_JOIN handler', () => {
         redis: logStore,
         log: capturingLog,
         timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+        archive: fakeArchive,
       }),
     );
     try {
@@ -782,6 +791,7 @@ describe('TEAM_ASSIGN handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -831,6 +841,7 @@ describe('TEAM_ASSIGN handler', () => {
         currentDefuserIndex: 0,
         cumulativeTimeMs: 0,
         roundTimesMs: [],
+        roundOutcomes: [],
         equalisationRoundsPlayed: 0,
       });
     }
@@ -1021,6 +1032,7 @@ describe('PREPARATION_OPEN handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -1250,6 +1262,7 @@ describe('PREPARATION_CANCEL handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -1344,6 +1357,7 @@ describe('ROUND_START handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -1623,7 +1637,7 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
     store = createMemoryRedisStore();
     server = await startTestSocketServer((io) => {
       scheduler = createTestScheduler({ redis: store, io, log: noopLog });
-      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler });
+      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler, archive: fakeArchive });
     });
     facilitator = await server.connectClient();
     maya = await server.connectClient();
@@ -1760,6 +1774,7 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
         // Short grace so disconnect-removal tests don't wait the 8s default, but
         // long enough that an in-test reconnect reliably wins the cancellation race.
         disconnectGraceMs: 500,
@@ -2146,6 +2161,7 @@ describe('Story 2.7: durable identity, disconnect cleanup, PLAYER_REMOVE, reatta
         redis: logStore,
         log: capturingLog,
         timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+        archive: fakeArchive,
       }),
     );
     try {
@@ -2188,6 +2204,7 @@ describe('PLAYER_READY handler (Story 2.5)', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -2339,6 +2356,7 @@ describe('PLAYER_READY handler (Story 2.5)', () => {
         redis: logStore,
         log: capturingLog,
         timer: createTestScheduler({ redis: logStore, io, log: capturingLog }),
+        archive: fakeArchive,
       }),
     );
     try {
@@ -2377,6 +2395,7 @@ describe('ROUND_CONFIGURE handler (Story 8.1)', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -2523,7 +2542,7 @@ describe('Relay orchestration — Model B sequential play (Story 8.11)', () => {
     store = createMemoryRedisStore();
     server = await startTestSocketServer((io) => {
       scheduler = createTestScheduler({ redis: store, io, log: noopLog });
-      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler });
+      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler, archive: fakeArchive });
     });
     facilitator = await server.connectClient();
     maya = await server.connectClient();
@@ -2686,8 +2705,8 @@ describe('Relay orchestration — Model B sequential play (Story 8.11)', () => {
       roundNumber: patch.roundNumber,
       players,
       teams: {
-        A: { teamId: 'A', relayOrder: ['a0', 'a1', 'a2'], currentDefuserIndex: patch.aIndex, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
-        B: { teamId: 'B', relayOrder: ['b0', 'b1'], currentDefuserIndex: patch.bIndex, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: patch.bPlayed ?? 0 },
+        A: { teamId: 'A', relayOrder: ['a0', 'a1', 'a2'], currentDefuserIndex: patch.aIndex, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['b0', 'b1'], currentDefuserIndex: patch.bIndex, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: patch.bPlayed ?? 0 },
       },
     };
     await store.setJSON(sessionKey(ack.sessionId), seeded);
@@ -2790,6 +2809,7 @@ describe('Retry a failed round (Story 8.8)', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       }),
     );
     facilitator = await server.connectClient();
@@ -2958,6 +2978,7 @@ describe('Pause — facilitator & disconnect (Story 8.7)', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
         disconnectGraceMs: 500,
       }),
     );
@@ -3165,5 +3186,156 @@ describe('Pause — facilitator & disconnect (Story 8.7)', () => {
     const teamA = await server.io.in(teamRoom(ack.sessionId, 'A')).fetchSockets();
     expect(teamA.map((s) => s.data.playerId)).toContain(maya.identity.playerId);
     expect(reconnect.connected).toBe(true);
+  });
+});
+
+describe('SESSION_END handler (Story 8.10)', () => {
+  let server: TestSocketServer;
+  let store: MemoryRedisStore;
+  let archive: SpyArchive;
+  let facilitator: TestClientSocket;
+  let maya: TestClientSocket;
+
+  beforeEach(async () => {
+    store = createMemoryRedisStore();
+    archive = createSpyArchive();
+    server = await startTestSocketServer((io) =>
+      registerSessionHandlers(io, {
+        redis: store,
+        log: noopLog,
+        timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive,
+      }),
+    );
+    facilitator = await server.connectClient();
+    maya = await server.connectClient();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function idOf(state: SessionState, displayName: string): string {
+    return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
+  }
+
+  function nextScoreboard(socket: TestClientSocket): Promise<{ winnerTeamId?: TeamId }> {
+    return new Promise((resolve) => socket.once('SCOREBOARD', ((p: { winnerTeamId?: TeamId }) => resolve(p)) as never));
+  }
+
+  /** Overwrite a session into a between-rounds snapshot. Relay-complete unless
+   * `aIndex` leaves Team A a natural slot. A finished faster than B (A wins). */
+  async function makeBetween(sessionId: string, { aIndex = 2 }: { aIndex?: number } = {}): Promise<void> {
+    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    const next: SessionState = {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: 4,
+      teams: {
+        A: {
+          teamId: 'A',
+          relayOrder: ['a0', 'a1'],
+          currentDefuserIndex: aIndex,
+          cumulativeTimeMs: 80_000,
+          roundTimesMs: [40_000, 40_000],
+          roundOutcomes: ['defused', 'defused'],
+          equalisationRoundsPlayed: 0,
+        },
+        B: {
+          teamId: 'B',
+          relayOrder: ['b0', 'b1'],
+          currentDefuserIndex: 2,
+          cumulativeTimeMs: 120_000,
+          roundTimesMs: [60_000, 60_000],
+          roundOutcomes: ['defused', 'exploded'],
+          equalisationRoundsPlayed: 0,
+        },
+      },
+    };
+    await store.setJSON(sessionKey(sessionId), next);
+  }
+
+  async function seedComplete(): Promise<string> {
+    const ack = await createSession(facilitator, { config: { timerMs: 300_000 } });
+    await makeBetween(ack.sessionId);
+    return ack.sessionId;
+  }
+
+  it('archives once + flips to ended + broadcasts the final scoreboard (winner = lowest cumulative)', async () => {
+    const sessionId = await seedComplete();
+    expect(archive.archived).toHaveLength(0); // NOTHING written during play
+
+    const stateP = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const scoreP = nextScoreboard(facilitator);
+    facilitator.emit('SESSION_END');
+
+    const ended = await stateP;
+    expect(ended.status).toBe('ended');
+    expect(ended.activeTeamId).toBeUndefined();
+    expect((await scoreP).winnerTeamId).toBe('A');
+
+    // Exactly one archive write, carrying the authoritative winner + per-round breakdown.
+    expect(archive.archived).toHaveLength(1);
+    const rec = archive.archived[0]!;
+    expect(rec.sessionId).toBe(sessionId);
+    expect(rec.winnerTeamId).toBe('A');
+    expect(rec.roundCount).toBe(4);
+    const teamB = rec.teams.find((t) => t.teamId === 'B')!;
+    expect(teamB.rounds).toEqual([
+      { roundIndex: 0, elapsedMs: 60_000, outcome: 'defused' },
+      { roundIndex: 1, elapsedMs: 60_000, outcome: 'exploded' },
+    ]);
+    // Redis reflects the ended status.
+    expect((JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState).status).toBe('ended');
+  });
+
+  it('a non-facilitator SESSION_END is refused NOT_FACILITATOR and writes nothing', async () => {
+    const ack = await createSession(facilitator, { config: { timerMs: 300_000 } });
+    const joined = nextEvent<SessionState>(maya, 'SESSION_STATE');
+    maya.emit('SESSION_JOIN', { joinCode: ack.joinCode, displayName: 'Maya', role: 'expert' });
+    await joined;
+    await makeBetween(ack.sessionId);
+
+    const errP = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('SESSION_END');
+    expect((await errP).code).toBe('NOT_FACILITATOR');
+    expect(archive.archived).toHaveLength(0);
+  });
+
+  it('SESSION_END on an INCOMPLETE relay is refused RELAY_NOT_COMPLETE and writes nothing', async () => {
+    const ack = await createSession(facilitator, { config: { timerMs: 300_000 } });
+    await makeBetween(ack.sessionId, { aIndex: 1 }); // Team A still owes a natural round
+
+    const errP = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('SESSION_END');
+    expect((await errP).code).toBe('RELAY_NOT_COMPLETE');
+    expect(archive.archived).toHaveLength(0);
+    expect((JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState).status).toBe('between-rounds');
+  });
+
+  it('an archive failure surfaces SESSION_END_FAILED and leaves the session between-rounds (no half-end)', async () => {
+    const sessionId = await seedComplete();
+    archive.failNext = true;
+
+    const errP = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('SESSION_END');
+    expect((await errP).code).toBe('SESSION_END_FAILED');
+    expect(archive.archived).toHaveLength(0); // the failed write recorded nothing
+    expect((JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState).status).toBe('between-rounds');
+  });
+
+  it('SESSION_END on an already-ended session is an idempotent no-op (no second archive)', async () => {
+    const sessionId = await seedComplete();
+    // First end → archives + flips.
+    const firstP = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('SESSION_END');
+    await firstP;
+    expect(archive.archived).toHaveLength(1);
+
+    // Second end → silent no-op; no error, no second archive.
+    facilitator.emit('SESSION_END');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(archive.archived).toHaveLength(1);
+    expect((JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState).status).toBe('ended');
   });
 });

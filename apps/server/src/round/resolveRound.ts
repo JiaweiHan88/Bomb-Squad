@@ -17,13 +17,17 @@
  * the per-team result is carried by which event fired + that team's
  * cumulativeTimeMs (matching the ScoreboardPayload contract).
  *
- * ELAPSED-TIME CONVENTION (AC-5): the recorded `elapsedMs` is the *displayed*
- * elapsed = `config.timerMs - displayedRemaining(timer, now)`, computed once here
- * from the live `TimerState` via `timerCore.remainingMs` (the only timer math).
- * This is consistent across all three outcomes — at timeout `remainingMs` is 0 by
- * definition so displayed elapsed = `timerMs` (preserves 8.4 decision 6), and
- * under strikes the accelerated countdown is already baked into `remainingMs`, so
- * per-round time never over-counts. Story 8.10 sums this single definition.
+ * ELAPSED-TIME CONVENTION: TWO values, computed once here from the live
+ * `TimerState` via `timerCore.remainingMs` (the only timer math):
+ *  - `displayedElapsedMs` = `config.timerMs - remainingMs(timer, now)` — the actual
+ *    moment the round ended, bounded to [0, timerMs]; carried by the BOMB_DEFUSED/
+ *    BOMB_EXPLODED announcement (Story 8.5 AC-5; preserves the 8.4 timeout = timerMs
+ *    decision and the strike-accelerated countdown baked into `remainingMs`).
+ *  - `scoredElapsedMs` (Story 8.10 AC-1) = the value RECORDED into
+ *    cumulativeTimeMs/roundTimesMs. A `defused` round scores its displayed elapsed;
+ *    a FAILED round (`exploded`/`time-expired`) scores a FULL-TIMER PENALTY
+ *    (`timerMs`) so failing is never cheaper than defusing (Jay's decision,
+ *    resolving the bugs-epic8:15 fast-fail loophole). Story 8.10 sums this.
  */
 import type { RoundOutcome, RoundState, SessionState, TeamId, TeamState, TimerState } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
@@ -123,10 +127,19 @@ async function resolveRoundCeremony(
     return;
   }
 
-  // Displayed elapsed (AC-5): one definition for all outcomes. remainingMs clamps
-  // at 0, so this is bounded to [0, timerMs] — a strike-accelerated round cannot
-  // over-count, and a timeout (remaining 0) records the full timerMs.
-  const elapsedMs = Math.max(0, session.config.timerMs - remainingMs(timer, now));
+  // Displayed elapsed (Story 8.5 AC-5): the actual time the bomb was live, bounded
+  // to [0, timerMs] (remainingMs clamps at 0). This is what the BOMB_DEFUSED/
+  // BOMB_EXPLODED announcement carries — the honest moment the round ended.
+  const displayedElapsedMs = Math.max(0, session.config.timerMs - remainingMs(timer, now));
+
+  // SCORED elapsed (Story 8.10 AC-1, Jay's decision): a FAILED round (3rd-strike
+  // `exploded` / `time-expired`) contributes a FULL-TIMER PENALTY — the full
+  // `timerMs` — so failing is never cheaper than a slow defuse (resolves the
+  // bugs-epic8:15 fast-fail loophole). A successful `defused` records its real
+  // displayed elapsed. A timeout already had displayed = timerMs, so the penalty is
+  // a no-op there; only fast detonations are affected. This is the value recorded
+  // into cumulativeTimeMs / roundTimesMs; the announcement still uses the real one.
+  const scoredElapsedMs = outcome === 'defused' ? displayedElapsedMs : session.config.timerMs;
 
   // (a) Clear the live clock BEFORE announcing. This trips the per-team fence
   // (so a stray re-arm/strike can no longer find a "live" timer and double-fire)
@@ -175,13 +188,24 @@ async function resolveRoundCeremony(
   // so the slot to replace is the LAST appended entry. (`length - 1` equals
   // `roundNumber - 1` in the old all-teams-play-every-round model, so this is
   // correct in both.)
+  // `roundOutcomes` (Story 8.10) is maintained in LOCK-STEP with `roundTimesMs` —
+  // the kept outcome must correspond to the kept time. On a retry the replaced
+  // slot keeps the BETTER attempt's time, so it keeps that attempt's outcome too:
+  // if the new (retried) score is strictly better it wins (e.g. a successful
+  // re-defuse replaces the failed first attempt); otherwise the prior outcome (and
+  // time) stand. (Retries only happen on failed rounds, so `previous` is a penalty
+  // timerMs; a faster successful retry is always strictly better.)
   const idx = team.roundTimesMs.length - 1;
   let roundTimesMs: number[];
+  let roundOutcomes: RoundOutcome[];
   let cumulativeTimeMs: number;
   if (round.retry && idx >= 0 && idx < team.roundTimesMs.length) {
     const previous = team.roundTimesMs[idx]!;
-    const best = Math.min(previous, elapsedMs);
+    const newIsBetter = scoredElapsedMs < previous;
+    const best = newIsBetter ? scoredElapsedMs : previous;
+    const bestOutcome = newIsBetter ? outcome : (team.roundOutcomes[idx] ?? outcome);
     roundTimesMs = team.roundTimesMs.map((t, i) => (i === idx ? best : t));
+    roundOutcomes = team.roundOutcomes.map((o, i) => (i === idx ? bestOutcome : o));
     cumulativeTimeMs = team.cumulativeTimeMs + (best - previous); // delta ≤ 0
   } else {
     if (round.retry) {
@@ -192,8 +216,9 @@ async function resolveRoundCeremony(
         'retry resolution with no prior round time — appending (desync fallback)',
       );
     }
-    roundTimesMs = [...team.roundTimesMs, elapsedMs];
-    cumulativeTimeMs = team.cumulativeTimeMs + elapsedMs;
+    roundTimesMs = [...team.roundTimesMs, scoredElapsedMs];
+    roundOutcomes = [...team.roundOutcomes, outcome];
+    cumulativeTimeMs = team.cumulativeTimeMs + scoredElapsedMs;
   }
 
   // POINTER ADVANCE (Story 8.11, Task 2 — the single advance site for Model B):
@@ -204,7 +229,7 @@ async function resolveRoundCeremony(
   // the same round). `openPreparation` no longer advances anything, so this is the
   // only place a pointer moves. Immutable spread; the cumulative time/history
   // update is folded in.
-  let teamUpdate: TeamState = { ...team, cumulativeTimeMs, roundTimesMs };
+  let teamUpdate: TeamState = { ...team, cumulativeTimeMs, roundTimesMs, roundOutcomes };
   if (!round.retry) {
     if (team.currentDefuserIndex < team.relayOrder.length) {
       teamUpdate = { ...teamUpdate, currentDefuserIndex: team.currentDefuserIndex + 1 };
@@ -238,9 +263,9 @@ async function resolveRoundCeremony(
   // both failure outcomes (DETONATED vs TIME EXPIRED is a client-side label, not
   // a 3rd event).
   const event = outcome === 'defused' ? 'BOMB_DEFUSED' : 'BOMB_EXPLODED';
-  deps.io.to(teamRoom(sessionId, teamId)).emit(event, { teamId, elapsedMs });
+  deps.io.to(teamRoom(sessionId, teamId)).emit(event, { teamId, elapsedMs: displayedElapsedMs });
 
-  deps.log.info({ sessionId, teamId, outcome, elapsedMs }, 'round resolved');
+  deps.log.info({ sessionId, teamId, outcome, displayedElapsedMs, scoredElapsedMs }, 'round resolved');
 
   // (e) Between-rounds entry (Story 8.6): once every team has resolved, announce
   // the new phase to ALL roles — broadcast the between-rounds SESSION_STATE

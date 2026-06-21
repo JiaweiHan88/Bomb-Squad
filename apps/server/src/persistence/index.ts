@@ -1,8 +1,8 @@
 import { Pool } from 'pg';
 import { createPostgresArchive } from './postgres.js';
-import type { PostgresArchive, PoolLike } from './postgres.js';
+import type { PostgresArchive, PoolLike, PoolClientLike, SessionArchiveRecord } from './postgres.js';
 
-export type { PostgresArchive, PoolLike };
+export type { PostgresArchive, PoolLike, PoolClientLike, SessionArchiveRecord };
 export { createPostgresArchive } from './postgres.js';
 
 export interface PostgresConnection {

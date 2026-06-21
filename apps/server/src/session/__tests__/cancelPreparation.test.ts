@@ -28,8 +28,8 @@ const betweenRoundsWithTeams = (): SessionState => ({
   status: 'between-rounds',
   roundNumber: 1,
   teams: {
-    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000], equalisationRoundsPlayed: 0 },
-    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 0, cumulativeTimeMs: 2_000, roundTimesMs: [2_000], equalisationRoundsPlayed: 0 },
+    A: { teamId: 'A', relayOrder: ['p1', 'p2'], currentDefuserIndex: 0, cumulativeTimeMs: 1_000, roundTimesMs: [1_000], roundOutcomes: ['defused'], equalisationRoundsPlayed: 0 },
+    B: { teamId: 'B', relayOrder: ['p3', 'p4'], currentDefuserIndex: 0, cumulativeTimeMs: 2_000, roundTimesMs: [2_000], roundOutcomes: ['defused'], equalisationRoundsPlayed: 0 },
   },
 });
 

@@ -52,6 +52,11 @@ export interface ClientToServerEvents {
    * SESSION_STATE broadcast, failure a typed ERROR. */
   PREPARATION_CANCEL: () => void;
   ROUND_START: () => void;
+  /** Facilitator-only. Ends a COMPLETED relay (Story 8.10): archives the session to
+   * Postgres (single transaction) and transitions to `'ended'` with the final
+   * scoreboard. Only valid from `'between-rounds'` once `isRelayComplete`. No ack:
+   * success is the SESSION_STATE broadcast (status `'ended'`), failure a typed ERROR. */
+  SESSION_END: () => void;
   MODULE_INTERACT: (payload: ModuleInteractPayload) => void;
   MANUAL_NAVIGATE: (payload: ManualPositionPayload) => void;
   FACILITATOR_PAUSE: () => void;

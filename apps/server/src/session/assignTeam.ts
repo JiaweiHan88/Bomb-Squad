@@ -67,6 +67,7 @@ export function assignPlayerToTeam(state: SessionState, args: AssignTeamArgs): S
     currentDefuserIndex: 0,
     cumulativeTimeMs: 0,
     roundTimesMs: [],
+    roundOutcomes: [], // Story 8.10: per-round outcome history (lock-step with roundTimesMs).
     equalisationRoundsPlayed: 0, // Story 8.9: a fresh team owes no equalisation yet.
   };
   teams[args.teamId] = target.relayOrder.includes(args.playerId)

@@ -7,11 +7,15 @@ import type {
   PlayerRole,
   SessionState,
   TeamId,
+  TeamState,
   BombState,
   TimerState,
   RoundState,
+  ScoreboardPayload,
 } from '@bomb-squad/shared';
+import { buildFinalScoreboard } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
+import type { PostgresArchive } from '../persistence/index.js';
 import { sessionKey, joinCodeKey, roundKey, timerKey, bombKey } from '../state/keys.js';
 import { startSegment } from '../timer/timerCore.js';
 import type { TimerScheduler } from '../timer/timerScheduler.js';
@@ -32,6 +36,9 @@ import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
 import { retryRound } from '../session/retryRound.js';
+import { endSession } from '../session/endSession.js';
+import type { SessionArchiveRecord } from '../persistence/index.js';
+import { buildScoreboard } from '../round/buildScoreboard.js';
 import { isRelayComplete, pairIndexFor } from '../session/relayComplete.js';
 import { undersizedTeams } from '@bomb-squad/shared';
 import { designateEqualisationVolunteer } from '../session/equalisationVolunteer.js';
@@ -89,6 +96,9 @@ export interface SessionHandlerDeps {
   /** Server-authoritative expiry scheduler (Story 8.4). Owns the wall clock the
    * handlers stamp timers with, and the setTimeout-backed expiry wakes. */
   timer: TimerScheduler;
+  /** Session-end archive (Story 8.10). The ONLY Postgres writer — `SESSION_END`
+   * calls `archiveSession` in a single transaction before flipping to `'ended'`. */
+  archive: PostgresArchive;
   /** Lobby disconnect grace (Story 2.7): how long to wait before freeing a
    * disconnected player's seat. A refresh reconnects well within this window and
    * cancels the removal, so role/team/relayOrder survive (AC 4). A genuine leave
@@ -1084,6 +1094,109 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         socket.emit('ERROR', {
           code: 'PREPARATION_OPEN_FAILED',
           message: 'Could not open preparation. Try again.',
+          recoverable: true,
+        });
+      }
+    });
+
+    // Facilitator ends a COMPLETED relay (Story 8.10, FR45). The ONE sanctioned
+    // Postgres write: archive the session (single transaction) THEN flip to
+    // 'ended'. Order matters — the durable archive is the commit point; only on a
+    // successful write do we mutate Redis + broadcast (persist-then-emit). A failed
+    // archive leaves the session in 'between-rounds' so the Facilitator can retry,
+    // never a half-ended session with no record. No ack: success is SESSION_STATE.
+    socket.on('SESSION_END', async () => {
+      const sessionId = socket.data.sessionId;
+      if (sessionId === undefined) {
+        socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+        return;
+      }
+
+      try {
+        const state = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
+        if (state === null) {
+          socket.emit('ERROR', { code: 'NOT_IN_SESSION', message: "You're not in a session.", recoverable: true });
+          return;
+        }
+
+        // Authority gate FIRST (a non-facilitator probe learns nothing, triggers no write).
+        if (state.players[socket.data.playerId ?? '']?.role !== 'facilitator') {
+          socket.emit('ERROR', {
+            code: 'NOT_FACILITATOR',
+            message: 'Only the facilitator ends the session.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Already ended → idempotent no-op (NEVER a second archive write).
+        if (state.status === 'ended') return;
+
+        // Gate: only a COMPLETED relay between rounds may end. Mirrors the pure
+        // endSession guard; refuse anything else without touching Postgres.
+        if (state.status !== 'between-rounds' || !isRelayComplete(state)) {
+          socket.emit('ERROR', {
+            code: 'RELAY_NOT_COMPLETE',
+            message: 'The relay is not finished — every player must defuse first.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        // Build the authoritative final scoreboard + the archive record (pure).
+        const finalScoreboard = buildFinalScoreboard(state);
+        const record: SessionArchiveRecord = {
+          sessionId: state.sessionId,
+          joinCode: state.joinCode,
+          config: state.config,
+          roundCount: state.roundNumber,
+          endedAt: deps.timer.now(),
+          ...(finalScoreboard.winnerTeamId ? { winnerTeamId: finalScoreboard.winnerTeamId } : {}),
+          teams: (Object.values(state.teams) as TeamState[]).map((team) => ({
+            teamId: team.teamId,
+            cumulativeTimeMs: team.cumulativeTimeMs,
+            rounds: team.roundTimesMs.map((elapsedMs, i) => ({
+              roundIndex: i,
+              elapsedMs,
+              outcome: team.roundOutcomes[i] ?? 'defused',
+            })),
+          })),
+        };
+
+        // SINGLE Postgres transaction. On failure: surface a recoverable error and
+        // leave the session in 'between-rounds' (no status flip, no broadcast).
+        try {
+          await deps.archive.archiveSession(record);
+        } catch (err) {
+          deps.log.error({ err, sessionId }, 'SESSION_END archive failed — session left between-rounds');
+          socket.emit('ERROR', {
+            code: 'SESSION_END_FAILED',
+            message: 'Could not save the session results. Try again.',
+            recoverable: true,
+          });
+          return;
+        }
+
+        const next = endSession(state);
+        if (next === state) return; // defensive — the gate above already proved eligibility
+
+        // Persist then emit (Redis is now the only post-archive write).
+        await deps.redis.setJSON(sessionKey(sessionId), next);
+        io.to(sessionRoom(sessionId)).emit('SESSION_STATE', next);
+        const finalPayload: ScoreboardPayload = {
+          teams: buildScoreboard(next).teams,
+          ...(finalScoreboard.winnerTeamId ? { winnerTeamId: finalScoreboard.winnerTeamId } : {}),
+        };
+        io.to(sessionRoom(sessionId)).emit('SCOREBOARD', finalPayload);
+        deps.log.info(
+          { sessionId, winnerTeamId: finalScoreboard.winnerTeamId ?? null, roundCount: record.roundCount },
+          'session ended + archived',
+        );
+      } catch (err) {
+        deps.log.error({ err, socketId: socket.id }, 'SESSION_END failed');
+        socket.emit('ERROR', {
+          code: 'SESSION_END_FAILED',
+          message: 'Could not end the session. Try again.',
           recoverable: true,
         });
       }

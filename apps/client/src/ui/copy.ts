@@ -129,6 +129,20 @@ export const EQUALISATION_NEEDS_VOLUNTEER = 'Choose a volunteer Defuser to start
 export const RELAY_COMPLETE_NOTICE = 'The relay is complete — every player has defused once.';
 export const RESTING_THIS_ROUND = 'Resting this round';
 
+// Session end + final scoreboard (Story 8.10). The relay-complete notice gains a
+// facilitator "End session" action that archives the run and reveals the FINAL
+// scoreboard — copy here reads "winner"/"final" (the preview reads "leading").
+export const END_SESSION = 'End session & view results';
+export const FINAL_EYEBROW = 'Final results';
+export const FINAL_HEADING = 'Final scoreboard';
+/** `team` is the already-formatted label (e.g. "Team A"). */
+export const FINAL_WINNER = (team: string): string => `${team} wins`;
+export const FINAL_DRAW = "It's a draw";
+export const FINAL_COMPLETE = 'Session complete';
+export const FINAL_WINNER_BADGE = 'Winner';
+export const FINAL_DEFUSED_LABEL = 'Defused';
+export const FINAL_FAILED_LABEL = 'Detonated';
+
 // Sequential round orchestration (Story 8.11, Model B) — one team plays per round
 // while the other rests/spectates. The between-rounds scoreboard surfaces who is
 // up next so the Facilitator's advance reads as a hand-off; the resting team's

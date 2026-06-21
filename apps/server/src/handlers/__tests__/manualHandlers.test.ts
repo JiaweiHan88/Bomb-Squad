@@ -12,7 +12,7 @@ import {
   createMemoryRedisStore,
   createTestScheduler,
   noopLog,
-  type TestSocketServer,
+  fakeArchive,  type TestSocketServer,
   type TestClientSocket,
   type MemoryRedisStore,
 } from './testSocketServer.js';
@@ -103,6 +103,7 @@ describe('MANUAL_NAVIGATE handler', () => {
         redis: store,
         log: noopLog,
         timer: createTestScheduler({ redis: store, io, log: noopLog }),
+        archive: fakeArchive,
       });
       registerManualHandlers(io, { redis: store, log: noopLog });
     });
@@ -207,6 +208,7 @@ describe('MANUAL_NAVIGATE handler', () => {
         redis: failing,
         log: noopLog,
         timer: createTestScheduler({ redis: failing, io, log: noopLog }),
+        archive: fakeArchive,
       });
       registerManualHandlers(io, { redis: failing, log: noopLog });
     });

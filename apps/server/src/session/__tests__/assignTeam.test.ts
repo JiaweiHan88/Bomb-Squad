@@ -55,6 +55,7 @@ describe('assignPlayerToTeam', () => {
       currentDefuserIndex: 0,
       cumulativeTimeMs: 0,
       roundTimesMs: [],
+      roundOutcomes: [],
       equalisationRoundsPlayed: 0,
     });
     expect(next.teams.B).toBeUndefined();

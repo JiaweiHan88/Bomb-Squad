@@ -1,3 +1,5 @@
+import type { RoundOutcome } from './round.js';
+
 export type PlayerRole = 'facilitator' | 'defuser' | 'expert' | 'spectator';
 
 /** Exactly two teams per session. */
@@ -63,6 +65,16 @@ export interface TeamState {
    * between-round preview (8.6) and final scoreboard (8.10) render.
    */
   roundTimesMs: number[];
+  /**
+   * Per-round OUTCOME history (Story 8.10, AC-2). `roundOutcomes[i]` is the team's
+   * result for the same round as `roundTimesMs[i]` — kept in lock-step so
+   * `roundOutcomes.length === roundTimesMs.length` always holds (appended together
+   * on a first attempt; the last entry replaced together on a retry). Drives the
+   * final scoreboard's per-round defused ✓ / detonated ✗ icons (resolves
+   * deferred-work.md:240 — outcome was previously not stored). `RoundOutcome` =
+   * `'defused' | 'exploded' | 'time-expired'`. Empty `[]` at every construction site.
+   */
+  roundOutcomes: RoundOutcome[];
   /**
    * Number of odd-team equalisation rounds this team has played (Story 8.9, FR44).
    * A shorter team owes `max(teamA.len, teamB.len) - this.relayOrder.length`

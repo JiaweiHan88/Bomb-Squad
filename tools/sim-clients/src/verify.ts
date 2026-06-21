@@ -77,8 +77,18 @@ async function boot(): Promise<{ url: string; close: () => Promise<void> }> {
     setTimer: (cb, ms) => setTimeout(cb, ms).unref(),
     clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   });
-  registerSessionHandlers(io, { redis, log: noopLog, timer });
-  registerModuleHandlers(io, { redis, log: noopLog, timer });
+  // No-op session-end archive (Story 8.10): the sim never touches real Postgres;
+  // SESSION_END just flips the phase and the archive resolves to nothing.
+  const archive = {
+    async ping() {
+      return true;
+    },
+    async ensureSchema() {},
+    async archiveSession() {},
+    async close() {},
+  };
+  registerSessionHandlers(io, { redis, log: noopLog, timer, archive });
+  registerModuleHandlers(io, { redis, log: noopLog, timer, archive });
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const { port } = httpServer.address() as AddressInfo;
   return {

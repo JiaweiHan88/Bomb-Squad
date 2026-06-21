@@ -8,7 +8,7 @@ import { useGameStore } from '../../store/gameStore.js';
 vi.mock('../../net/socket.js', () => ({ getSocket: vi.fn(), createSocket: vi.fn() }));
 import { getSocket } from '../../net/socket.js';
 import Scoreboard from '../Scoreboard.js';
-import { START_NEXT_ROUND, BETWEEN_ROUNDS_WAITING, SCOREBOARD_LEADING, RETRY_ROUND } from '../copy.js';
+import { START_NEXT_ROUND, BETWEEN_ROUNDS_WAITING, SCOREBOARD_LEADING, RETRY_ROUND, END_SESSION } from '../copy.js';
 
 let mock: MockSocket;
 
@@ -246,5 +246,32 @@ describe('Scoreboard — relay completion & odd-team equalisation (Story 8.9)', 
     render(<Scoreboard />);
     expect(screen.queryByTestId('equalisation-B')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: START_NEXT_ROUND })).not.toBeInTheDocument();
+  });
+
+  // Session end (Story 8.10): the relay-complete notice gains a facilitator
+  // "End session" action that emits SESSION_END.
+  it('relay complete → facilitator sees the End-session button and clicking emits SESSION_END', async () => {
+    seedRelayComplete('fac');
+    render(<Scoreboard />);
+    const end = screen.getByRole('button', { name: END_SESSION });
+    await userEvent.click(end); // arm the two-step confirm
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
+    expect(mock.emit).toHaveBeenCalledWith('SESSION_END');
+  });
+
+  it('relay complete → a non-facilitator gets NO End-session button (facilitator-only action)', () => {
+    seedRelayComplete('p1');
+    render(<Scoreboard />);
+    expect(screen.queryByRole('button', { name: END_SESSION })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('relay-complete')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a SESSION_END_FAILED server refusal as an alert', () => {
+    seedRelayComplete('fac');
+    render(<Scoreboard />);
+    act(() => {
+      mock.fire('ERROR', { code: 'SESSION_END_FAILED', message: 'Could not save the session results. Try again.', recoverable: true });
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save the session results');
   });
 });

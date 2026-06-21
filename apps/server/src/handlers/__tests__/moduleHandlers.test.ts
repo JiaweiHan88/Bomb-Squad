@@ -19,7 +19,7 @@ import {
   createMemoryRedisStore,
   createTestScheduler,
   noopLog,
-  type TestSocketServer,
+  fakeArchive,  type TestSocketServer,
   type TestClientSocket,
   type MemoryRedisStore,
   type TestScheduler,
@@ -91,8 +91,8 @@ describe('MODULE_INTERACT handler (Story 4.7)', () => {
     store = createMemoryRedisStore();
     server = await startTestSocketServer((io) => {
       scheduler = createTestScheduler({ redis: store, io, log: noopLog });
-      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler });
-      registerModuleHandlers(io, { redis: store, log: noopLog, timer: scheduler });
+      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler, archive: fakeArchive });
+      registerModuleHandlers(io, { redis: store, log: noopLog, timer: scheduler, archive: fakeArchive });
     });
     facilitator = await server.connectClient();
     maya = await server.connectClient();

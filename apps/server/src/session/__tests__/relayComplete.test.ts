@@ -23,6 +23,7 @@ const team = (teamId: TeamId, len: number, played: number, eq = 0): TeamState =>
   currentDefuserIndex: played,
   cumulativeTimeMs: 0,
   roundTimesMs: [],
+  roundOutcomes: [],
   equalisationRoundsPlayed: eq,
 });
 

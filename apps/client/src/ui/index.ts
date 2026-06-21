@@ -7,6 +7,7 @@ export { default as LobbyMicCheck } from './LobbyMicCheck.js';
 export { default as Preparation } from './Preparation.js';
 export { default as ActiveRound } from './ActiveRound.js';
 export { default as Scoreboard } from './Scoreboard.js';
+export { default as FinalScoreboard } from './FinalScoreboard.js';
 export { default as VoiceController } from './VoiceController.js';
 export { default as PauseOverlay } from './PauseOverlay.js';
 export { default as SpeakerIndicator } from './SpeakerIndicator.js';

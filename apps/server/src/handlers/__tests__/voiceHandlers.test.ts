@@ -27,7 +27,7 @@ import {
   startTestSocketServer,
   createMemoryRedisStore,
   createTestScheduler,
-  type TestSocketServer,
+  fakeArchive,  type TestSocketServer,
   type TestClientSocket,
   type MemoryRedisStore,
 } from './testSocketServer.js';
@@ -117,6 +117,7 @@ describe('VOICE_TOKEN handler', () => {
         redis: store,
         log: cap.log,
         timer: createTestScheduler({ redis: store, io, log: cap.log }),
+        archive: fakeArchive,
       });
       registerVoiceHandlers(io, { redis: store, log: cap.log, config: CONFIG });
     });
@@ -322,6 +323,7 @@ describe('VOICE_TOKEN handler — TURN relay configured (Story 3.6)', () => {
         redis: store,
         log: cap.log,
         timer: createTestScheduler({ redis: store, io, log: cap.log }),
+        archive: fakeArchive,
       });
       registerVoiceHandlers(io, { redis: store, log: cap.log, config: TURN_CONFIG });
     });

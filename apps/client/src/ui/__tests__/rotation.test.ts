@@ -12,6 +12,7 @@ const team = (
   currentDefuserIndex,
   cumulativeTimeMs: 0,
   roundTimesMs: [],
+  roundOutcomes: [],
   equalisationRoundsPlayed: 0,
   ...extra,
 });

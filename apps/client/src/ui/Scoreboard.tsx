@@ -21,6 +21,7 @@ import {
   EQUALISATION_PROMPT,
   EQUALISATION_NEEDS_VOLUNTEER,
   RELAY_COMPLETE_NOTICE,
+  END_SESSION,
   UP_NEXT,
   TEAM_A,
   TEAM_B,
@@ -47,6 +48,9 @@ const ADVANCE_ERROR_CODES: ReadonlySet<string> = new Set([
   'EQUALISATION_VOLUNTEER_REQUIRED',
   'NO_EQUALISATION_ROUND',
   'INVALID_VOLUNTEER',
+  // Session-end (Story 8.10): the "End session" button surfaces these inline.
+  'RELAY_NOT_COMPLETE',
+  'SESSION_END_FAILED',
 ]);
 
 /**
@@ -119,6 +123,14 @@ export default function Scoreboard() {
   const advance = () => {
     setAdvanceError(null);
     getSocket().emit('PREPARATION_OPEN');
+  };
+
+  // End the session (Story 8.10): only valid once the relay is complete. Archives
+  // the run + transitions to 'ended' (the final scoreboard surface). Rejections
+  // (RELAY_NOT_COMPLETE / SESSION_END_FAILED) paint the same inline alert.
+  const endSession = () => {
+    setAdvanceError(null);
+    getSocket().emit('SESSION_END');
   };
 
   // Teams whose just-resolved round failed (Story 8.8). Only the facilitator gets
@@ -242,11 +254,15 @@ export default function Scoreboard() {
             ))}
 
             {relayComplete ? (
-              /* Relay done — everyone defused. No advance (session-end is 8.10);
-                 show a clear notice instead of a dead button (Story 8.9 fix). */
-              <p data-testid="relay-complete" className="text-sm text-ink-muted">
-                {RELAY_COMPLETE_NOTICE}
-              </p>
+              /* Relay done — everyone defused. The Facilitator ends the session
+                 (Story 8.10): archives the run + reveals the final scoreboard. The
+                 notice explains why there is no "next round". */
+              <div className="flex flex-col items-center gap-3">
+                <p data-testid="relay-complete" className="text-sm text-ink-muted">
+                  {RELAY_COMPLETE_NOTICE}
+                </p>
+                <ConfirmButton label={END_SESSION} onConfirm={endSession} />
+              </div>
             ) : (
               <>
                 {/* Up next (Story 8.11): the single team that plays next round. Makes

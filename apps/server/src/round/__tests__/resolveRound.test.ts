@@ -77,6 +77,7 @@ async function makeHarness(opts?: {
               currentDefuserIndex: 0,
               cumulativeTimeMs: opts?.cumulativeTimeMs ?? 0,
               roundTimesMs: opts?.cumulativeTimeMs ? [opts.cumulativeTimeMs] : [],
+              roundOutcomes: opts?.cumulativeTimeMs ? ['defused'] : [],
               equalisationRoundsPlayed: 0,
             },
           }
@@ -166,12 +167,17 @@ describe('resolveRound — failures (AC-2)', () => {
     expect(h.emitted.map((e) => e.event)).toEqual(['BOMB_EXPLODED', 'SESSION_STATE', 'SCOREBOARD']);
   });
 
-  it('3rd strike: status=exploded, BOMB_EXPLODED with displayed elapsed at the strike instant', async () => {
+  it('3rd strike: status=exploded; announcement shows displayed elapsed, SCORE is full-timer penalty (Story 8.10)', async () => {
     const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
     await resolveRound(h.deps, SID, 'A', 'exploded', 30_000);
 
     expect((await loadRound(h))!.status).toBe('exploded');
-    expect((await loadSession(h))!.teams.A!.cumulativeTimeMs).toBe(30_000);
+    // Story 8.10 AC-1: a FAILED round scores the full timer (penalty), not the
+    // fast-detonation 30s — so failing is never cheaper than a slow defuse.
+    expect((await loadSession(h))!.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([TIMER_MS]);
+    expect((await loadSession(h))!.teams.A!.roundOutcomes).toEqual(['exploded']);
+    // The announcement keeps the HONEST displayed elapsed (the real strike instant).
     expect(h.emitted[0]).toMatchObject({ event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: 30_000 } });
   });
 });
@@ -189,13 +195,15 @@ describe('resolveRound — per-team outcomes + retry better-of-two (Story 8.8)',
     expect((await loadRound(h))!.outcomes).toEqual({ A: 'time-expired' });
   });
 
-  it('a FIRST attempt appends (retry: false unchanged)', async () => {
+  it('a FIRST attempt appends (retry: false unchanged) + records the outcome in lock-step', async () => {
     const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
     await resolveRound(h.deps, SID, 'A', 'defused', 60_000);
-    expect((await loadSession(h))!.teams.A!.roundTimesMs).toEqual([60_000]);
+    const team = (await loadSession(h))!.teams.A!;
+    expect(team.roundTimesMs).toEqual([60_000]);
+    expect(team.roundOutcomes).toEqual(['defused']); // Story 8.10: lock-step with roundTimesMs
   });
 
-  it('a faster retry REPLACES the round time in place (better-of-two) and shifts cumulative', async () => {
+  it('a faster retry REPLACES the round time in place (better-of-two), shifts cumulative, and flips the outcome', async () => {
     // Seed a failed round-1 time of 60s, then retry and defuse in 40s.
     const h = await makeHarness({ timer: startSegment(TIMER_MS, 0), cumulativeTimeMs: 60_000 });
     await markRetry(h);
@@ -204,8 +212,10 @@ describe('resolveRound — per-team outcomes + retry better-of-two (Story 8.8)',
     const team = (await loadSession(h))!.teams.A!;
     expect(team.roundTimesMs).toEqual([40_000]); // replaced, not appended
     expect(team.cumulativeTimeMs).toBe(40_000); // shifted by (40k - 60k)
+    expect(team.roundOutcomes).toEqual(['defused']); // better attempt's outcome wins
     // Invariant preserved.
     expect(team.cumulativeTimeMs).toBe(team.roundTimesMs.reduce((a, b) => a + b, 0));
+    expect(team.roundOutcomes.length).toBe(team.roundTimesMs.length);
   });
 
   it('a slower/again-failed retry leaves the recorded time UNCHANGED (keeps the better)', async () => {
@@ -320,8 +330,8 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
       status: 'active',
       roundNumber: ROUND_NUMBER,
       teams: {
-        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
-        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: 0 },
       },
     };
     await store.setJSON(sessionKey(SID), session);
@@ -389,8 +399,8 @@ describe('resolveRound — concurrent two-team resolution (shared-session lost-u
       status: 'active',
       roundNumber: ROUND_NUMBER,
       teams: {
-        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
-        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        A: { teamId: 'A', relayOrder: ['p1'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['p2'], currentDefuserIndex: 0, cumulativeTimeMs: 0, roundTimesMs: [], roundOutcomes: [], equalisationRoundsPlayed: 0 },
       },
     } as SessionState);
     await store.setJSON(roundKey(SID, ROUND_NUMBER), {

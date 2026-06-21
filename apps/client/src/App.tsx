@@ -14,6 +14,7 @@ import {
   PlatformGate,
   Preparation,
   Scoreboard,
+  FinalScoreboard,
 } from './ui/index.js';
 import { CONNECTING } from './ui/copy.js';
 import DevBombHarness from './scenes/DevBombHarness.js';
@@ -99,7 +100,7 @@ export default function App() {
       ) : (
         <AppShell header={<h1 className="font-display text-lg font-semibold">Bomb Squad</h1>}>
           {/* Surface derives from the server snapshot — no router, no URL state.
-              'ended' still falls back to Lobby until Story 8.10 owns it. */}
+              'ended' shows the final scoreboard (Story 8.10). */}
           {session === null ? (
             <Landing />
           ) : session.status === 'preparation' ? (
@@ -108,6 +109,8 @@ export default function App() {
             <ActiveRound />
           ) : session.status === 'between-rounds' ? (
             <Scoreboard />
+          ) : session.status === 'ended' ? (
+            <FinalScoreboard />
           ) : (
             <Lobby />
           )}

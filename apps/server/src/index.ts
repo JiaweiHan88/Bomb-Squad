@@ -74,6 +74,15 @@ async function start(): Promise<void> {
     fastify.log.error(err, 'redis initial connect failed — will retry in background');
   }
 
+  // Create the session-archive schema at boot (Story 8.10). Best-effort: a
+  // Postgres-down-at-boot start must not crash (mirrors the redis-connect catch) —
+  // `archiveSession` re-ensures the schema lazily on the first session end.
+  try {
+    await archive.ensureSchema();
+  } catch (err) {
+    fastify.log.error(err, 'postgres schema bootstrap failed — will retry at first session end');
+  }
+
   // Register readiness probes into the health registry (boot path, not module-load,
   // so adapter files stay import-safe for unit tests — mirrors the parseEnv/config split).
   healthRegistry.register('redis', async () => {
@@ -117,9 +126,9 @@ async function start(): Promise<void> {
   // stays pure construction — handlers need the connected Redis store. The
   // identity middleware inside registerSessionHandlers registers AFTER the
   // readiness gate above (see ORDER MATTERS note).
-  registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
+  registerSessionHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler, archive });
   registerManualHandlers(io, { redis: redisStore, log: fastify.log });
-  registerModuleHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler });
+  registerModuleHandlers(io, { redis: redisStore, log: fastify.log, timer: timerScheduler, archive });
   registerVoiceHandlers(io, {
     redis: redisStore,
     log: fastify.log,
