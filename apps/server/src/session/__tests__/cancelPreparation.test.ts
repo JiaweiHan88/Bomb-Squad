@@ -51,17 +51,19 @@ describe('cancelPreparation', () => {
     expect(reopened.roundNumber).toBe(first.roundNumber);
   });
 
-  it('returns preparation to BETWEEN-ROUNDS for round 2+ and reverses the rotation advance (Story 8.6)', () => {
+  it('returns preparation to BETWEEN-ROUNDS for round 2+, clears activeTeamId, leaves pointers (Model B)', () => {
     // Facilitator advanced from between-rounds → prep (round 2), then changed mind.
     const prep = openPreparation(betweenRoundsWithTeams());
     expect(prep.status).toBe('preparation');
     expect(prep.roundNumber).toBe(2);
-    expect(prep.teams.A!.currentDefuserIndex).toBe(1); // advanced
+    expect(prep.activeTeamId).toBeDefined(); // a team was selected
+    expect(prep.teams.A!.currentDefuserIndex).toBe(0); // NOT advanced (Model B)
 
     const next = cancelPreparation(prep);
     expect(next.status).toBe('between-rounds'); // NOT lobby
     expect(next.roundNumber).toBe(1);
-    expect(next.teams.A!.currentDefuserIndex).toBe(0); // reversed
+    expect(next.activeTeamId).toBeUndefined(); // selection cleared
+    expect(next.teams.A!.currentDefuserIndex).toBe(0); // untouched (nothing to reverse)
     expect(next.teams.B!.currentDefuserIndex).toBe(0);
   });
 
@@ -71,6 +73,7 @@ describe('cancelPreparation', () => {
     expect(roundTrip.status).toBe(before.status);
     expect(roundTrip.roundNumber).toBe(before.roundNumber);
     expect(roundTrip.teams).toEqual(before.teams);
+    expect(roundTrip.activeTeamId).toBeUndefined();
   });
 
   it.each(['lobby', 'active', 'ended', 'between-rounds'] as const)(

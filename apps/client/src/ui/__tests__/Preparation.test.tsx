@@ -25,6 +25,7 @@ let mock: MockSocket;
 function seedFacilitatorPrep() {
   const session = makeSession({
     status: 'preparation',
+    activeTeamId: 'A',
     players: {
       fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
       p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
@@ -42,6 +43,7 @@ function seedFacilitatorPrep() {
 function seedDefuserVsExpertPrep(viewer: 'p1' | 'e1' | 'spec', overrides: Partial<RoundConfig> = {}) {
   const session = makeSession({
     status: 'preparation',
+    activeTeamId: 'A',
     config: makeRoundConfig(overrides),
     players: {
       p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
@@ -130,14 +132,16 @@ describe('Preparation', () => {
     const session = makeSession({
       status: 'preparation',
       roundNumber: 3,
+      // A is the active team this round; B rests (Model B — one team at a time).
+      activeTeamId: 'A',
       players: {
         fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
         p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
         p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'expert', teamId: 'B' }),
       },
       teams: {
-        // A still has a natural pick at index 2; B is exhausted (index past its
-        // single player) → B rests this round.
+        // A is active with a natural pick at index 2; B is not the active team → it
+        // rests this round and is labelled accordingly.
         A: makeTeam('A', ['p1', 'p1', 'p1'], { currentDefuserIndex: 2 }),
         B: makeTeam('B', ['p2'], { currentDefuserIndex: 2 }),
       },

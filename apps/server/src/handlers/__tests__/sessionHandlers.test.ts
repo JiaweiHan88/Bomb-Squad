@@ -1405,7 +1405,7 @@ describe('ROUND_START handler', () => {
     return { sessionId: ack.sessionId, mayaId, devonId };
   }
 
-  it('happy path: activates the round, commits rotation picks, persists RoundState, joins team rooms', async () => {
+  it('happy path (Model B): activates with ONLY the active team armed (A); B rests; joins team rooms', async () => {
     const { sessionId, mayaId, devonId } = await setupPrepared();
 
     const facStatePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
@@ -1415,8 +1415,10 @@ describe('ROUND_START handler', () => {
 
     for (const state of [facState, mayaState]) {
       expect(state.status).toBe('active');
+      expect(state.activeTeamId).toBe('A'); // round 1 → Team A (snake first turn)
       expect(state.players[mayaId]).toMatchObject({ role: 'defuser', teamId: 'A' });
-      expect(state.players[devonId]).toMatchObject({ role: 'defuser', teamId: 'B' });
+      // Devon (Team B) RESTS this round — not a defuser.
+      expect(state.players[devonId]).toMatchObject({ role: 'expert', teamId: 'B' });
       expect(Object.values(state.players).find((p) => p.role === 'facilitator')).toBeDefined();
     }
 
@@ -1424,25 +1426,23 @@ describe('ROUND_START handler', () => {
     expect(round).toEqual({
       roundNumber: 1,
       status: 'active',
-      defusers: { A: mayaId, B: devonId },
+      defusers: { A: mayaId }, // single active team
       outcomes: {},
       retry: false,
     });
 
+    // Every roster socket still joins its team room (harmless for the resting team).
     const teamA = await server.io.in(teamRoom(sessionId, 'A')).fetchSockets();
     const teamB = await server.io.in(teamRoom(sessionId, 'B')).fetchSockets();
-    // Story 2.7: team-room membership resolves by the durable playerId, not socket.id.
     expect(teamA.map((s) => s.data.playerId)).toEqual([mayaId]);
     expect(teamB.map((s) => s.data.playerId)).toEqual([devonId]);
   });
 
-  it('between-rounds advance → ROUND_START commits the NEXT rotation Defuser (AC-3 end-to-end)', async () => {
-    // Two players relay on Team A. After the facilitator's between-rounds advance
-    // (PREPARATION_OPEN → currentDefuserIndex +1), the next ROUND_START must
-    // commit relayOrder[1], not round 1's relayOrder[0] pick — proving the
-    // rotation moved end-to-end through the handler, not just the openPreparation
-    // unit. The expected picks are derived from the committed relayOrder so the
-    // assertion is robust to assignment ordering.
+  it('between-rounds advance → ROUND_START commits the NEXT rotation Defuser (Model B, single-team relay)', async () => {
+    // Two players relay on Team A (single-team session). After round 1, the
+    // resolution ceremony advanced A's pointer to index 1. The facilitator's
+    // advance keeps it (openPreparation no longer advances), and the next
+    // ROUND_START commits relayOrder[1], proving the rotation moved end-to-end.
     const ack = await createSession(facilitator);
     const j1 = await joinAs(maya, ack.joinCode, 'Maya');
     const mayaId = idOf(j1, 'Maya');
@@ -1462,25 +1462,27 @@ describe('ROUND_START handler', () => {
     const relayOrder = seeded.teams.A!.relayOrder;
     expect(relayOrder).toEqual([mayaId, devonId]);
 
-    // Flip into between-rounds at round 1, index 0 — as the resolution ceremony
-    // leaves the session after round 1 completes.
+    // Flip into between-rounds at round 1 with A's pointer ALREADY advanced to 1
+    // (as resolveRound leaves it after round 1 completes — Model B).
     await store.setJSON(sessionKey(ack.sessionId), {
       ...seeded,
       status: 'between-rounds',
       roundNumber: 1,
       teams: {
         ...seeded.teams,
-        A: { ...seeded.teams.A!, currentDefuserIndex: 0, cumulativeTimeMs: 9_000, roundTimesMs: [9_000] },
+        A: { ...seeded.teams.A!, currentDefuserIndex: 1, cumulativeTimeMs: 9_000, roundTimesMs: [9_000] },
       },
     });
 
-    // Facilitator advances → preparation, roundNumber 2, index +1.
+    // Facilitator advances → preparation, roundNumber 2, activeTeamId A; the
+    // pointer is UNCHANGED (advance is at resolve, not here).
     done = everyone();
     facilitator.emit('PREPARATION_OPEN');
     await done;
     const advanced = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
     expect(advanced.status).toBe('preparation');
     expect(advanced.roundNumber).toBe(2);
+    expect(advanced.activeTeamId).toBe('A');
     expect(advanced.teams.A!.currentDefuserIndex).toBe(1);
 
     // ROUND_START commits the NEXT defuser (relayOrder[1] = devon), not round 1's.
@@ -1493,31 +1495,30 @@ describe('ROUND_START handler', () => {
     expect(round2.defusers.A).not.toBe(relayOrder[0]);
   });
 
-  it('generates + persists a bomb per populated team and broadcasts BOMB_INIT to each team room (Story 4.7)', async () => {
+  it('generates + persists a bomb ONLY for the active team and broadcasts BOMB_INIT to it (Model B)', async () => {
     const { sessionId } = await setupPrepared();
 
     const mayaBomb = new Promise<BombState>((res) => maya.once('BOMB_INIT', (b) => res(b as BombState)));
-    const devonBomb = new Promise<BombState>((res) => devon.once('BOMB_INIT', (b) => res(b as BombState)));
-    // The bomb is team-private: Maya (Team A) must receive exactly one BOMB_INIT
-    // (hers), never Team B's.
+    // Maya (Team A, active) gets exactly one BOMB_INIT; Devon (Team B, resting) none.
     const mayaBombSpy = jest.fn();
     maya.on('BOMB_INIT', mayaBombSpy);
+    const devonBombSpy = jest.fn();
+    devon.on('BOMB_INIT', devonBombSpy);
 
     facilitator.emit('ROUND_START');
-    const [a, b] = await Promise.all([mayaBomb, devonBomb]);
+    const a = await mayaBomb;
 
-    // Same shared layout (template seed), distinct team seeds.
     expect(a.modules.length).toBeGreaterThan(0);
-    expect(b.modules.length).toBe(a.modules.length);
 
-    // Persisted under each team's private bomb key, matching the broadcast.
+    // Persisted under the active team's private bomb key; the resting team has none.
     expect(store.data.has(bombKey(sessionId, 'A'))).toBe(true);
-    expect(store.data.has(bombKey(sessionId, 'B'))).toBe(true);
+    expect(store.data.has(bombKey(sessionId, 'B'))).toBe(false);
     const persistedA = JSON.parse(store.data.get(bombKey(sessionId, 'A'))!) as BombState;
     expect(persistedA).toEqual(a);
 
     await new Promise((r) => setTimeout(r, 100));
     expect(mayaBombSpy).toHaveBeenCalledTimes(1);
+    expect(devonBombSpy).not.toHaveBeenCalled();
   });
 
   it('non-facilitator → NOT_FACILITATOR, no broadcast, no round key', async () => {
@@ -1563,24 +1564,22 @@ describe('ROUND_START handler', () => {
     expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
   });
 
-  it('Story 8.9: out-of-range currentDefuserIndex no longer wraps — team exhausted, rests, no throw', async () => {
-    const { sessionId, mayaId, devonId } = await setupPrepared();
+  it('Model B: an exhausted ACTIVE team does not wrap — ROUND_START refuses (no wrong pick)', async () => {
+    const { sessionId } = await setupPrepared();
     const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    // A=[Maya] index 7 (past relayOrder) — the old modulo wrapped (7 % 1 = 0 →
-    // Maya). 8.9 reads it raw: A is exhausted. B=[Devon] still has its natural
-    // slot, so the round starts with Devon defusing and Team A resting.
+    expect(stored.activeTeamId).toBe('A');
+    // Force the active team A past its relayOrder (index 7). The old modulo wrapped
+    // (7 % 1 = 0 → Maya); Model B reads it raw, so A is exhausted with no owed
+    // round → ROUND_START refuses rather than committing a wrapped pick.
     await store.setJSON(sessionKey(sessionId), {
       ...stored,
       teams: { ...stored.teams, A: { ...stored.teams.A!, currentDefuserIndex: 7 } },
     });
 
-    const statePromise = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
     facilitator.emit('ROUND_START');
-    const state = await statePromise;
-
-    const round = JSON.parse(store.data.get(roundKey(sessionId, 1))!) as RoundState;
-    expect(round.defusers).toEqual({ B: devonId }); // A rests, no wrap to Maya
-    expect(state.players[mayaId]).toMatchObject({ role: 'expert' }); // not stranded
+    expect((await errorPromise).code).toBe('CANNOT_START_ROUND');
+    expect(store.data.get(roundKey(sessionId, 1))).toBeUndefined(); // no round committed
   });
 
   it('a never-joined socket → NOT_IN_SESSION', async () => {
@@ -1697,63 +1696,50 @@ describe('ROUND_START — timer mint & expiry (Story 8.4)', () => {
     expect(scheduler.armCalls.map((c) => c.teamId)).toContain('A');
   });
 
-  it('two populated teams → independent timers, each only to its own team room', async () => {
+  it('Model B: only the ACTIVE team gets a timer; the resting team gets none', async () => {
     const { sessionId } = await prep();
 
     const mayaTimer = onceEvent<TimerState>(maya, 'TIMER_UPDATE');
-    const devonTimer = onceEvent<TimerState>(devon, 'TIMER_UPDATE');
-    // Maya (Team A) must NOT receive Team B's timer.
-    const mayaSawB = jest.fn();
-    let mayaCount = 0;
-    maya.on('TIMER_UPDATE', () => {
-      mayaCount += 1;
-      if (mayaCount > 1) mayaSawB();
-    });
+    // Devon (Team B, resting in round 1) must NOT receive any timer.
+    const devonSawTimer = jest.fn();
+    devon.on('TIMER_UPDATE', devonSawTimer);
 
     facilitator.emit('ROUND_START');
-    await Promise.all([mayaTimer, devonTimer]);
+    await mayaTimer;
     // Give any stray cross-team broadcast a window to (not) arrive.
     await new Promise((r) => setTimeout(r, 150));
 
     expect(store.data.has(timerKey(sessionId, 'A'))).toBe(true);
-    expect(store.data.has(timerKey(sessionId, 'B'))).toBe(true);
-    expect(scheduler.armCalls.map((c) => c.teamId).sort()).toEqual(['A', 'B']);
-    expect(mayaSawB).not.toHaveBeenCalled();
+    expect(store.data.has(timerKey(sessionId, 'B'))).toBe(false);
+    expect(scheduler.armCalls.map((c) => c.teamId)).toEqual(['A']);
+    expect(devonSawTimer).not.toHaveBeenCalled();
   });
 
-  it('authoritative expiry: scheduler fire → BOMB_EXPLODED, timerKey cleared, time recorded + status flipped (8.5 ceremony)', async () => {
+  it('authoritative expiry: single active team resolves immediately into between-rounds (8.5/8.6 ceremony)', async () => {
     const { sessionId } = await prep();
 
     const started = onceEvent<TimerState>(maya, 'TIMER_UPDATE');
     facilitator.emit('ROUND_START');
     await started;
 
+    // Under Model B only Team A is armed, so when A expires it is the LAST (only)
+    // team to resolve → the round completes and the session enters between-rounds
+    // immediately, with a SCOREBOARD preview to the whole session (Story 8.6).
     const explodedPromise = onceEvent<RoundEndPayloadLike>(maya, 'BOMB_EXPLODED');
+    const scoreboardPromise = onceEvent<unknown>(maya, 'SCOREBOARD');
     scheduler.setNow(TIMER_MS + 1); // advance the server clock past the deadline
     await scheduler.fireNow(sessionId, 'A');
     const exploded = await explodedPromise;
+    await scoreboardPromise;
 
     expect(exploded).toEqual({ teamId: 'A', elapsedMs: TIMER_MS });
     expect(store.data.has(timerKey(sessionId, 'A'))).toBe(false);
-    // Story 8.5: the timeout path runs the full resolution ceremony — records
-    // displayed elapsed into cumulativeTimeMs and (Story 8.6) keeps the shared
-    // session 'active' because Team B is still playing. Between-rounds entry waits
-    // for the LAST team to resolve so B is never routed off its bomb mid-round.
-    const afterA = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    expect(afterA.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
-    expect(afterA.teams.A!.roundTimesMs).toEqual([TIMER_MS]);
-    expect(afterA.status).toBe('active');
-
-    // Now Team B expires too → last team → between-rounds entry: session flips and
-    // a SCOREBOARD preview is broadcast to the whole session (Story 8.6).
-    const scoreboardPromise = onceEvent<unknown>(maya, 'SCOREBOARD');
-    scheduler.setNow(TIMER_MS + 2);
-    await scheduler.fireNow(sessionId, 'B');
-    await scoreboardPromise;
-
-    const afterB = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    expect(afterB.teams.B!.cumulativeTimeMs).toBe(TIMER_MS);
-    expect(afterB.status).toBe('between-rounds');
+    const after = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    expect(after.teams.A!.cumulativeTimeMs).toBe(TIMER_MS);
+    expect(after.teams.A!.roundTimesMs).toEqual([TIMER_MS]);
+    // Resolve advanced A's pointer (Model B single advance site).
+    expect(after.teams.A!.currentDefuserIndex).toBe(1);
+    expect(after.status).toBe('between-rounds');
   });
 });
 
@@ -2381,27 +2367,31 @@ describe('ROUND_CONFIGURE handler (Story 8.1)', () => {
   });
 });
 
-describe('Relay orchestration & odd-team equalisation (Story 8.9)', () => {
+describe('Relay orchestration — Model B sequential play (Story 8.11)', () => {
   let server: TestSocketServer;
   let store: MemoryRedisStore;
+  let scheduler: TestScheduler;
   let facilitator: TestClientSocket;
   let maya: TestClientSocket;
   let devon: TestClientSocket;
   let ana: TestClientSocket;
+  let bo: TestClientSocket;
+
+  const TIMER_MS = 2_000;
+  let clock = 0;
 
   beforeEach(async () => {
+    clock = 0;
     store = createMemoryRedisStore();
-    server = await startTestSocketServer((io) =>
-      registerSessionHandlers(io, {
-        redis: store,
-        log: noopLog,
-        timer: createTestScheduler({ redis: store, io, log: noopLog }),
-      }),
-    );
+    server = await startTestSocketServer((io) => {
+      scheduler = createTestScheduler({ redis: store, io, log: noopLog });
+      registerSessionHandlers(io, { redis: store, log: noopLog, timer: scheduler });
+    });
     facilitator = await server.connectClient();
     maya = await server.connectClient();
     devon = await server.connectClient();
     ana = await server.connectClient();
+    bo = await server.connectClient();
   });
 
   afterEach(async () => {
@@ -2412,160 +2402,235 @@ describe('Relay orchestration & odd-team equalisation (Story 8.9)', () => {
     return Object.values(state.players).find((p) => p.displayName === displayName)!.playerId;
   }
 
+  function onceEvent<T>(socket: TestClientSocket, event: string): Promise<T> {
+    return new Promise<T>((resolve) => {
+      socket.once(event as 'SESSION_STATE', ((payload: T) => resolve(payload)) as never);
+    });
+  }
+
   /** Join a socket and assign to a team, draining the facilitator's broadcasts. */
   async function joinAssign(
     socket: TestClientSocket,
     joinCode: string,
     name: string,
     teamId: 'A' | 'B',
-  ): Promise<void> {
+  ): Promise<string> {
     const joined = nextEvent<SessionState>(socket, 'SESSION_STATE');
     socket.emit('SESSION_JOIN', { joinCode, displayName: name, role: 'expert' });
     const state = await joined;
+    const id = idOf(state, name);
     const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('TEAM_ASSIGN', { playerId: idOf(state, name), teamId, role: 'expert' });
+    facilitator.emit('TEAM_ASSIGN', { playerId: id, teamId, role: 'expert' });
     await facBc;
+    return id;
   }
 
-  /** A=[Maya,Devon] (len 2), B=[Ana] (len 1) — the odd 2v1 relay. */
-  async function setupOdd(): Promise<{ sessionId: string; mayaId: string; anaId: string }> {
-    const ack = await createSession(facilitator);
-    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
-    await joinAssign(devon, ack.joinCode, 'Devon', 'A');
-    await joinAssign(ana, ack.joinCode, 'Ana', 'B');
+  /** Facilitator advances (open prep) → returns the new preparation state. */
+  async function openPrep(): Promise<SessionState> {
+    const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('PREPARATION_OPEN');
+    return facBc;
+  }
+
+  /** Start the round → returns the active session state. */
+  async function startRoundNow(): Promise<SessionState> {
+    const facBc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('ROUND_START');
+    return facBc;
+  }
+
+  /** Expire the active team's timer → drives the resolution + between-rounds entry. */
+  async function expireActive(sessionId: string, teamId: 'A' | 'B'): Promise<void> {
+    clock += TIMER_MS + 1;
+    scheduler.setNow(clock);
+    const scoreboard = onceEvent<unknown>(facilitator, 'SCOREBOARD');
+    await scheduler.fireNow(sessionId, teamId);
+    await scoreboard;
+  }
+
+  it('equal 2v2 snake: A,B,B,A — exactly one team armed each round; layout shared per pair; relay completes', async () => {
+    const ack = await createSession(facilitator, { config: { timerMs: TIMER_MS } });
+    const mayaId = await joinAssign(maya, ack.joinCode, 'Maya', 'A');
+    const devonId = await joinAssign(devon, ack.joinCode, 'Devon', 'A');
+    const anaId = await joinAssign(ana, ack.joinCode, 'Ana', 'B');
+    const boId = await joinAssign(bo, ack.joinCode, 'Bo', 'B');
+    const sessionId = ack.sessionId;
+
+    // ── Round 1: pair 1, first turn → Team A (Maya). Only A armed. ──────────────
+    let prep = await openPrep();
+    expect(prep.activeTeamId).toBe('A');
+    const r1Bomb = onceEvent<BombState>(maya, 'BOMB_INIT');
+    await startRoundNow();
+    const bombR1 = await r1Bomb;
+    let round = JSON.parse(store.data.get(roundKey(sessionId, 1))!) as RoundState;
+    expect(round.defusers).toEqual({ A: mayaId }); // single active team
+    // Only Team A has a bomb + live timer; Team B rests (no keys).
+    expect(store.data.has(bombKey(sessionId, 'A'))).toBe(true);
+    expect(store.data.has(timerKey(sessionId, 'A'))).toBe(true);
+    expect(store.data.has(timerKey(sessionId, 'B'))).toBe(false);
+    await expireActive(sessionId, 'A');
+
+    // ── Round 2: pair 1, second turn → Team B (Ana). Shares R1's layout. ───────
+    prep = await openPrep();
+    expect(prep.activeTeamId).toBe('B');
+    const r2Bomb = onceEvent<BombState>(ana, 'BOMB_INIT');
+    await startRoundNow();
+    const bombR2 = await r2Bomb;
+    round = JSON.parse(store.data.get(roundKey(sessionId, 2))!) as RoundState;
+    expect(round.defusers).toEqual({ B: anaId });
+    // IDENTICAL layout (same pairIndex) but INDEPENDENT values (deriveTeamSeed).
+    expect(bombR2.modules.map((m) => m.moduleId)).toEqual(bombR1.modules.map((m) => m.moduleId));
+    expect(JSON.stringify(bombR2.modules)).not.toEqual(JSON.stringify(bombR1.modules));
+    await expireActive(sessionId, 'B');
+
+    // ── Round 3: pair 2, first turn → Team B (Bo). ─────────────────────────────
+    prep = await openPrep();
+    expect(prep.activeTeamId).toBe('B');
+    const r3Bomb = onceEvent<BombState>(bo, 'BOMB_INIT');
+    await startRoundNow();
+    const bombR3 = await r3Bomb;
+    round = JSON.parse(store.data.get(roundKey(sessionId, 3))!) as RoundState;
+    expect(round.defusers).toEqual({ B: boId });
+    // Pair 2 layout differs from pair 1.
+    expect(bombR3.modules.map((m) => m.moduleId)).not.toEqual(bombR1.modules.map((m) => m.moduleId));
+    await expireActive(sessionId, 'B');
+
+    // ── Round 4: pair 2, second turn → Team A (Devon). Shares R3's layout. ──────
+    prep = await openPrep();
+    expect(prep.activeTeamId).toBe('A');
+    const r4Bomb = onceEvent<BombState>(devon, 'BOMB_INIT');
+    await startRoundNow();
+    const bombR4 = await r4Bomb;
+    round = JSON.parse(store.data.get(roundKey(sessionId, 4))!) as RoundState;
+    expect(round.defusers).toEqual({ A: devonId });
+    expect(bombR4.modules.map((m) => m.moduleId)).toEqual(bombR3.modules.map((m) => m.moduleId));
+    await expireActive(sessionId, 'A');
+
+    // Every player defused exactly once; the next advance is refused RELAY_COMPLETE.
+    const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    expect(stored.teams.A!.currentDefuserIndex).toBe(2);
+    expect(stored.teams.B!.currentDefuserIndex).toBe(2);
+    const errP = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    expect((await errP).code).toBe('RELAY_COMPLETE');
+  });
+
+  /**
+   * Seed a between-rounds 3v2 relay (A=[a0,a1,a2], B=[b0,b1]) with synthetic team
+   * rosters at the given pointer state. Both teams are ≥2 (the min size), so this
+   * is a valid odd-team relay (B owes 1 equalisation). The real `facilitator`
+   * socket drives the facilitator actions; team players need only exist on the
+   * roster (TEAM_ASSIGN + the defuser pick resolve by playerId, not socket).
+   */
+  async function seedOddRelay(patch: {
+    roundNumber: number;
+    aIndex: number;
+    bIndex: number;
+    bPlayed?: number;
+  }): Promise<string> {
+    const ack = await createSession(facilitator, { config: { timerMs: TIMER_MS } });
     const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
-    return { sessionId: ack.sessionId, mayaId: idOf(live, 'Maya'), anaId: idOf(live, 'Ana') };
-  }
-
-  /** Overwrite the live session into a between-rounds snapshot. */
-  function seedBetweenRounds(
-    sessionId: string,
-    patch: { index: number; playedB?: number },
-  ): SessionState {
-    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
-    const next: SessionState = {
+    const mk = (id: string, teamId: 'A' | 'B') => ({
+      playerId: id,
+      displayName: id,
+      role: 'expert' as const,
+      teamId,
+      isReady: true,
+    });
+    const players = {
+      ...live.players,
+      a0: mk('a0', 'A'), a1: mk('a1', 'A'), a2: mk('a2', 'A'),
+      b0: mk('b0', 'B'), b1: mk('b1', 'B'),
+    };
+    const seeded: SessionState = {
       ...live,
       status: 'between-rounds',
-      roundNumber: patch.index + 1,
+      roundNumber: patch.roundNumber,
+      players,
       teams: {
-        A: { ...live.teams.A!, currentDefuserIndex: patch.index },
-        B: { ...live.teams.B!, currentDefuserIndex: patch.index, equalisationRoundsPlayed: patch.playedB ?? 0 },
+        A: { teamId: 'A', relayOrder: ['a0', 'a1', 'a2'], currentDefuserIndex: patch.aIndex, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['b0', 'b1'], currentDefuserIndex: patch.bIndex, cumulativeTimeMs: 0, roundTimesMs: [], equalisationRoundsPlayed: patch.bPlayed ?? 0 },
       },
     };
-    store.data.set(sessionKey(sessionId), JSON.stringify(next));
-    return next;
+    await store.setJSON(sessionKey(ack.sessionId), seeded);
+    return ack.sessionId;
   }
 
-  it('odd 2v1: the between-rounds advance OPENS an equalisation round (relay not yet complete)', async () => {
-    const { sessionId } = await setupOdd();
-    // Naturals exhausted (index 1, both teams) but B owes 1 equalisation round.
-    seedBetweenRounds(sessionId, { index: 1 });
+  it('odd 3v2: the snake routes B into an equalisation round with the Facilitator volunteer; A rests', async () => {
+    // After 5 turns (A,B,B,A,A) both naturals are exhausted (A index 3, B index 2);
+    // the snake's 6th turn (pair 3, second turn) is B's owed equalisation round.
+    const sessionId = await seedOddRelay({ roundNumber: 5, aIndex: 3, bIndex: 2 });
 
-    const opened = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('PREPARATION_OPEN');
-    const state = await opened;
-    expect(state.status).toBe('preparation');
-  });
+    const prep = await openPrep();
+    expect(prep.activeTeamId).toBe('B'); // equalisation turn for B
+    expect(prep.roundNumber).toBe(6);
 
-  it('equalisation ROUND_START with no designated volunteer → EQUALISATION_VOLUNTEER_REQUIRED', async () => {
-    const { sessionId } = await setupOdd();
-    const seeded = seedBetweenRounds(sessionId, { index: 1 });
-    // Advance into the equalisation preparation (no volunteer yet).
-    store.data.set(sessionKey(sessionId), JSON.stringify({ ...seeded, status: 'preparation', roundNumber: 3, teams: {
-      A: { ...seeded.teams.A!, currentDefuserIndex: 2 },
-      B: { ...seeded.teams.B!, currentDefuserIndex: 2 },
-    } }));
-
-    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    // No volunteer yet → ROUND_START refuses (the server never auto-picks).
+    const errP = nextEvent<ErrorPayload>(facilitator, 'ERROR');
     facilitator.emit('ROUND_START');
-    const error = await errorPromise;
-    expect(error.code).toBe('EQUALISATION_VOLUNTEER_REQUIRED');
-  });
+    expect((await errP).code).toBe('EQUALISATION_VOLUNTEER_REQUIRED');
 
-  it('TEAM_ASSIGN designates the equalisation volunteer between rounds', async () => {
-    const { sessionId, anaId } = await setupOdd();
-    seedBetweenRounds(sessionId, { index: 1 });
+    // Designate b0 (TEAM_ASSIGN), then start the equalisation round → only B armed.
+    const designated = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('TEAM_ASSIGN', { playerId: 'b0', teamId: 'B', role: 'defuser' });
+    expect((await designated).teams.B!.equalisationVolunteerId).toBe('b0');
+    await startRoundNow();
+    const round = JSON.parse(store.data.get(roundKey(sessionId, 6))!) as RoundState;
+    expect(round.defusers).toEqual({ B: 'b0' }); // A rests
 
-    const bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('TEAM_ASSIGN', { playerId: anaId, teamId: 'B', role: 'defuser' });
-    const state = await bc;
-    expect(state.teams.B!.equalisationVolunteerId).toBe(anaId);
-    expect(state.players[anaId]!.role).toBe('defuser');
-  });
-
-  it('TEAM_ASSIGN volunteer refuses a team that owes nothing / an off-team player', async () => {
-    const { sessionId, mayaId, anaId } = await setupOdd();
-    seedBetweenRounds(sessionId, { index: 1 });
-
-    // Team A owes no equalisation round.
-    let err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
-    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'A', role: 'defuser' });
-    expect((await err).code).toBe('NO_EQUALISATION_ROUND');
-
-    // Maya is not on Team B (off-team volunteer).
-    err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
-    facilitator.emit('TEAM_ASSIGN', { playerId: mayaId, teamId: 'B', role: 'defuser' });
-    expect((await err).code).toBe('INVALID_VOLUNTEER');
-    expect(anaId).toBeDefined();
-  });
-
-  it('equalisation ROUND_START commits the volunteer; the longer team rests (absent from defusers)', async () => {
-    const { sessionId, mayaId, anaId } = await setupOdd();
-    seedBetweenRounds(sessionId, { index: 1 });
-
-    // Designate Ana, open prep, start the equalisation round.
-    let bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('TEAM_ASSIGN', { playerId: anaId, teamId: 'B', role: 'defuser' });
-    await bc;
-    bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('PREPARATION_OPEN');
-    await bc;
-
-    const active = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
-    facilitator.emit('ROUND_START');
-    await active;
-
-    const round = JSON.parse(store.data.get(roundKey(sessionId, 3))!) as RoundState;
-    expect(round.defusers).toEqual({ B: anaId }); // A rests
+    // The equalisation bump + volunteer clear happen at RESOLVE (Model B single site).
+    await expireActive(sessionId, 'B');
     const stored = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
     expect(stored.teams.B!.equalisationRoundsPlayed).toBe(1);
     expect(stored.teams.B!.equalisationVolunteerId).toBeUndefined();
-    // Maya (A's stale defuser) is not stranded on the bomb surface.
-    expect(stored.players[mayaId]!.role).toBe('expert');
+
+    // Both teams now on the same count (3) → the advance is refused RELAY_COMPLETE.
+    const errP2 = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('PREPARATION_OPEN');
+    expect((await errP2).code).toBe('RELAY_COMPLETE');
   });
 
-  it('once every owed round is played → the advance is refused RELAY_COMPLETE', async () => {
-    const { sessionId } = await setupOdd();
-    // B has now played its 1 owed equalisation round.
-    seedBetweenRounds(sessionId, { index: 2, playedB: 1 });
+  it('TEAM_ASSIGN volunteer refuses a team that owes nothing / an off-team player', async () => {
+    const sessionId = await seedOddRelay({ roundNumber: 5, aIndex: 3, bIndex: 2 });
+
+    // Team A owes no equalisation round.
+    let err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: 'a0', teamId: 'A', role: 'defuser' });
+    expect((await err).code).toBe('NO_EQUALISATION_ROUND');
+
+    // a0 is not on Team B (off-team volunteer).
+    err = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    facilitator.emit('TEAM_ASSIGN', { playerId: 'a0', teamId: 'B', role: 'defuser' });
+    expect((await err).code).toBe('INVALID_VOLUNTEER');
+    expect(sessionId).toBeDefined();
+  });
+
+  it('relay-complete: the advance is refused RELAY_COMPLETE and is a pure no-op', async () => {
+    // A,B,B,A,A then B's equalisation all played → everyone defused.
+    const sessionId = await seedOddRelay({ roundNumber: 6, aIndex: 3, bIndex: 2, bPlayed: 1 });
     const storedBefore = store.data.get(sessionKey(sessionId));
 
-    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
+    const errP = nextEvent<ErrorPayload>(facilitator, 'ERROR');
     facilitator.emit('PREPARATION_OPEN');
-    const error = await errorPromise;
-    expect(error.code).toBe('RELAY_COMPLETE');
-    // Refusal is a pure no-op: the relay does NOT silently wrap to player 0.
+    expect((await errP).code).toBe('RELAY_COMPLETE');
+    // Refusal does NOT silently wrap the rotation.
     expect(store.data.get(sessionKey(sessionId))).toBe(storedBefore);
   });
 
-  it('equal 1v1 reaches relay-complete with zero equalisation rounds → advance refused', async () => {
-    const ack = await createSession(facilitator);
-    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
-    await joinAssign(ana, ack.joinCode, 'Ana', 'B');
-    // After the single natural round (index 0), both 1-player teams are exhausted
-    // and owe nothing.
-    seedBetweenRounds(ack.sessionId, { index: 0 });
-    const storedBefore = store.data.get(sessionKey(ack.sessionId));
-
-    const errorPromise = nextEvent<ErrorPayload>(facilitator, 'ERROR');
-    facilitator.emit('PREPARATION_OPEN');
-    expect((await errorPromise).code).toBe('RELAY_COMPLETE');
-    expect(store.data.get(sessionKey(ack.sessionId))).toBe(storedBefore);
-  });
-
   it('a non-facilitator advance at relay-complete is still NOT_FACILITATOR (authority before completeness)', async () => {
-    const { sessionId } = await setupOdd();
-    seedBetweenRounds(sessionId, { index: 2, playedB: 1 });
+    // Maya joins (a real non-facilitator socket), then seed a relay-complete state
+    // that preserves her on the roster so the authority gate fires before completeness.
+    const ack = await createSession(facilitator, { config: { timerMs: TIMER_MS } });
+    await joinAssign(maya, ack.joinCode, 'Maya', 'A');
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(ack.sessionId), {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: 1,
+      teams: {
+        A: { ...live.teams.A!, currentDefuserIndex: live.teams.A!.relayOrder.length },
+      },
+    });
 
     const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
     maya.emit('PREPARATION_OPEN');

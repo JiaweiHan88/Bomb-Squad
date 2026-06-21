@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ErrorPayload, TeamId, TeamState } from '@bomb-squad/shared';
-import { isRelayComplete, naturalRoundRemains, equalisationRoundsOwed } from '@bomb-squad/shared';
+import { isRelayComplete, equalisationRoundsOwed, selectActiveTeam } from '@bomb-squad/shared';
 import { useGameStore } from '../store/gameStore.js';
 import { getSocket } from '../net/socket.js';
 import { formatTimerDisplay } from '../scenes/timerLcd.js';
@@ -21,6 +21,7 @@ import {
   EQUALISATION_PROMPT,
   EQUALISATION_NEEDS_VOLUNTEER,
   RELAY_COMPLETE_NOTICE,
+  UP_NEXT,
   TEAM_A,
   TEAM_B,
 } from './copy.js';
@@ -129,18 +130,24 @@ export default function Scoreboard() {
     getSocket().emit('ROUND_RETRY', { teamId });
   };
 
-  // Relay orchestration (Story 8.9) — derived from the SAME shared predicates the
-  // server authority uses, so the facilitator UI can never drift from the server.
+  // Relay orchestration (Story 8.9 / 8.11) — derived from the SAME shared
+  // predicates + the snake selector the server authority uses, so the facilitator
+  // UI can never drift from the server.
   const relayComplete = isRelayComplete(session);
   const owed = equalisationRoundsOwed(session);
-  // Equalisation phase: every natural rotation is exhausted but the shorter team
-  // still owes an extra round (with a Facilitator-chosen volunteer Defuser).
-  const equalisationPhase = !relayComplete && !naturalRoundRemains(session);
-  const owingTeams = TEAM_ORDER.filter(
-    (id) => session.teams[id] !== undefined && (owed[id] ?? 0) > 0,
-  );
-  const needsVolunteer =
-    equalisationPhase && owingTeams.some((id) => session.teams[id]!.equalisationVolunteerId === undefined);
+  // Up next: the single team that will play the next round (Model B snake). Shown
+  // so the Facilitator's advance reads as a hand-off. Undefined at relay complete.
+  const upNext = relayComplete ? undefined : selectActiveTeam(session);
+  const upNextTeam = upNext !== undefined ? session.teams[upNext] : undefined;
+  // Does the next active team play an EQUALISATION round? Under Model B these are
+  // INTERLEAVED with the other team's naturals (not all at the end), so we detect
+  // it from the SPECIFIC up-next team: it has exhausted its natural rotation but
+  // still owes an equalisation round. It then needs a Facilitator-chosen volunteer.
+  const upNextIsEqualisation =
+    upNextTeam !== undefined &&
+    !(upNextTeam.currentDefuserIndex < upNextTeam.relayOrder.length) &&
+    (owed[upNext!] ?? 0) > 0;
+  const needsVolunteer = upNextIsEqualisation && upNextTeam!.equalisationVolunteerId === undefined;
 
   // Designate the equalisation volunteer (reuses TEAM_ASSIGN — the server routes a
   // between-rounds role-only assign to the volunteer designation, Story 8.9).
@@ -240,47 +247,52 @@ export default function Scoreboard() {
               <p data-testid="relay-complete" className="text-sm text-ink-muted">
                 {RELAY_COMPLETE_NOTICE}
               </p>
-            ) : equalisationPhase ? (
-              /* Odd-team equalisation (Story 8.9): the shorter team plays an extra
-                 round with a Facilitator-chosen volunteer Defuser. Pick first, then
-                 start — the advance is gated until a volunteer is chosen. */
-              <>
-                {owingTeams.map((teamId) => {
-                  const team = session.teams[teamId]!;
-                  const chosen = team.equalisationVolunteerId;
-                  return (
-                    <div
-                      key={teamId}
-                      data-testid={`equalisation-${teamId}`}
-                      className="flex flex-col items-center gap-2"
-                    >
-                      <p className="font-mono text-xs uppercase tracking-widest text-brass">
-                        {EQUALISATION_HEADING}
-                      </p>
-                      <p className="text-sm text-ink-muted">
-                        {EQUALISATION_PROMPT(TEAM_LABELS[teamId])}
-                      </p>
-                      <div className="flex flex-wrap justify-center gap-2">
-                        {team.relayOrder.map((pid) => (
-                          <Button
-                            key={pid}
-                            variant={pid === chosen ? 'primary' : 'secondary'}
-                            onClick={() => designateVolunteer(teamId, pid)}
-                          >
-                            {session.players[pid]?.displayName ?? pid}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-                {needsVolunteer && (
-                  <p className="text-sm text-ink-muted">{EQUALISATION_NEEDS_VOLUNTEER}</p>
-                )}
-                <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} disabled={needsVolunteer} />
-              </>
             ) : (
-              <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} />
+              <>
+                {/* Up next (Story 8.11): the single team that plays next round. Makes
+                    the Facilitator's advance legible as a one-team-at-a-time hand-off. */}
+                {upNext !== undefined && (
+                  <p data-testid="up-next" className="font-mono text-xs uppercase tracking-widest text-brass">
+                    {UP_NEXT(TEAM_LABELS[upNext])}
+                  </p>
+                )}
+                {upNextIsEqualisation && upNext !== undefined ? (
+                  /* Odd-team equalisation (Story 8.9 / 8.11): the up-next team has
+                     exhausted its rotation and plays an extra round with a
+                     Facilitator-chosen volunteer Defuser. Pick first, then start —
+                     the advance is gated until a volunteer is chosen. Keyed on the
+                     SPECIFIC up-next team (equalisation rounds interleave under the
+                     snake, so this is no longer "all owing teams at the end"). */
+                  <div
+                    data-testid={`equalisation-${upNext}`}
+                    className="flex flex-col items-center gap-2"
+                  >
+                    <p className="font-mono text-xs uppercase tracking-widest text-brass">
+                      {EQUALISATION_HEADING}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      {EQUALISATION_PROMPT(TEAM_LABELS[upNext])}
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {upNextTeam!.relayOrder.map((pid) => (
+                        <Button
+                          key={pid}
+                          variant={pid === upNextTeam!.equalisationVolunteerId ? 'primary' : 'secondary'}
+                          onClick={() => designateVolunteer(upNext, pid)}
+                        >
+                          {session.players[pid]?.displayName ?? pid}
+                        </Button>
+                      ))}
+                    </div>
+                    {needsVolunteer && (
+                      <p className="text-sm text-ink-muted">{EQUALISATION_NEEDS_VOLUNTEER}</p>
+                    )}
+                    <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} disabled={needsVolunteer} />
+                  </div>
+                ) : (
+                  <ConfirmButton label={START_NEXT_ROUND} onConfirm={advance} />
+                )}
+              </>
             )}
           </>
         ) : (

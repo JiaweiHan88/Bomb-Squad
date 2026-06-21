@@ -17,30 +17,30 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/**
- * A preparation-phase session (roundNumber 1) with:
- *  Team A: Maya (defuser), Devon (expert)  — relayOrder [maya, devon]
- *  Team B: Ana (expert)                    — relayOrder [ana]
- *  Sam: unassigned spectator.
- */
-const prepState = (): SessionState => {
-  let state = createSessionState({
-    sessionId: 'sess-1',
-    joinCode: 'ABC123',
-    facilitatorId: 'sock-fac',
-  });
+/** A lobby session with both teams populated (Maya+Devon on A, Ana+Bo on B). */
+const lobbyWithTeams = (): SessionState => {
+  let state = createSessionState({ sessionId: 'sess-1', joinCode: 'ABC123', facilitatorId: 'sock-fac' });
   state = addPlayerToSession(state, { playerId: 'sock-maya', displayName: 'Maya', role: 'expert' });
   state = addPlayerToSession(state, { playerId: 'sock-devon', displayName: 'Devon', role: 'expert' });
   state = addPlayerToSession(state, { playerId: 'sock-ana', displayName: 'Ana', role: 'expert' });
+  state = addPlayerToSession(state, { playerId: 'sock-bo', displayName: 'Bo', role: 'expert' });
   state = addPlayerToSession(state, { playerId: 'sock-sam', displayName: 'Sam', role: 'spectator' });
   state = assignPlayerToTeam(state, { playerId: 'sock-maya', teamId: 'A', role: 'defuser' });
   state = assignPlayerToTeam(state, { playerId: 'sock-devon', teamId: 'A', role: 'expert' });
   state = assignPlayerToTeam(state, { playerId: 'sock-ana', teamId: 'B', role: 'expert' });
-  return openPreparation(state);
+  state = assignPlayerToTeam(state, { playerId: 'sock-bo', teamId: 'B', role: 'expert' });
+  return state;
 };
 
-describe('startRound', () => {
-  it('activates the round and commits the rotation pick per team', () => {
+/**
+ * Round-1 preparation (Model B): openPreparation selects the active team via the
+ * snake — round 1 (pair 1, first turn) → Team A. relayOrder A=[maya,devon],
+ * B=[ana,bo]. So ONLY Team A is armed; Team B rests.
+ */
+const prepState = (): SessionState => openPreparation(lobbyWithTeams());
+
+describe('startRound (Model B — exactly one active team)', () => {
+  it('activates the round and commits ONLY the active team (A) — B rests', () => {
     const result = startRound(prepState());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -48,13 +48,13 @@ describe('startRound', () => {
     expect(result.round).toEqual({
       roundNumber: 1,
       status: 'active',
-      defusers: { A: 'sock-maya', B: 'sock-ana' },
+      defusers: { A: 'sock-maya' }, // single entry — the resting team is absent
       outcomes: {},
       retry: false,
     });
   });
 
-  it('flips the selected players to defuser; previous defuser-role holders become expert', () => {
+  it('flips the active team pick to defuser; a prior defuser-role holder becomes expert', () => {
     // Move the defuser role onto Devon pre-start so rotation (Maya, index 0) displaces him.
     let state = prepState();
     state = {
@@ -70,22 +70,18 @@ describe('startRound', () => {
     if (!result.ok) return;
     expect(result.state.players['sock-maya']!.role).toBe('defuser');
     expect(result.state.players['sock-devon']!.role).toBe('expert');
-    expect(result.state.players['sock-ana']!.role).toBe('defuser');
   });
 
-  it('a spectator in relayOrder who comes up in rotation becomes defuser (relay order is the authority)', () => {
+  it('a spectator who comes up in the active team rotation becomes defuser (relay order is authority)', () => {
     let state = prepState();
     state = {
       ...state,
-      players: {
-        ...state.players,
-        'sock-ana': { ...state.players['sock-ana']!, role: 'spectator' },
-      },
+      players: { ...state.players, 'sock-maya': { ...state.players['sock-maya']!, role: 'spectator' } },
     };
     const result = startRound(state);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.players['sock-ana']!.role).toBe('defuser');
+    expect(result.state.players['sock-maya']!.role).toBe('defuser');
   });
 
   it('never touches the facilitator or off-team spectators', () => {
@@ -96,24 +92,19 @@ describe('startRound', () => {
     expect(result.state.players['sock-sam']!.role).toBe('spectator');
   });
 
-  it('Story 8.9: an out-of-range index NO LONGER wraps — the team is exhausted and rests', () => {
-    // Old behaviour wrapped via modulo (5 % 2 = 1 → Devon); 8.9 reads the index
-    // raw, so an index past relayOrder means the team has exhausted its rotation
-    // and gets no natural pick. Team B still has a natural slot (the natural
-    // phase), so exhausted Team A simply rests (absent from defusers).
+  it('the RESTING team is absent from defusers and its stale defuser is demoted (AC-1)', () => {
+    // Give Team B (resting in round 1) a stale defuser; it must be demoted so its
+    // players are not stranded on a bomb surface.
     let state = prepState();
     state = {
       ...state,
-      teams: { ...state.teams, A: { ...state.teams.A!, currentDefuserIndex: 5 } },
+      players: { ...state.players, 'sock-ana': { ...state.players['sock-ana']!, role: 'defuser' } },
     };
     const result = startRound(state);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.round.defusers.A).toBeUndefined(); // exhausted → rests, no wrap
-    expect(result.round.defusers.B).toBe('sock-ana'); // B's natural pick
-    // A resting team's stale 'defuser' (Maya, set in the lobby) is demoted to
-    // expert so its players are not stranded on the bomb surface (Task 6).
-    expect(result.state.players['sock-maya']!.role).toBe('expert');
+    expect(result.round.defusers.B).toBeUndefined(); // B rests
+    expect(result.state.players['sock-ana']!.role).toBe('expert'); // demoted
   });
 
   it.each(['lobby', 'active', 'between-rounds', 'ended'] as const)(
@@ -125,38 +116,18 @@ describe('startRound', () => {
     },
   );
 
-  it('rejects when no team has a populated relayOrder', () => {
-    const state: SessionState = { ...prepState(), teams: {} };
-    const result = startRound(state);
-    expect(result).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+  it('rejects when no active team is selected (activeTeamId undefined)', () => {
+    const state: SessionState = { ...prepState(), activeTeamId: undefined };
+    expect(startRound(state)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
 
-  it('skips a team whose selected relayOrder entry is missing from players (integrity guard)', () => {
+  it('rejects when the active team pick is missing from players (integrity guard)', () => {
     let state = prepState();
     state = {
       ...state,
-      teams: {
-        ...state.teams,
-        B: { ...state.teams.B!, relayOrder: ['sock-ghost'] },
-      },
+      teams: { ...state.teams, A: { ...state.teams.A!, relayOrder: ['sock-ghost'] } },
     };
-    const result = startRound(state);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.round.defusers).toEqual({ A: 'sock-maya' });
-  });
-
-  it('rejects when every populated team resolves to a missing player', () => {
-    let state = prepState();
-    state = {
-      ...state,
-      teams: {
-        A: { ...state.teams.A!, relayOrder: ['sock-ghost-a'] },
-        B: { ...state.teams.B!, relayOrder: ['sock-ghost-b'] },
-      },
-    };
-    const result = startRound(state);
-    expect(result).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+    expect(startRound(state)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
 
   it('does not mutate the input state (deep-frozen input must not throw)', () => {
@@ -164,58 +135,57 @@ describe('startRound', () => {
     const result = startRound(frozen);
     expect(result.ok).toBe(true);
     expect(frozen.status).toBe('preparation');
-    expect(frozen.players['sock-ana']!.role).toBe('expert');
   });
 
-  it('leaves rotation bookkeeping and scores untouched (8.6/8.9 own advancement)', () => {
+  it('leaves pointers, counters, roundNumber, and config UNTOUCHED (resolve owns advancement)', () => {
     const state = prepState();
     const result = startRound(state);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.teams.A!.currentDefuserIndex).toBe(0);
-    expect(result.state.teams.A!.cumulativeTimeMs).toBe(0);
+    expect(result.state.teams.A!.currentDefuserIndex).toBe(0); // advance is at resolve now
+    expect(result.state.teams.A!.equalisationRoundsPlayed).toBe(0);
+    expect(result.state.teams).toBe(state.teams); // no team rebuild
     expect(result.state.roundNumber).toBe(1);
     expect(result.state.config).toBe(state.config);
   });
 });
 
-describe('startRound — odd-team equalisation round (Story 8.9)', () => {
+describe('startRound — odd-team equalisation round (Story 8.9 / 8.11)', () => {
   /**
-   * A preparation-phase session whose natural rotation is EXHAUSTED for both
-   * teams (indices past relayOrder): A=[maya,devon] (len 2), B=[ana] (len 1),
-   * both at index 2. maxLen 2 ⇒ B owes 1 equalisation round, A owes 0.
+   * A preparation session whose active team (B) plays an EQUALISATION round: both
+   * teams exhausted their naturals (A=[maya,devon] index 2; B=[ana] index 1),
+   * maxLen 2 ⇒ B owes 1. `activeTeamId` = B (the snake would pick B for this turn).
    */
   const equalisationPrep = (volunteerForB: string | undefined): SessionState => {
     const state = prepState();
     return {
       ...state,
+      activeTeamId: 'B',
       teams: {
         A: { ...state.teams.A!, currentDefuserIndex: 2 },
-        B: { ...state.teams.B!, currentDefuserIndex: 2, equalisationVolunteerId: volunteerForB },
+        B: { ...state.teams.B!, relayOrder: ['sock-ana'], currentDefuserIndex: 1, equalisationVolunteerId: volunteerForB },
       },
     };
   };
 
-  it('commits the Facilitator volunteer for the owing team; the longer team rests', () => {
+  it('commits the Facilitator volunteer for the active owing team; the longer team rests', () => {
     const result = startRound(equalisationPrep('sock-ana'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Only B plays (its volunteer); A has no owed round → absent from defusers.
     expect(result.round.defusers).toEqual({ B: 'sock-ana' });
     expect(result.state.players['sock-ana']!.role).toBe('defuser');
   });
 
-  it('bumps equalisationRoundsPlayed and clears the consumed volunteer', () => {
+  it('does NOT bump equalisationRoundsPlayed or clear the volunteer (resolveRound owns that)', () => {
     const result = startRound(equalisationPrep('sock-ana'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.teams.B!.equalisationRoundsPlayed).toBe(1);
-    expect(result.state.teams.B!.equalisationVolunteerId).toBeUndefined();
-    // The longer team's bookkeeping is untouched.
-    expect(result.state.teams.A!.equalisationRoundsPlayed).toBe(0);
+    // Under Model B the bump + clear happen at resolve (single advance site).
+    expect(result.state.teams.B!.equalisationRoundsPlayed).toBe(0);
+    expect(result.state.teams.B!.equalisationVolunteerId).toBe('sock-ana');
   });
 
-  it('a resting team is absent from defusers and its stale defuser is demoted (Task 6)', () => {
+  it('the resting longer team is absent from defusers and its stale defuser is demoted', () => {
     // Maya holds 'defuser' from the lobby; Team A rests this equalisation round.
     const result = startRound(equalisationPrep('sock-ana'));
     expect(result.ok).toBe(true);
@@ -241,7 +211,11 @@ describe('startRound — odd-team equalisation round (Story 8.9)', () => {
 
 describe('startRound — retry round (Story 8.8)', () => {
   /** A retry prep: preparation with the retryingTeamId marker set (via retryRound). */
-  const retryPrep = (teamId: 'A' | 'B'): SessionState => ({ ...prepState(), retryingTeamId: teamId });
+  const retryPrep = (teamId: 'A' | 'B'): SessionState => ({
+    ...prepState(),
+    retryingTeamId: teamId,
+    activeTeamId: teamId,
+  });
 
   it('arms ONLY the retried team with its SAME Defuser, retry: true, outcomes: {}', () => {
     const result = startRound(retryPrep('A'));
@@ -275,12 +249,11 @@ describe('startRound — retry round (Story 8.8)', () => {
   });
 
   it('refuses when the retried team is exhausted (failed equalisation round — V1 limitation)', () => {
-    // An exhausted index (the original was an equalisation/volunteer round) yields
-    // no natural same-Defuser pick → NO_POPULATED_TEAM (documented V1 limitation).
     const exhausted: SessionState = {
       ...prepState(),
       retryingTeamId: 'B',
-      teams: { ...prepState().teams, B: { ...prepState().teams.B!, currentDefuserIndex: 2 } },
+      activeTeamId: 'B',
+      teams: { ...prepState().teams, B: { ...prepState().teams.B!, currentDefuserIndex: 5 } },
     };
     expect(startRound(exhausted)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
@@ -294,25 +267,26 @@ describe('startRound — retry round (Story 8.8)', () => {
   });
 });
 
-describe('hasPopulatedTeam', () => {
-  it('is true when a team holds a rostered player', () => {
-    expect(hasPopulatedTeam(prepState())).toBe(true);
+describe('hasPopulatedTeam (precondition for opening prep — checks the NEXT active team)', () => {
+  it('is true for a lobby with a rostered active team', () => {
+    expect(hasPopulatedTeam(lobbyWithTeams())).toBe(true);
   });
 
-  it('is false when no team exists', () => {
-    expect(hasPopulatedTeam({ ...prepState(), teams: {} })).toBe(false);
+  it('is false when no team exists (relay complete / nothing to play)', () => {
+    expect(hasPopulatedTeam({ ...lobbyWithTeams(), teams: {} })).toBe(false);
   });
 
-  it('is false when every relayOrder entry is missing from players (matches startRound)', () => {
+  it('is false when the active team pick is missing from players (matches startRound)', () => {
     const state: SessionState = {
-      ...prepState(),
+      ...lobbyWithTeams(),
       teams: {
-        A: { ...prepState().teams.A!, relayOrder: ['sock-ghost-a'] },
-        B: { ...prepState().teams.B!, relayOrder: ['sock-ghost-b'] },
+        A: { ...lobbyWithTeams().teams.A!, relayOrder: ['sock-ghost-a'] },
+        B: { ...lobbyWithTeams().teams.B!, relayOrder: ['sock-ghost-b'] },
       },
     };
     expect(hasPopulatedTeam(state)).toBe(false);
-    // The precondition mirrors startRound's success condition exactly.
-    expect(startRound(state)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+    // The selected active team (A, round 1) maps to a ghost → startRound refuses too.
+    const prep = openPreparation(state);
+    expect(startRound(prep)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
 });

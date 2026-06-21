@@ -35,7 +35,22 @@ export interface TeamState {
   teamId: TeamId;
   /** Player IDs in join/relay order. */
   relayOrder: string[];
-  /** Index into relayOrder for the current round's defuser. */
+  /**
+   * Index into `relayOrder` for the team's NEXT natural Defuser.
+   *
+   * MODEL B SEMANTICS (Story 8.11): this is the count of NATURAL rounds the team
+   * has already played — equivalently, the index of the next un-played rotation
+   * slot. Starts 0; advances by one (in `resolveRound`) ONLY when THIS team plays
+   * a natural round. A team of `n` players therefore commits `relayOrder[0…n-1]`
+   * across its `n` natural rounds; once the index reaches `n` the team has
+   * EXHAUSTED its natural rotation (`startRound` reads it raw — an out-of-range
+   * index yields no natural pick). `startRound` reads `relayOrder[currentDefuserIndex]`
+   * for the active team; `upcomingDefuserId` mirrors it.
+   *
+   * This REPLACES Story 8.9's "all teams advance together / index === roundNumber-1
+   * / index = last-played slot" meaning: under Model B exactly one team is active
+   * per round, so pointers advance per-team and independently, not in lockstep.
+   */
   currentDefuserIndex: number;
   /** Cumulative defuse time in milliseconds across all completed rounds. */
   cumulativeTimeMs: number;
@@ -116,4 +131,15 @@ export interface SessionState {
    * startRound" precedent.
    */
   retryingTeamId?: TeamId;
+  /**
+   * The single ACTIVE team for the round about to play / playing (Story 8.11,
+   * Model B). Transient per-round intent: `openPreparation` SELECTS it (via the
+   * pure `selectActiveTeam` snake rule) when prep opens, `startRound` CONSUMES it
+   * (arms ONLY this team — its bomb, its timer, its Defuser; the other team rests),
+   * and the client reads it off the `SESSION_STATE` broadcast to route the resting
+   * team to a spectate surface. `undefined` in `lobby`/`between-rounds` before a
+   * team is selected. Mirrors the `retryingTeamId` "explicit intent on SessionState,
+   * consumed by startRound" precedent; a retry sets it to the retrying team.
+   */
+  activeTeamId?: TeamId;
 }

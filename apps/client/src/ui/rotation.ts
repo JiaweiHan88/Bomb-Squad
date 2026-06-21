@@ -6,8 +6,12 @@ import type { TeamState } from '@bomb-squad/shared';
  * surface shows this derivation; ROUND_START commits it. Drift is a bug (story 8.3
  * decision 2).
  *
- * Story 8.9 removed the old non-negative modulo (which wrapped past the last
- * player — the rotation-never-ends bug): the index is read RAW.
+ * The index is read RAW (Story 8.9 removed the wrapping modulo). Under Model B
+ * (Story 8.11) `currentDefuserIndex` is the team's NEXT un-played slot (= natural
+ * rounds played), so `relayOrder[currentDefuserIndex]` is exactly the player about
+ * to defuse — this expression is unchanged from 8.9 and still mirrors
+ * `startRound`'s pick. (Whether the team plays THIS round is the caller's concern:
+ * the prep surface only shows this for the ACTIVE team — Story 8.11.)
  * - A natural rotation slot (`0 <= currentDefuserIndex < relayOrder.length`) →
  *   `relayOrder[currentDefuserIndex]`.
  * - Otherwise the team has exhausted its natural rotation. If the Facilitator has

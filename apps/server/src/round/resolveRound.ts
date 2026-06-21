@@ -25,7 +25,7 @@
  * under strikes the accelerated countdown is already baked into `remainingMs`, so
  * per-round time never over-counts. Story 8.10 sums this single definition.
  */
-import type { RoundOutcome, RoundState, SessionState, TeamId, TimerState } from '@bomb-squad/shared';
+import type { RoundOutcome, RoundState, SessionState, TeamId, TeamState, TimerState } from '@bomb-squad/shared';
 import type { RedisStore } from '../state/redis.js';
 import { roundKey, sessionKey, timerKey } from '../state/keys.js';
 import { sessionRoom, teamRoom, type SessionIOServer, type SessionLog } from '../handlers/sessionHandlers.js';
@@ -168,7 +168,14 @@ async function resolveRoundCeremony(
   // the BETTER (lower) of the two attempts in place, shifting cumulativeTimeMs by
   // the (non-positive) delta. roundTimesMs.length stays stable and the invariant
   // holds. A first attempt (retry === false) appends exactly as before.
-  const idx = roundNumber - 1; // roundTimesMs[i] is round i+1's time
+  //
+  // MODEL B (Story 8.11): a team plays only a SUBSET of rounds, so `roundTimesMs`
+  // is densely packed per the team's OWN turns — `roundNumber - 1` no longer
+  // indexes it. A retry is always of the team's just-resolved (most recent) turn,
+  // so the slot to replace is the LAST appended entry. (`length - 1` equals
+  // `roundNumber - 1` in the old all-teams-play-every-round model, so this is
+  // correct in both.)
+  const idx = team.roundTimesMs.length - 1;
   let roundTimesMs: number[];
   let cumulativeTimeMs: number;
   if (round.retry && idx >= 0 && idx < team.roundTimesMs.length) {
@@ -189,12 +196,30 @@ async function resolveRoundCeremony(
     cumulativeTimeMs = team.cumulativeTimeMs + elapsedMs;
   }
 
+  // POINTER ADVANCE (Story 8.11, Task 2 — the single advance site for Model B):
+  // the team that just played a NATURAL round advances `currentDefuserIndex` by
+  // one (the next un-played slot); a team that just played an EQUALISATION round
+  // (exhausted naturals, so no natural slot) bumps `equalisationRoundsPlayed` and
+  // clears the consumed `equalisationVolunteerId`. A RETRY advances NOTHING (it is
+  // the same round). `openPreparation` no longer advances anything, so this is the
+  // only place a pointer moves. Immutable spread; the cumulative time/history
+  // update is folded in.
+  let teamUpdate: TeamState = { ...team, cumulativeTimeMs, roundTimesMs };
+  if (!round.retry) {
+    if (team.currentDefuserIndex < team.relayOrder.length) {
+      teamUpdate = { ...teamUpdate, currentDefuserIndex: team.currentDefuserIndex + 1 };
+    } else {
+      const { equalisationVolunteerId: _consumed, ...rest } = teamUpdate;
+      teamUpdate = { ...rest, equalisationRoundsPlayed: team.equalisationRoundsPlayed + 1 };
+    }
+  }
+
   const updatedSession: SessionState = {
     ...session,
     status: enteringBetweenRounds ? 'between-rounds' : session.status,
     teams: {
       ...session.teams,
-      [teamId]: { ...team, cumulativeTimeMs, roundTimesMs },
+      [teamId]: teamUpdate,
     },
   };
   await deps.redis.setJSON(sessionKey(sessionId), updatedSession);

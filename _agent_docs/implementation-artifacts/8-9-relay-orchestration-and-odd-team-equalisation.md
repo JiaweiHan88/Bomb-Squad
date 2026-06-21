@@ -4,7 +4,9 @@ baseline_commit: b536b01
 
 # Story 8.9: Relay Orchestration & Odd-Team Equalisation
 
-Status: review
+Status: done
+
+<!-- 2026-06-21: Task 8 re-verification COMPLETE. Jay interactively verified the relay/equalisation behaviour during the Story 8.11 (Sequential Round Orchestration) Docker run — correct play order for even AND uneven teams, the uneven case adds a facilitator-chosen-Defuser equalisation round, identical layout per pair, correct next-round status. The relay spine 8.9 built (reshaped to Model B's per-team pointer by 8.11) is confirmed. See 8-11 Task 10 + bugs-epic8-2026-06-21.md. -->
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

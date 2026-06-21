@@ -24,6 +24,7 @@ import {
 import { registerModuleHandlers } from '@bomb-squad/server/src/handlers/moduleHandlers.js';
 import { createTimerScheduler } from '@bomb-squad/server/src/timer/index.js';
 import type { RedisStore, UpdateDecision } from '@bomb-squad/server/src/state/redis.js';
+import { isRelayComplete } from '@bomb-squad/shared';
 import { buildAutonomousSwarm, playRound, teardown } from './swarm.js';
 
 const noopLog: SessionLog = { info: () => {}, error: () => {} };
@@ -96,18 +97,21 @@ async function run(): Promise<void> {
   console.log(`In-process server at ${server.url}\n`);
 
   try {
-    // 1. DEFUSE — wires + passwords across two teams.
+    // 1. DEFUSE — wires + passwords across two teams (Model B: one team plays per
+    //    round). Play the FULL snake relay (A,B,B,A) to completion; every team's
+    //    bots observe their own team's DEFUSE across the relay.
     {
       const swarm = await buildAutonomousSwarm(
         { url: server.url, teams: 2, perTeam: 2, outcome: 'defuse', pacingMs: 40, log },
         { modulePool: ['wires', 'passwords'], moduleCount: 3, timerMs: 300_000 },
       );
-      await playRound(swarm);
-      // Every bot is in its team room, so all of them observe the team's
-      // resolution; assert no team exploded (all DEFUSED) and the round closed.
+      let guard = 0;
+      while (!isRelayComplete(swarm.facilitator!.session!) && guard++ < 12) {
+        await playRound(swarm);
+      }
       const resolutions = swarm.players.map((b) => b.resolved);
-      check('defuse: both teams reached between-rounds', swarm.facilitator!.session?.status === 'between-rounds');
-      check('defuse: every bot observed DEFUSED (no team exploded)', resolutions.every((r) => r === 'defused'));
+      check('defuse: the relay reached completion (every player defused once)', isRelayComplete(swarm.facilitator!.session!));
+      check('defuse: every bot observed DEFUSED for its team (no team exploded)', resolutions.every((r) => r === 'defused'));
       teardown(swarm);
     }
 

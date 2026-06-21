@@ -1,4 +1,5 @@
-import type { SessionState, TeamId, TeamState } from '@bomb-squad/shared';
+import type { SessionState } from '@bomb-squad/shared';
+import { selectActiveTeam } from './relayComplete.js';
 
 /**
  * Pure transition: lobby | between-rounds → preparation (Story 8.3, FR8).
@@ -6,22 +7,25 @@ import type { SessionState, TeamId, TeamState } from '@bomb-squad/shared';
  *
  * `roundNumber` increments HERE, not at ROUND_START: prep belongs to a
  * specific round (Story 8.6: "the next round's Preparation phase begins for
- * the next Defuser"), and Story 8.2's seed chain
- * (`templateSeed = hash(sessionId + ":" + roundNumber)`) needs the number
- * settled before generation runs inside ROUND_START.
+ * the next Defuser"), and Story 8.2's seed chain needs the number settled
+ * before generation runs inside ROUND_START.
  *
- * ROTATION ADVANCE (Story 8.6, AC-3): when opening prep FROM 'between-rounds'
- * (i.e. for round 2+), every team's `currentDefuserIndex` advances by one so the
- * next round's Defuser is the next player in `relayOrder`. `startRound` only
- * READS the index (it normalizes with a non-negative modulo); this is the write
- * the `startRound.ts` "pointer ADVANCEMENT belongs to 8.6/8.9" seam pointed at.
- * Opening prep FROM 'lobby' (round 1) leaves indices at 0 — round 1 uses the
- * first player in rotation. Story 8.9 (relay orchestration / odd-team
- * equalisation) layers "every player defuses once" on top of this simple +1.
+ * ACTIVE-TEAM SELECTION (Story 8.11, Model B — REPLACES the 8.6/8.9 uniform
+ * advance): exactly ONE team plays each round. We pick it with the pure shared
+ * `selectActiveTeam` (the snake rule) BEFORE the `+1` so it reads the
+ * just-finished `roundNumber` and computes the round about to open
+ * (`roundNumber + 1`); the result is stashed in `activeTeamId` for `startRound`
+ * to consume and the client to route on. The per-team rotation pointers are NO
+ * LONGER advanced here — under Model B a pointer advances ONLY when its team
+ * actually plays, which `resolveRound` now does (decision recorded in Story 8.11
+ * Task 2). This removes the old "advance EVERY team's `currentDefuserIndex` by
+ * +1" write entirely, so `cancelPreparation` has nothing to reverse.
  *
- * Prep has no countdown — GDD A9 says facilitator-controlled (default
- * 2–5 min is display guidance); the phase ends when the facilitator sends
- * ROUND_START.
+ * The retry path (`retryRound`, not this function) sets `activeTeamId =
+ * retryingTeamId` itself and leaves `roundNumber`/pointers untouched.
+ *
+ * Prep has no countdown — GDD A9 says facilitator-controlled; the phase ends
+ * when the facilitator sends ROUND_START.
  *
  * Guard (defensive — the handler errors first, but pure functions never
  * trust): any other status returns the state unchanged (same reference), so
@@ -30,17 +34,14 @@ import type { SessionState, TeamId, TeamState } from '@bomb-squad/shared';
 export function openPreparation(state: SessionState): SessionState {
   if (state.status !== 'lobby' && state.status !== 'between-rounds') return state;
 
-  // Advance the rotation pointer only when starting a NEW round after a previous
-  // one (between-rounds → preparation). Round 1 (lobby → preparation) keeps 0.
-  const advanceRotation = state.status === 'between-rounds';
-  const teams = advanceRotation
-    ? (Object.fromEntries(
-        Object.entries(state.teams).map(([teamId, team]) => [
-          teamId,
-          { ...team, currentDefuserIndex: team.currentDefuserIndex + 1 },
-        ]),
-      ) as Partial<Record<TeamId, TeamState>>)
-    : state.teams;
+  // Select the single active team for the round about to open (snake rule). Read
+  // on the pre-increment state so `selectActiveTeam` computes for `roundNumber+1`.
+  const activeTeamId = selectActiveTeam(state);
 
-  return { ...state, status: 'preparation', roundNumber: state.roundNumber + 1, teams };
+  return {
+    ...state,
+    status: 'preparation',
+    roundNumber: state.roundNumber + 1,
+    activeTeamId,
+  };
 }

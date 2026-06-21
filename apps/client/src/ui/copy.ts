@@ -126,6 +126,14 @@ export const EQUALISATION_NEEDS_VOLUNTEER = 'Choose a volunteer Defuser to start
 export const RELAY_COMPLETE_NOTICE = 'The relay is complete — every player has defused once.';
 export const RESTING_THIS_ROUND = 'Resting this round';
 
+// Sequential round orchestration (Story 8.11, Model B) — one team plays per round
+// while the other rests/spectates. The between-rounds scoreboard surfaces who is
+// up next so the Facilitator's advance reads as a hand-off; the resting team's
+// in-round surface tells them to watch rather than stranding them on a dead bomb.
+/** `team` is the already-formatted label (e.g. "Team A"). */
+export const UP_NEXT = (team: string): string => `Up next: ${team}`;
+export const RESTING_SPECTATE = 'Resting this round — watch the other team defuse.';
+
 // Retry a failed round (Story 8.8, FR14) — facilitator-only affordance shown on
 // the between-rounds scoreboard when a team failed the just-resolved round. The
 // retry re-runs the IDENTICAL bomb (same seed) and keeps the better of the two

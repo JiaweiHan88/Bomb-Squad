@@ -140,19 +140,23 @@ describe('Scoreboard — retry a failed round (Story 8.8)', () => {
 });
 
 describe('Scoreboard — relay completion & odd-team equalisation (Story 8.9)', () => {
-  /** A 1v1 between-rounds at index 0 → both teams exhausted, nothing owed → relay complete. */
+  /**
+   * A 1v1 after both teams have played (Model B: index 1 = one natural round
+   * played) → both exhausted, nothing owed → relay complete. (Under Model B the
+   * index is the count of natural rounds played, not the last-played slot.)
+   */
   function seedRelayComplete(viewer: 'fac' | 'p1') {
     const session = makeSession({
       status: 'between-rounds',
-      roundNumber: 1,
+      roundNumber: 2,
       players: {
         fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
         p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
         p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'defuser', teamId: 'B' }),
       },
       teams: {
-        A: makeTeam('A', ['p1'], { currentDefuserIndex: 0, cumulativeTimeMs: 40_000, roundTimesMs: [40_000] }),
-        B: makeTeam('B', ['p2'], { currentDefuserIndex: 0, cumulativeTimeMs: 70_000, roundTimesMs: [70_000] }),
+        A: makeTeam('A', ['p1'], { currentDefuserIndex: 1, cumulativeTimeMs: 40_000, roundTimesMs: [40_000] }),
+        B: makeTeam('B', ['p2'], { currentDefuserIndex: 1, cumulativeTimeMs: 70_000, roundTimesMs: [70_000] }),
       },
     });
     useGameStore.setState({ session, myPlayerId: viewer, scoreboard: null });
@@ -185,6 +189,26 @@ describe('Scoreboard — relay completion & odd-team equalisation (Story 8.9)', 
     render(<Scoreboard />);
     expect(screen.getByTestId('relay-complete')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: START_NEXT_ROUND })).not.toBeInTheDocument();
+  });
+
+  it('between rounds → surfaces "Up next" with the snake-selected next active team (Story 8.11)', () => {
+    // 2v2 after round 1 (A played, index 1; B at 0): the snake's next turn is B.
+    const session = makeSession({
+      status: 'between-rounds',
+      roundNumber: 1,
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'expert', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'expert', teamId: 'B' }),
+      },
+      teams: {
+        A: makeTeam('A', ['p1', 'pa2'], { currentDefuserIndex: 1, roundTimesMs: [40_000], cumulativeTimeMs: 40_000 }),
+        B: makeTeam('B', ['p2', 'pb2'], { currentDefuserIndex: 0 }),
+      },
+    });
+    useGameStore.setState({ session, myPlayerId: 'fac', scoreboard: null });
+    render(<Scoreboard />);
+    expect(screen.getByTestId('up-next')).toHaveTextContent('Team B');
   });
 
   it('surfaces a RELAY_COMPLETE server refusal as an alert', () => {

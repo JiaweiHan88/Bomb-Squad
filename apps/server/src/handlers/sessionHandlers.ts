@@ -32,7 +32,7 @@ import { openPreparation } from '../session/openPreparation.js';
 import { cancelPreparation } from '../session/cancelPreparation.js';
 import { startRound, hasPopulatedTeam } from '../session/startRound.js';
 import { retryRound } from '../session/retryRound.js';
-import { isRelayComplete } from '../session/relayComplete.js';
+import { isRelayComplete, pairIndexFor } from '../session/relayComplete.js';
 import { undersizedTeams } from '@bomb-squad/shared';
 import { designateEqualisationVolunteer } from '../session/equalisationVolunteer.js';
 import { pauseSession, resumeSession, canResume, clearDisconnectedPlayer } from '../session/pauseSession.js';
@@ -452,12 +452,22 @@ async function restoreReattachedSocket(
         // deferred-work.md). Resolve identity via the durable playerId, never socket.id.
         const teamId = fresh.players[playerId]?.teamId;
         const midRound = fresh.status === 'active' || fresh.pausedAt !== null;
+        // ACTIVE-TEAM GUARD (Story 8.11, Model B): only the ACTIVE team has a live
+        // bomb/timer this round. A reconnecting RESTING player must NOT be re-sent a
+        // bomb — its team's bomb key persists from a PRIOR round it played, so a
+        // raw `bomb !== null` would restore a STALE bomb. Gate on `activeTeamId`;
+        // the resting player just gets SESSION_STATE and the client routes it to
+        // spectate. (The resolved team's timer key is already gone — resolveRound
+        // deletes it — but the bomb key lingers, so this guard is load-bearing.)
+        const isActiveTeam = teamId !== undefined && teamId === fresh.activeTeamId;
         if (teamId !== undefined && midRound) {
           await socket.join(teamRoom(sessionId, teamId));
-          const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
-          if (bomb !== null) socket.emit('BOMB_INIT', bomb);
-          const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
-          if (timer !== null) socket.emit('TIMER_UPDATE', timer);
+          if (isActiveTeam) {
+            const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
+            if (bomb !== null) socket.emit('BOMB_INIT', bomb);
+            const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+            if (timer !== null) socket.emit('TIMER_UPDATE', timer);
+          }
           // Clear this player from the disconnect-pause dropped list (they're back).
           // The session STAYS paused until the facilitator resumes (AC-2 gate).
           if (fresh.disconnectedPlayerIds.includes(playerId)) {
@@ -1239,9 +1249,19 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        // The populated teams (those with a committed defuser) — the single set
+        // The active team (Story 8.11: exactly one in Model B) — the single set
         // the bomb generation and timer mint below both iterate.
         const teamIds = Object.keys(result.round.defusers) as TeamId[];
+
+        // SEED BY PAIR, NOT TURN (Story 8.11, AC-2 — identical layout per pair).
+        // Each `roundNumber` is one team's turn; keying the layout by the raw turn
+        // would give the two teams DIFFERENT layouts and break FR19. The pair's two
+        // matched turns share `pairIndex = ceil(roundNumber/2)`, so feeding it as
+        // the round identifier reproduces an IDENTICAL layout for the pair while
+        // `deriveTeamSeed` still diverges per team (independent values). A retry
+        // reuses the same `roundNumber`, so `pairIndexFor` returns the same value →
+        // the identical bomb regenerates (Story 8.8 reused-seed guarantee intact).
+        const pairIndex = pairIndexFor(result.round.roundNumber);
 
         // Story 4.7 (closes the 8.2 seam): generate + persist every team's bomb
         // FIRST — before the session/round persist and before ANY broadcast.
@@ -1256,7 +1276,7 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
         const bombs = await initializeRoundBombs(
           deps.redis,
           sessionId,
-          result.round.roundNumber,
+          pairIndex,
           result.state.config,
           teamIds,
         );

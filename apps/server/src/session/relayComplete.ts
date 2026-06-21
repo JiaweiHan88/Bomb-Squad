@@ -14,4 +14,9 @@ export {
   equalisationRoundsOwed,
   totalEqualisationOwed,
   isRelayComplete,
+  // Story 8.11 (Model B): the single-active-team snake selector + the layout-pair
+  // helper. Shared so client + server can't drift; re-exported here so server
+  // import sites keep their `../relayComplete.js` path.
+  selectActiveTeam,
+  pairIndexFor,
 } from '@bomb-squad/shared';

@@ -82,12 +82,20 @@ export default function Preparation() {
   const self = selfId !== null ? session.players[selfId] : undefined;
   const isFacilitator = self?.role === 'facilitator';
 
+  // ACTIVE-TEAM-FIRST (Story 8.11, Model B): exactly one team plays this round.
+  // The active team shows its upcoming Defuser (mirrors startRound's pick via
+  // `upcomingDefuserId`); the other team is RESTING this round. A non-active team
+  // never has an "upcoming Defuser" here even though its rotation pointer holds a
+  // next slot — it is not playing.
   const teams = Object.values(session.teams);
   const upcoming = teams.map((team) => ({
     teamId: team.teamId,
-    playerId: upcomingDefuserId(team),
+    playerId: team.teamId === session.activeTeamId ? upcomingDefuserId(team) : null,
   }));
-  const isUpcomingDefuser = upcoming.some((u) => u.playerId === selfId);
+  // Only the ACTIVE team's upcoming Defuser gets the PrepBombView orientation.
+  const isUpcomingDefuser = upcoming.some(
+    (u) => u.teamId === session.activeTeamId && u.playerId === selfId,
+  );
 
   const startRound = () => {
     setStartError(null);

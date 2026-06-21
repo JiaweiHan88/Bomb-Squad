@@ -26,5 +26,8 @@ import type { SessionState, TeamId } from '@bomb-squad/shared';
  */
 export function retryRound(state: SessionState, teamId: TeamId): SessionState {
   if (state.status !== 'between-rounds') return state;
-  return { ...state, status: 'preparation', retryingTeamId: teamId };
+  // Set activeTeamId too (Story 8.11): the retrying team IS the active team this
+  // round, so the client routes the other team to spectate. `startRound`'s retry
+  // branch arms only `retryingTeamId`; `cancelPreparation` clears both markers.
+  return { ...state, status: 'preparation', retryingTeamId: teamId, activeTeamId: teamId };
 }
