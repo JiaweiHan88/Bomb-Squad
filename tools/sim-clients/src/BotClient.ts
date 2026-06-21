@@ -360,7 +360,9 @@ export class BotClient {
           break;
         }
         await this.emitStrike(teamId, target.index, target.plan);
-        await this.waitUntil(() => this.strikes > before || this.resolved !== null, 5000).catch(() => {});
+        // STRIKE lands within ~one round-trip; a full timeout here only happens
+        // when a module can't be struck again, so keep it short to move on fast.
+        await this.waitUntil(() => this.strikes > before || this.resolved !== null, 1500).catch(() => {});
         if (this.strikes === before) exhausted.add(target.index); // that module won't strike again
       }
     } catch (err) {

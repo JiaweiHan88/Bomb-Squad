@@ -39,6 +39,11 @@ the panel). Set teams / per-team / sizes and a default auto-mode.
 | +1 strike | emit a single wrong action (one strike) |
 | auto-mode ▾ | per-bot `manual` / `defuse` / `strike` / `timeout` on each `BOMB_INIT` |
 
+**Bomb details** (shown for the active round): serial, batteries, indicators,
+ports, live strikes, solved count, the seed-derivation line, and a per-module
+table (id · status · a compact data summary — wire colours/cuts, button
+colour+label, password letters).
+
 **Bulk + Facilitator** (Create mode): Open Prep · Cancel Prep · Start Round ·
 Pause · Resume, plus All Ready, Ready (resume-gate), Solve all, Detonate active,
 Reconnect all, Teardown. A live event log streams every bot's server events.

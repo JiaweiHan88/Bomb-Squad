@@ -18,7 +18,14 @@ import {
 } from '../src/swarm.js';
 import type { BotClient, Outcome } from '../src/BotClient.js';
 import { timerRemainingMs, formatTimerDisplay } from '../src/timerDigits.js';
-import type { SessionState } from '@bomb-squad/shared';
+import { WIRES_MODULE_ID, BUTTON_MODULE_ID, PASSWORDS_MODULE_ID } from '@bomb-squad/shared';
+import type {
+  SessionState,
+  ModuleState,
+  WiresState,
+  ButtonState,
+  PasswordsState,
+} from '@bomb-squad/shared';
 
 const app = document.getElementById('app') as HTMLElement;
 const connSummary = document.getElementById('conn-summary') as HTMLElement;
@@ -99,6 +106,9 @@ async function spawn(): Promise<void> {
     perTeam: form.perTeam,
     ...(sizes && sizes.length ? { sizes } : {}),
     outcome: form.outcome,
+    // Snappier than the CLI's 150ms default — the panel is interactive, not a
+    // "watchable" demo, so tighten the inter-emit pacing for faster solve/strike.
+    pacingMs: 70,
     log: (m) => pushLog(m),
     onUpdate: () => scheduleRender(),
   };
@@ -267,6 +277,7 @@ function renderDashboard(s: Swarm): string {
   const fac = s.facilitator;
   return `
   ${renderBanner(session)}
+  ${renderBomb(s, session)}
   <div class="card">
     <h2>Controls</h2>
     <div class="row">
@@ -312,6 +323,67 @@ function renderBanner(session: SessionState | null): string {
       ${paused}
     </div>
   </div>`;
+}
+
+function renderBomb(s: Swarm, session: SessionState | null): string {
+  // The active Defuser mirrors its team's (private) bomb. Fall back to any bot on
+  // the active team that holds a bomb, so the card still shows between drives.
+  const holder =
+    s.all.find((b) => b.isCurrentDefuser && b.bomb) ??
+    s.all.find((b) => b.bomb != null && session?.activeTeamId != null && b.team === session.activeTeamId);
+  const bomb = holder?.bomb;
+  if (!holder || !bomb) return '';
+  const ctx = bomb.context;
+  const solvedCount = bomb.modules.filter((m) => m.status === 'solved').length;
+  const indicators = ctx.indicators.length
+    ? ctx.indicators
+        .map((i) => `<span class="pill ${i.lit ? 'warn' : 'dim'}">${i.label}${i.lit ? ' •lit' : ''}</span>`)
+        .join(' ')
+    : '<span class="dim">none</span>';
+  const ports = ctx.ports.length
+    ? ctx.ports.map((p) => `<span class="pill dim">${p}</span>`).join(' ')
+    : '<span class="dim">none</span>';
+  const rows = bomb.modules
+    .map((m, i) => {
+      const st = m.status === 'solved' ? 'ok' : m.status === 'struck' ? 'bad' : 'warn';
+      return `<tr><td>${i}</td><td><b>${escapeHtml(m.moduleId)}</b></td><td><span class="pill ${st}">${m.status}</span></td><td class="dim">${escapeHtml(moduleDetail(m))}</td></tr>`;
+    })
+    .join('');
+  return `
+  <div class="card">
+    <h2>Bomb — team ${holder.team ?? '?'} · Defuser ${escapeHtml(holder.displayName)}</h2>
+    <div class="banner">
+      <span><span class="k">serial</span> <b>${escapeHtml(ctx.serialNumber)}</b></span>
+      <span><span class="k">batteries</span> <b>${ctx.batteryCount}</b></span>
+      <span><span class="k">strikes</span> <b>${holder.strikes}/3</b></span>
+      <span><span class="k">solved</span> <b>${solvedCount}/${bomb.modules.length}</b></span>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="k">indicators</span> ${indicators}</div>
+    <div class="row"><span class="k">ports</span> ${ports}</div>
+    <div class="row"><span class="k">seed</span> <span class="dim">deterministic from session ${escapeHtml(session?.joinCode ?? '?')} · round ${session?.roundNumber ?? '?'} · team ${holder.team ?? '?'} (serial ${escapeHtml(ctx.serialNumber)})</span></div>
+    <table style="margin-top:10px">
+      <thead><tr><th>#</th><th>Module</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+/** Compact per-module summary for the bomb card (best-effort, known modules only). */
+function moduleDetail(m: ModuleState<unknown>): string {
+  if (m.moduleId === WIRES_MODULE_ID) {
+    const d = m.data as WiresState;
+    // cut wires shown struck-through-ish with ~…~
+    return d.wires.map((w) => (w.cut ? `~${w.color}~` : w.color)).join(' ');
+  }
+  if (m.moduleId === BUTTON_MODULE_ID) {
+    const d = m.data as ButtonState;
+    return `${d.color} button "${d.label}"`;
+  }
+  if (m.moduleId === PASSWORDS_MODULE_ID) {
+    const d = m.data as PasswordsState;
+    return `showing ${d.positions.map((p, i) => d.columns[i]?.[p] ?? '?').join('')}`;
+  }
+  return '';
 }
 
 function renderBotTable(s: Swarm): string {
