@@ -129,8 +129,11 @@ async function resolveRoundCeremony(
 
   // Displayed elapsed (Story 8.5 AC-5): the actual time the bomb was live, bounded
   // to [0, timerMs] (remainingMs clamps at 0). This is what the BOMB_DEFUSED/
-  // BOMB_EXPLODED announcement carries — the honest moment the round ended.
-  const displayedElapsedMs = Math.max(0, session.config.timerMs - remainingMs(timer, now));
+  // BOMB_EXPLODED announcement carries — the honest moment the round ended. Rounded
+  // to integer ms: `remainingMs` carries sub-ms timer drift, and the session-end
+  // archive stores these in INTEGER columns (Story 8.10) — fractional ms is noise
+  // (the LCD formats whole units) and would reject the Postgres write.
+  const displayedElapsedMs = Math.round(Math.max(0, session.config.timerMs - remainingMs(timer, now)));
 
   // SCORED elapsed (Story 8.10 AC-1, Jay's decision): a FAILED round (3rd-strike
   // `exploded` / `time-expired`) contributes a FULL-TIMER PENALTY — the full

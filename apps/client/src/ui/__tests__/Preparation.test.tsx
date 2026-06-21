@@ -152,4 +152,36 @@ describe('Preparation', () => {
     const upcoming = screen.getByTestId('upcoming-defusers');
     expect(within(upcoming).getByText(RESTING_THIS_ROUND)).toBeInTheDocument();
   });
+
+  it('REGRESSION (Jay 2026-06-21): a retry shows the FAILED player as the active Defuser, not "Resting" — the other team rests', () => {
+    // Model B: Maya (index 0) failed, so Team A's pointer advanced to 1 (exhausted
+    // its single-slot rotation). On a retry `upcomingDefuserId` would return null →
+    // the ACTIVE team also rendered "Resting", so BOTH teams read as resting. The
+    // retry must show `retryDefuserId` (Maya) for the active team instead.
+    const session = makeSession({
+      status: 'preparation',
+      roundNumber: 1,
+      activeTeamId: 'A',
+      retryingTeamId: 'A',
+      retryDefuserId: 'p1',
+      players: {
+        fac: makePlayer({ playerId: 'fac', displayName: 'Faci', role: 'facilitator' }),
+        p1: makePlayer({ playerId: 'p1', displayName: 'Maya', role: 'defuser', teamId: 'A' }),
+        p2: makePlayer({ playerId: 'p2', displayName: 'Devon', role: 'expert', teamId: 'B' }),
+      },
+      teams: {
+        // A's pointer already advanced past Maya (index 1 = exhausted single slot).
+        A: makeTeam('A', ['p1'], { currentDefuserIndex: 1 }),
+        B: makeTeam('B', ['p2'], { currentDefuserIndex: 0 }),
+      },
+    });
+    useGameStore.setState({ session, myPlayerId: 'fac' });
+    render(<Preparation />);
+
+    const upcoming = screen.getByTestId('upcoming-defusers');
+    // The active (retrying) team shows the FAILED player Maya — NOT resting.
+    expect(within(upcoming).getByText('Maya')).toBeInTheDocument();
+    // Exactly ONE team rests (Team B), not both.
+    expect(within(upcoming).getAllByText(RESTING_THIS_ROUND)).toHaveLength(1);
+  });
 });

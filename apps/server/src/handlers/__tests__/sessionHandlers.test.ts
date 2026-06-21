@@ -2912,7 +2912,12 @@ describe('Retry a failed round (Story 8.8)', () => {
     await bc;
     bc = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
     facilitator.emit('ROUND_START');
-    await bc;
+    const active = await bc;
+
+    // The retrying team is the ACTIVE team — so the client routes ONLY Team B to
+    // the resting surface (not both teams). activeTeamId must survive the retry
+    // ROUND_START, else every team reads as resting.
+    expect(active.activeTeamId).toBe('A');
 
     // Bit-for-bit identical bomb (same roundNumber → same seeds) — AC-1.
     const bombARetry = JSON.parse(store.data.get(bombKey(sessionId, 'A'))!) as BombState;
@@ -3287,6 +3292,30 @@ describe('SESSION_END handler (Story 8.10)', () => {
     ]);
     // Redis reflects the ended status.
     expect((JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState).status).toBe('ended');
+  });
+
+  it('integer-coerces fractional ms in the archive record (the INTEGER columns reject floats)', async () => {
+    const ack = await createSession(facilitator, { config: { timerMs: 300_000 } });
+    const live = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    // A session that accumulated sub-ms drift before the resolveRound rounding fix.
+    await store.setJSON(sessionKey(ack.sessionId), {
+      ...live,
+      status: 'between-rounds',
+      roundNumber: 2,
+      teams: {
+        A: { teamId: 'A', relayOrder: ['a0', 'a1'], currentDefuserIndex: 2, cumulativeTimeMs: 52_543.5, roundTimesMs: [40_000.25, 12_543.25], roundOutcomes: ['defused', 'defused'], equalisationRoundsPlayed: 0 },
+        B: { teamId: 'B', relayOrder: ['b0', 'b1'], currentDefuserIndex: 2, cumulativeTimeMs: 120_000, roundTimesMs: [60_000, 60_000], roundOutcomes: ['defused', 'defused'], equalisationRoundsPlayed: 0 },
+      },
+    });
+
+    const stateP = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    facilitator.emit('SESSION_END');
+    expect((await stateP).status).toBe('ended');
+
+    expect(archive.archived).toHaveLength(1);
+    const teamA = archive.archived[0]!.teams.find((t) => t.teamId === 'A')!;
+    expect(Number.isInteger(teamA.cumulativeTimeMs)).toBe(true);
+    expect(teamA.rounds.every((r) => Number.isInteger(r.elapsedMs))).toBe(true);
   });
 
   it('a non-facilitator SESSION_END is refused NOT_FACILITATOR and writes nothing', async () => {

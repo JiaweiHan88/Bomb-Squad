@@ -180,6 +180,16 @@ describe('resolveRound — failures (AC-2)', () => {
     // The announcement keeps the HONEST displayed elapsed (the real strike instant).
     expect(h.emitted[0]).toMatchObject({ event: 'BOMB_EXPLODED', payload: { teamId: 'A', elapsedMs: 30_000 } });
   });
+
+  it('records WHOLE-millisecond elapsed (Story 8.10 — the archive columns are INTEGER)', async () => {
+    // A resolution at a fractional instant (sub-ms timer drift is real in prod).
+    const h = await makeHarness({ timer: startSegment(TIMER_MS, 0) });
+    await resolveRound(h.deps, SID, 'A', 'defused', 30_000.5);
+
+    const team = (await loadSession(h))!.teams.A!;
+    expect(Number.isInteger(team.roundTimesMs[0])).toBe(true);
+    expect(Number.isInteger(team.cumulativeTimeMs)).toBe(true);
+  });
 });
 
 describe('resolveRound — per-team outcomes + retry better-of-two (Story 8.8)', () => {

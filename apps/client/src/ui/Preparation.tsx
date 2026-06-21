@@ -87,11 +87,18 @@ export default function Preparation() {
   // `upcomingDefuserId`); the other team is RESTING this round. A non-active team
   // never has an "upcoming Defuser" here even though its rotation pointer holds a
   // next slot — it is not playing.
+  // RETRY (Story 8.8): a retry re-arms the EXACT player who failed (`retryDefuserId`),
+  // NOT the rotation pick — under Model B (8.11) the pointer has advanced past that
+  // player, so `upcomingDefuserId` would show the next player (or null → "resting",
+  // making BOTH teams read as resting). When a retry is pending, the active team's
+  // upcoming Defuser is `retryDefuserId`.
+  const retryPending = session.retryingTeamId !== undefined;
   const teams = Object.values(session.teams);
-  const upcoming = teams.map((team) => ({
-    teamId: team.teamId,
-    playerId: team.teamId === session.activeTeamId ? upcomingDefuserId(team) : null,
-  }));
+  const upcoming = teams.map((team) => {
+    if (team.teamId !== session.activeTeamId) return { teamId: team.teamId, playerId: null };
+    const playerId = retryPending ? (session.retryDefuserId ?? null) : upcomingDefuserId(team);
+    return { teamId: team.teamId, playerId };
+  });
   // Only the ACTIVE team's upcoming Defuser gets the PrepBombView orientation.
   const isUpcomingDefuser = upcoming.some(
     (u) => u.teamId === session.activeTeamId && u.playerId === selfId,

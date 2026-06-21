@@ -1152,12 +1152,15 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           roundCount: state.roundNumber,
           endedAt: deps.timer.now(),
           ...(finalScoreboard.winnerTeamId ? { winnerTeamId: finalScoreboard.winnerTeamId } : {}),
+          // Coerce to integer ms at the DB boundary (the archive columns are
+          // INTEGER). resolveRound now records whole ms, but a session that
+          // accumulated fractional ms before this fix must still archive cleanly.
           teams: (Object.values(state.teams) as TeamState[]).map((team) => ({
             teamId: team.teamId,
-            cumulativeTimeMs: team.cumulativeTimeMs,
+            cumulativeTimeMs: Math.round(team.cumulativeTimeMs),
             rounds: team.roundTimesMs.map((elapsedMs, i) => ({
               roundIndex: i,
-              elapsedMs,
+              elapsedMs: Math.round(elapsedMs),
               outcome: team.roundOutcomes[i] ?? 'defused',
             })),
           })),
