@@ -82,13 +82,13 @@ beforeEach(() => {
     bomb: { strikes: 0 } as never,
     connection: 'connected',
   });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   useGameStore.setState({ session: null, bomb: null, timer: null, connection: 'disconnected' });
-  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [] });
+  useVoiceStore.setState({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false });
 });
 
 // ── The load-bearing independence test (AC #3) ───────────────────────────────
@@ -184,6 +184,110 @@ describe('voiceStore status state machine', () => {
     // disconnect() runs async off the event; flush the microtask queue.
     await Promise.resolve();
     expect(useVoiceStore.getState().status).toBe('unavailable');
+  });
+
+  // LiveKit fires Reconnecting (its own resume window) ~30-60s BEFORE Disconnected
+  // when the SFU drops; surface the banner immediately rather than show a stale
+  // "connected". Reconnected (self-heal) restores it.
+  it('a Reconnecting RoomEvent → unavailable immediately (no stale connected)', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    expect(useVoiceStore.getState().status).toBe('connected');
+    room.emit(RoomEvent.Reconnecting, undefined);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+  });
+
+  it('a Reconnected RoomEvent → restores connected (LiveKit self-healed)', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+    room.emit(RoomEvent.Reconnected, undefined);
+    const s = useVoiceStore.getState();
+    expect(s.status).toBe('connected');
+    expect(s.room).toBe(GRANT.room);
+    expect(s.identity).toBe(GRANT.identity);
+  });
+
+  // Review fix (3.6): a self-heal must not silently un-mute a muted publisher.
+  // onReconnecting captures the mute intent before setUnavailable() wipes it;
+  // onReconnected re-asserts the mic + restores voiceStore.muted so the glyph
+  // never lies about whether the mic is live.
+  it('a self-heal reconciles a muted publisher (re-asserts mic + restores muted flag)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect(); // publish: true
+    await controller.setMuted(true);
+    expect(useVoiceStore.getState().muted).toBe(true);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    room.emit(RoomEvent.Reconnecting, undefined); // setUnavailable clears muted → false
+    expect(useVoiceStore.getState().muted).toBe(false);
+
+    room.emit(RoomEvent.Reconnected, undefined);
+    await Promise.resolve(); // flush the re-assert microtask chain
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false); // mic re-muted
+    expect(useVoiceStore.getState().muted).toBe(true); // flag restored
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  // A self-heal of an UN-muted publisher must not spuriously toggle the mic.
+  it('a self-heal does not touch the mic when the publisher was not muted', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    setMicrophoneEnabled.mockClear();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    room.emit(RoomEvent.Reconnected, undefined);
+    await Promise.resolve();
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+});
+
+// ── Manual reconnect (Story 3.6, AC #2) ──────────────────────────────────────
+// reconnect() tears down any existing (possibly dead) room then connects fresh.
+// Critically it works even after onReconnecting kept the room with phase still
+// 'connected' — a plain connect() would no-op on its phase guard there.
+
+describe('reconnect() manual recovery', () => {
+  it('after a Reconnecting drop, reconnect() tears down + connects fresh (new token)', async () => {
+    const requestToken = vi.fn(async () => okToken());
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined); // room kept alive, phase still 'connected'
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+
+    await controller.reconnect();
+    // A plain connect() would have no-op'd here; reconnect() tore down first, so a
+    // SECOND token was requested and we reach connected again.
+    expect(requestToken).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  it('reconnect() from a hard-failed (idle) state still connects fresh', async () => {
+    const requestToken = vi.fn(async () => okToken());
+    const controller = createVoiceController({ createRoom: () => makeFakeRoom().room, requestToken });
+    await controller.disconnect(); // idle, no room
+    await controller.reconnect();
+    expect(requestToken).toHaveBeenCalledTimes(1);
+    expect(useVoiceStore.getState().status).toBe('connected');
+  });
+
+  it('reconnect never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    room.emit(RoomEvent.Reconnecting, undefined);
+    await controller.reconnect();
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
   });
 });
 
@@ -399,6 +503,310 @@ describe('active-speaker tracking', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── Listen-only / spectator connect (Story 3.3, AC #1/#2/#4/#5) ──────────────
+// A spectator connects with `publish: false`: we must NEVER call
+// setMicrophoneEnabled (no getUserMedia → no mic prompt — AC #2) while still
+// subscribing to + playing every remote audio track (the spectator HEARS the
+// lounge — AC #1). The independence + teardown invariants hold for this path too.
+
+const LOUNGE_GRANT = {
+  url: 'ws://livekit:7880',
+  token: 'LOUNGE.JWT.VALUE',
+  room: 'spectator-lounge:sess-1',
+  identity: 'spec-1',
+};
+
+function okLoungeToken(): TokenResult {
+  return { ok: true, grant: LOUNGE_GRANT };
+}
+
+describe('listen-only (publish:false) spectator connect', () => {
+  it('NEVER acquires the mic yet still subscribes/plays remote audio and reaches connected', async () => {
+    const { room, connect, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+
+    const pending = controller.connect(false); // listen-only
+    expect(useVoiceStore.getState().status).toBe('connecting');
+    await pending;
+
+    // The load-bearing AC #2 assertion: no mic was ever requested.
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    // Still connected to the room the token named (lounge) + identity recorded.
+    expect(connect).toHaveBeenCalledWith(LOUNGE_GRANT.url, LOUNGE_GRANT.token);
+    const s = useVoiceStore.getState();
+    expect(s.status).toBe('connected');
+    expect(s.room).toBe(LOUNGE_GRANT.room);
+    expect(s.identity).toBe(LOUNGE_GRANT.identity);
+
+    // Remote audio is still subscribed + attached — the spectator HEARS it (AC #1).
+    const { track } = makeFakeAudioTrack();
+    room.emit(RoomEvent.TrackSubscribed, track);
+    expect(track.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it('the listen-only path never mutates gameStore — success (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+    await controller.connect(false);
+    expect(useVoiceStore.getState().status).toBe('connected');
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+
+  it('the listen-only path never mutates gameStore — failure → unavailable, game keeps running', async () => {
+    const before = useGameStore.getState();
+    const controller = createVoiceController({
+      createRoom: () => makeFakeRoom().room,
+      requestToken: async (): Promise<TokenResult> => ({ ok: false }),
+    });
+    await controller.connect(false);
+    expect(useVoiceStore.getState().status).toBe('unavailable');
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+
+  it('subscribe-only connect→disconnect detaches audio, drops listeners, disconnects (no leak)', async () => {
+    const { room, disconnect, listeners } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okLoungeToken(),
+    });
+    await controller.connect(false);
+
+    const { track, el } = makeFakeAudioTrack();
+    room.emit(RoomEvent.TrackSubscribed, track);
+
+    await controller.disconnect();
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(el.remove).toHaveBeenCalled(); // audio element removed from DOM
+    for (const set of listeners.values()) expect(set.size).toBe(0); // listeners unbound
+    expect(useVoiceStore.getState().status).toBe('idle');
+  });
+
+  it('reconnect after a listen-only disconnect requests a FRESH token', async () => {
+    const requestToken = vi.fn(async () => okLoungeToken());
+    const controller = createVoiceController({
+      createRoom: () => makeFakeRoom().room,
+      requestToken,
+    });
+    await controller.connect(false);
+    await controller.disconnect();
+    await controller.connect(false);
+    expect(requestToken).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Self-mute toggle (Story 3.4, AC #3/#6) ───────────────────────────────────
+// `setMuted` is a thin wrapper over `setMicrophoneEnabled`: mute ⇒ (false),
+// unmute ⇒ (true). It only acts for a CONNECTED publisher; it's a no-op for a
+// listen-only spectator (no mic) or when not connected. A failed toggle never
+// throws into the UI and never optimistically flips the store flag. And — like
+// all voice — it never mutates gameStore.
+
+describe('setMuted (self-mute publish toggle)', () => {
+  it('a publisher: setMuted(true) mutes the mic + flag, setMuted(false) restores both', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect(); // publish: true → mic acquired with (true)
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(useVoiceStore.getState().muted).toBe(true);
+
+    await controller.setMuted(false);
+    expect(setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('a listen-only spectator: setMuted(true) is a no-op (no mic call, flag stays false)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okLoungeToken() });
+    await controller.connect(false); // listen-only → mic never acquired
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('setMuted before connect is a no-op (not connected → nothing to toggle)', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.setMuted(true);
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().muted).toBe(false);
+  });
+
+  it('a thrown setMicrophoneEnabled does NOT flip the flag and does NOT escape', async () => {
+    const { room, setMicrophoneEnabled } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    // The mute toggle (not the connect publish) rejects.
+    setMicrophoneEnabled.mockRejectedValueOnce(new Error('mic toggle failed'));
+
+    await expect(controller.setMuted(true)).resolves.toBeUndefined(); // swallowed
+    expect(useVoiceStore.getState().muted).toBe(false); // flag untouched on failure
+  });
+
+  it('mute toggling never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+
+    await controller.setMuted(true);
+    await controller.setMuted(false);
+
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
+  });
+});
+
+// ── TURN relay rtcConfig + force-relay (Story 3.6, AC #3) ────────────────────
+// A grant carrying iceServers makes connect() receive { rtcConfig: { iceServers } };
+// a grant without it keeps the unchanged connect(url, token) (no third arg). The
+// dev force-relay toggle adds iceTransportPolicy: 'relay'.
+
+const ICE = [
+  { urls: ['turn:localhost:3478?transport=udp', 'turn:localhost:3478?transport=tcp'], username: '999:self-1', credential: 'abc==' },
+];
+function okTokenWithIce(): TokenResult {
+  return { ok: true, grant: { ...GRANT, iceServers: ICE } };
+}
+
+describe('TURN relay rtcConfig', () => {
+  it('passes grant iceServers to connect() as rtcConfig.iceServers', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okTokenWithIce() });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, { rtcConfig: { iceServers: ICE } });
+  });
+
+  it('a TURN-less grant calls connect(url, token) with NO third arg (no regression)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token);
+    expect(connect.mock.calls[0]).toHaveLength(2); // exactly two args
+  });
+
+  it('force-relay adds iceTransportPolicy: relay (alongside iceServers when present)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okTokenWithIce(),
+      forceRelay: () => true,
+    });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, {
+      rtcConfig: { iceServers: ICE, iceTransportPolicy: 'relay' },
+    });
+  });
+
+  it('force-relay applies even with a TURN-less grant (relay-only, no iceServers)', async () => {
+    const { room, connect } = makeFakeRoom();
+    const controller = createVoiceController({
+      createRoom: () => room,
+      requestToken: async () => okToken(),
+      forceRelay: () => true,
+    });
+    await controller.connect();
+    expect(connect).toHaveBeenCalledWith(GRANT.url, GRANT.token, {
+      rtcConfig: { iceTransportPolicy: 'relay' },
+    });
+  });
+});
+
+// ── Blocked-autoplay recovery (Story 3.6, AC #6/#7) ──────────────────────────
+// A rejected startAudio() on connect surfaces as voiceStore.audioBlocked (the
+// connection still succeeds → connected). resumeAudio() retries startAudio and
+// clears the flag on success, leaves it set on failure, and never throws. The
+// whole path never mutates gameStore.
+
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+describe('blocked-autoplay (audioBlocked) recovery', () => {
+  it('a rejected startAudio on connect sets audioBlocked but stays connected', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().status).toBe('connected'); // NOT unavailable
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+  });
+
+  it('a resolved startAudio on connect leaves audioBlocked false', async () => {
+    const { room } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('resumeAudio() retries startAudio and clears the flag on success', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+
+    await controller.resumeAudio(); // startAudio now resolves (default mock)
+    expect(startAudio).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().audioBlocked).toBe(false);
+  });
+
+  it('resumeAudio() leaves the flag set (and never throws) when startAudio still rejects', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('blocked on connect'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+
+    startAudio.mockRejectedValueOnce(new Error('still blocked'));
+    await expect(controller.resumeAudio()).resolves.toBeUndefined(); // swallowed
+    expect(useVoiceStore.getState().audioBlocked).toBe(true);
+  });
+
+  it('resumeAudio() before connect is a no-op (not connected → nothing to resume)', async () => {
+    const { room, startAudio } = makeFakeRoom();
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.resumeAudio();
+    expect(startAudio).not.toHaveBeenCalled();
+  });
+
+  it('the blocked-autoplay path never mutates gameStore (AR12 / ADR-007)', async () => {
+    const before = useGameStore.getState();
+    const { room, startAudio } = makeFakeRoom();
+    startAudio.mockRejectedValueOnce(new Error('autoplay blocked'));
+    const controller = createVoiceController({ createRoom: () => room, requestToken: async () => okToken() });
+    await controller.connect();
+    await flush();
+    await controller.resumeAudio();
+
+    const after = useGameStore.getState();
+    expect(after.session).toBe(before.session);
+    expect(after.bomb).toBe(before.bomb);
+    expect(after.connection).toBe(before.connection);
   });
 });
 

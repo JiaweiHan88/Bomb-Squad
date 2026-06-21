@@ -412,6 +412,10 @@ async function restoreReattachedSocket(
 
     await socket.join(sessionRoom(sessionId));
 
+    // Track the freshest state we observe; the mid-round replay below decides on
+    // this rather than the pre-await `snapshot`, which can go stale across the
+    // restore awaits (a team assignment or round resolution landing in between).
+    let latest: SessionState = snapshot;
     let restored = false;
     if (snapshot.players[playerId] === undefined && snapshot.status === 'lobby' && reattachToken !== null) {
       const record = await resolveReattachRecord(deps.redis, sessionId, reattachToken);
@@ -437,6 +441,7 @@ async function restoreReattachedSocket(
         );
         if (result.kind === 'restored') {
           io.to(sessionRoom(sessionId)).emit('SESSION_STATE', result.state);
+          latest = result.state;
           restored = true;
         }
       }
@@ -445,56 +450,81 @@ async function restoreReattachedSocket(
     if (!restored) {
       let fresh = await deps.redis.getJSON<SessionState>(sessionKey(sessionId));
       if (fresh !== null) {
-        // MID-ROUND RECONNECT RESTORE (Story 8.7, FR13): a reconnecting participant
-        // in an active/paused round must land back on a LIVE bomb surface — re-join
-        // its team room and re-send its bomb + current timer (BOMB_INIT is otherwise
-        // emitted only at ROUND_START, so a reconnect would see a blank scene —
-        // deferred-work.md). Resolve identity via the durable playerId, never socket.id.
-        const teamId = fresh.players[playerId]?.teamId;
-        const midRound = fresh.status === 'active' || fresh.pausedAt !== null;
-        // ACTIVE-TEAM GUARD (Story 8.11, Model B): only the ACTIVE team has a live
-        // bomb/timer this round. A reconnecting RESTING player must NOT be re-sent a
-        // bomb — its team's bomb key persists from a PRIOR round it played, so a
-        // raw `bomb !== null` would restore a STALE bomb. Gate on `activeTeamId`;
-        // the resting player just gets SESSION_STATE and the client routes it to
-        // spectate. (The resolved team's timer key is already gone — resolveRound
-        // deletes it — but the bomb key lingers, so this guard is load-bearing.)
-        const isActiveTeam = teamId !== undefined && teamId === fresh.activeTeamId;
-        if (teamId !== undefined && midRound) {
-          await socket.join(teamRoom(sessionId, teamId));
-          if (isActiveTeam) {
-            const bomb = await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId));
-            if (bomb !== null) socket.emit('BOMB_INIT', bomb);
-            const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
-            if (timer !== null) socket.emit('TIMER_UPDATE', timer);
-          }
-          // Clear this player from the disconnect-pause dropped list (they're back).
-          // The session STAYS paused until the facilitator resumes (AC-2 gate).
-          if (fresh.disconnectedPlayerIds.includes(playerId)) {
-            const { result } = await deps.redis.updateJSON<SessionState, SessionState | null>(
-              sessionKey(sessionId),
-              (current) => {
-                if (current === null) return { commit: false, result: null };
-                const cleared = clearDisconnectedPlayer(current, playerId);
-                return cleared === current
-                  ? { commit: false, result: current }
-                  : { commit: true, value: cleared, result: cleared };
-              },
-            );
-            if (result !== null) fresh = result;
-            io.to(sessionRoom(sessionId)).emit('SESSION_STATE', fresh);
-          } else {
-            socket.emit('SESSION_STATE', fresh);
-          }
+        // DISCONNECT-PAUSE CLEAR (Story 8.7, FR13): a reconnecting participant who
+        // was on the dropped list comes off it (the amber strip updates + the
+        // resume-ready gate re-counts), broadcast to all. The session STAYS paused
+        // until the facilitator resumes (AC-2). Otherwise just unicast the snapshot.
+        // The live bomb/timer replay is handled by the mid-round replay block below
+        // (timer-key-gated — only the ACTIVE team has a live timer under Model B, so
+        // a resting reconnect is never re-sent a stale bomb).
+        if (fresh.disconnectedPlayerIds.includes(playerId)) {
+          const { result } = await deps.redis.updateJSON<SessionState, SessionState | null>(
+            sessionKey(sessionId),
+            (current) => {
+              if (current === null) return { commit: false, result: null };
+              const cleared = clearDisconnectedPlayer(current, playerId);
+              return cleared === current
+                ? { commit: false, result: current }
+                : { commit: true, value: cleared, result: cleared };
+            },
+          );
+          if (result !== null) fresh = result;
+          io.to(sessionRoom(sessionId)).emit('SESSION_STATE', fresh);
         } else {
           socket.emit('SESSION_STATE', fresh);
         }
+        latest = fresh;
       }
     }
     // Re-emit the identity (token unchanged) so the client refreshes its store.
     if (reattachToken !== null) {
       socket.emit('SESSION_IDENTITY', { sessionId, playerId, reattachToken });
     }
+
+    // Mid-round replay: a socket reattaching during an active round (a browser
+    // refresh) is only in the session room — it was never re-joined to its team
+    // room nor re-sent the bomb. Without this it renders the DEV placeholder
+    // modules and then goes stale on the next team-scoped MODULE_UPDATE/
+    // TIMER_UPDATE. Re-join the team room and unicast the live bomb + timer
+    // snapshot straight from Redis (read-only; ROUND_START remains the authority
+    // that first armed them).
+    //
+    // The replay is gated on the timer key still existing. resolveRound deletes a
+    // team's timer the instant it defuses/explodes/times out but keeps the session
+    // 'active' while another team plays, and it never deletes the bomb key — so a
+    // resolved-team refresh would otherwise replay a stale, still-playable-looking
+    // bomb and (via the client's setBomb) wipe its result banner. A live timer ⟺
+    // the team is still playing this round. Replaying the resolution banner itself
+    // on a resolved-team refresh is mid-round sync (Epic 8), out of scope here.
+    //
+    // Bomb and timer are replayed both-or-neither: a live timer with no bomb
+    // snapshot (e.g. only the bomb key evicted) would leave the client ticking
+    // over the DEV placeholder modules — the very desync this fix prevents. The
+    // reads are self-guarded so a missing OR corrupt key just skips the replay and
+    // never fails the already-emitted SESSION_STATE/identity restore.
+    if (latest.status === 'active') {
+      const teamId = latest.players[playerId]?.teamId;
+      if (teamId !== undefined) {
+        await socket.join(teamRoom(sessionId, teamId));
+        try {
+          const timer = await deps.redis.getJSON<TimerState>(timerKey(sessionId, teamId));
+          const bomb =
+            timer !== null
+              ? await deps.redis.getJSON<BombState>(bombKey(sessionId, teamId))
+              : null;
+          if (timer !== null && bomb !== null) {
+            socket.emit('BOMB_INIT', bomb);
+            socket.emit('TIMER_UPDATE', timer);
+          }
+        } catch (replayErr) {
+          deps.log.info(
+            { replayErr, sessionId, playerId, teamId },
+            'mid-round bomb/timer replay skipped',
+          );
+        }
+      }
+    }
+
     deps.log.info({ sessionId, playerId, restored }, 'socket reattached');
   } catch (err) {
     deps.log.error({ err, socketId: socket.id }, 'reattach restore failed');

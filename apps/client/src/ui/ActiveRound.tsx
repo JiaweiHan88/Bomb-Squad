@@ -8,6 +8,9 @@ import { SANDBOX_MODULES } from '../modules/index.js';
 import ResolutionBanner from './ResolutionBanner.js';
 import VoiceController from './VoiceController.js';
 import PauseOverlay from './PauseOverlay.js';
+import SpeakerIndicator from './SpeakerIndicator.js';
+import MuteControl from './MuteControl.js';
+import AudioUnblockPrompt from './AudioUnblockPrompt.js';
 import { ROUND_IN_PROGRESS, WATCHING_THE_BOMB_ROOM, RESTING_SPECTATE } from './copy.js';
 
 /**
@@ -88,8 +91,14 @@ export default function ActiveRound() {
       {/* Pause surface (Story 8.7): the facilitator's break-glass Pause control, and
           the "Holding the clock" / amber disconnect strip + scene dim when paused. */}
       <PauseOverlay />
-      {/* Bomb Room voice join (Story 3.2) — non-blocking, unmount-safe. Self-hides
-          for non-Bomb-Room roles. Speaker pill + mute are Story 3.4. */}
+      {/* Voice HUD corners (non-blocking, self-gating). Story 3.2 connect CTA is
+          bottom-right; Story 3.4 adds the speaker pill (top-left, all in-round
+          roles incl. a spectator watching the Bomb Room) and the self-mute toggle
+          (bottom-left, publisher-only — self-gates internally). The timer LCD
+          (top-center/right) is reserved for Stories 4.4/4.5 — pill stays clear. */}
+      <SpeakerIndicator />
+      <MuteControl />
+      <AudioUnblockPrompt />
       <VoiceController />
     </div>
   );

@@ -22,6 +22,11 @@ const EnvSchema = Type.Object({
   LIVEKIT_API_SECRET: NonEmpty,
   TURN_SECRET: NonEmpty,
   TURN_TTL: NonEmpty,
+  // Optional (Story 3.6): browser-reachable TURN URI (e.g. `turn:localhost:3478`)
+  // handed to the client in the VOICE_TOKEN grant for the corporate-NAT relay
+  // path. Absent ⇒ no TURN advertised (client connects via LiveKit's own ICE —
+  // unchanged pre-3.6 behavior). Present-but-blank still fails (minLength: 1).
+  TURN_URL: Type.Optional(NonEmpty),
 });
 
 type RawEnv = Static<typeof EnvSchema>;
@@ -36,6 +41,8 @@ export interface Config {
   LIVEKIT_API_SECRET: string;
   TURN_SECRET: string;
   TURN_TTL: number;
+  /** Optional browser-reachable TURN URI for the relay path (Story 3.6). */
+  TURN_URL?: string;
 }
 
 /** Raised when the environment fails validation. Carries one message per offending variable. */
@@ -107,5 +114,6 @@ export function parseEnv(source: Record<string, unknown>): Config {
     LIVEKIT_API_SECRET: raw.LIVEKIT_API_SECRET,
     TURN_SECRET: raw.TURN_SECRET,
     TURN_TTL,
+    TURN_URL: raw.TURN_URL,
   };
 }
