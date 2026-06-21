@@ -6,6 +6,8 @@ baseline_commit: 62e9032b8eaa5a4e1bb34786b590b67b4fbb87b3
 
 Status: review
 
+<!-- 2026-06-21: Two defects found during the Story 8.11 interactive run and FIXED here (bugs-epic8-2026-06-21.md #5, #8): (1) MODULE_INTERACT had no pause gate — a Defuser could cut/detonate a bomb while paused; added a session.pausedAt check (SESSION_PAUSED) in moduleHandlers.ts + test. (2) The PauseOverlay Resume/Ready buttons used a non-existent `text-surface-base` token (cream-on-cream, invisible) → switched to `text-surface`. Pause/resume path still needs an interactive re-verification once the sim bots can drive resume (bots don't ready-up after a disconnect pause); Task 10 stays open. -->
+
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
 ## Story

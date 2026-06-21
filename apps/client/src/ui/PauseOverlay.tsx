@@ -89,7 +89,7 @@ export default function PauseOverlay() {
           data-testid="pause-resume"
           onClick={resume}
           disabled={resumeDisabled}
-          className="rounded bg-ink-primary px-4 py-1.5 font-mono text-xs font-bold uppercase tracking-widest text-surface-base disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded bg-ink-primary px-4 py-1.5 font-mono text-xs font-bold uppercase tracking-widest text-surface disabled:cursor-not-allowed disabled:opacity-40"
         >
           {PAUSE_RESUME_CTA}
         </button>
@@ -103,7 +103,7 @@ export default function PauseOverlay() {
         type="button"
         data-testid="pause-ready"
         onClick={readyUp}
-        className="rounded bg-ink-primary px-4 py-1.5 font-mono text-xs font-bold uppercase tracking-widest text-surface-base"
+        className="rounded bg-ink-primary px-4 py-1.5 font-mono text-xs font-bold uppercase tracking-widest text-surface"
       >
         {PAUSE_READY_CTA}
       </button>

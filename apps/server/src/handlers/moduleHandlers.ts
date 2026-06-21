@@ -108,6 +108,21 @@ export function registerModuleHandlers(io: SessionIOServer, deps: SessionHandler
           return;
         }
 
+        // PAUSE GATE (Story 8.7): while the session is paused the clock is frozen,
+        // so a bomb interaction must be refused — otherwise the Defuser could keep
+        // cutting (and even detonate / resolve the round) during a hold, which the
+        // frozen timer was meant to prevent. `pausedAt` is orthogonal to `status`
+        // (a pause sits on top of an 'active' round), so this is the authoritative
+        // check. Found in 8.11 interactive verification (bug ticket 2026-06-21).
+        if (session.pausedAt !== null) {
+          socket.emit('ERROR', {
+            code: 'SESSION_PAUSED',
+            message: 'The round is paused.',
+            recoverable: true,
+          });
+          return;
+        }
+
         // Authority: only the committed Defuser of the claimed team may interact
         // with that team's bomb (the bomb is team-private; a teammate Expert or a
         // foreign socket must be refused). Role is committed to 'defuser' at

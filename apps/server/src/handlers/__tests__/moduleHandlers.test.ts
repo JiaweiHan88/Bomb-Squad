@@ -13,7 +13,7 @@ import type {
 import { solveWires } from '@bomb-squad/shared';
 import { registerSessionHandlers } from '../sessionHandlers.js';
 import { registerModuleHandlers } from '../moduleHandlers.js';
-import { bombKey, timerKey } from '../../state/keys.js';
+import { bombKey, sessionKey, timerKey } from '../../state/keys.js';
 import {
   startTestSocketServer,
   createMemoryRedisStore,
@@ -222,6 +222,29 @@ describe('MODULE_INTERACT handler (Story 4.7)', () => {
     expect(error.recoverable).toBe(true);
     await new Promise((r) => setTimeout(r, 80));
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('a PAUSED round refuses MODULE_INTERACT (SESSION_PAUSED) — no cut, no detonate (Story 8.7, bug 2026-06-21)', async () => {
+    const { sessionId } = await activeRound(wiresBomb(1, 2)); // 2 strikes — a cut here would detonate
+    // Freeze the session as FACILITATOR_PAUSE does (pausedAt is orthogonal to status).
+    const live = JSON.parse(store.data.get(sessionKey(sessionId))!) as SessionState;
+    await store.setJSON(sessionKey(sessionId), { ...live, pausedAt: 1_000, pauseKind: 'facilitator' });
+
+    const updateSpy = jest.fn();
+    maya.on('MODULE_UPDATE', updateSpy);
+    const explodeSpy = jest.fn();
+    maya.on('BOMB_EXPLODED', explodeSpy);
+    const errorPromise = nextEvent<ErrorPayload>(maya, 'ERROR');
+    maya.emit('MODULE_INTERACT', { teamId: 'A', moduleIndex: 0, action: { type: 'CUT', wireIndex: 0 } });
+    const error = await errorPromise;
+
+    expect(error.code).toBe('SESSION_PAUSED');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(explodeSpy).not.toHaveBeenCalled();
+    // The bomb is untouched — still 2 strikes, not detonated.
+    const bomb = JSON.parse(store.data.get(bombKey(sessionId, 'A'))!) as BombState;
+    expect(bomb.strikes).toBe(2);
   });
 
   it("a socket interacting with a team it does not defuse → NOT_TEAM_DEFUSER", async () => {
