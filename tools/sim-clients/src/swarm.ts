@@ -39,6 +39,11 @@ export interface SwarmOptions {
   outcome: Outcome;
   pacingMs?: number;
   log?: (msg: string) => void;
+  /**
+   * Forwarded to every bot's `onUpdate` so a UI (the control panel) can re-render
+   * on any bot state change. Omitted by the CLI / verify harness.
+   */
+  onUpdate?: () => void;
 }
 
 /**
@@ -79,6 +84,7 @@ function makePlayers(opts: SwarmOptions, plan: TeamId[]): BotClient[] {
       outcome: opts.outcome,
       pacingMs: opts.pacingMs,
       log: opts.log,
+      onUpdate: opts.onUpdate,
     });
   });
 }
@@ -113,7 +119,7 @@ export async function buildAutonomousSwarm(
   config?: Partial<RoundConfig>,
 ): Promise<Swarm & { joinCode: string }> {
   const log = opts.log ?? (() => {});
-  const facilitator = new BotClient({ url: opts.url, displayName: 'Bot-Facilitator', log });
+  const facilitator = new BotClient({ url: opts.url, displayName: 'Bot-Facilitator', log, onUpdate: opts.onUpdate });
   await facilitator.connect();
   const { joinCode } = await facilitator.createSession(config);
   log(`[swarm] session created, join code ${joinCode}`);

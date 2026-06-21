@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
     "isolatedModules": true,
     "noEmit": true,
-    "rootDir": "./src",
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "panel/**/*.ts", "vite.config.ts"],
   "exclude": ["node_modules"]
 }

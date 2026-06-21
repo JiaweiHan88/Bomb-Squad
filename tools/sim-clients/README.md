@@ -12,6 +12,40 @@ snapshot using the shared pure solve functions (`solveWires`, `decideButton` +
 `releaseDigitFor`, `isValidPassword`) — the same honest path a human Defuser
 reading the manual takes. No baked answer is read (there isn't one to read).
 
+## The control panel (the easy way) 🕹️
+
+A single browser page that runs the **whole swarm in-browser** and gives you one
+dashboard for every bot — no terminal flags, no four windows. Same `BotClient`
+as the CLI (socket.io-client + the framework-free shared solvers are browser-safe;
+the server's CORS is `origin: true`).
+
+```
+pnpm --filter @bomb-squad/sim-clients panel     # opens http://localhost:5180
+```
+
+**Spawn**: pick **Join** (you host the session as Facilitator in a real browser,
+paste its code) or **Create** (a bot is Facilitator and you drive everything from
+the panel). Set teams / per-team / sizes and a default auto-mode.
+
+**Per-bot controls + live status**
+
+| Control | What it does |
+|---------|--------------|
+| Status row | connection, **team + role**, ready, strikes (n/3), result; 🎯 marks the current Defuser |
+| Ready / Unready | toggle a bot's ready — **works while the session is paused** (satisfy a disconnect-resume gate) |
+| Disconnect / Reconnect | drop a bot's socket, then **reattach the same seat** (Story 2.7 token) — mid-round this trips the disconnect-pause |
+| Solve | the active Defuser self-solves the whole bomb on demand |
+| Detonate | the active Defuser strikes until it explodes (3 strikes) |
+| +1 strike | emit a single wrong action (one strike) |
+| auto-mode ▾ | per-bot `manual` / `defuse` / `strike` / `timeout` on each `BOMB_INIT` |
+
+**Bulk + Facilitator** (Create mode): Open Prep · Cancel Prep · Start Round ·
+Pause · Resume, plus All Ready, Ready (resume-gate), Solve all, Detonate active,
+Reconnect all, Teardown. A live event log streams every bot's server events.
+
+> Same server caveat as below: run the game server on plain `tsx`, **not**
+> `tsx watch` (a watch restart drops the in-memory timer wake).
+
 ## The hybrid workflow (the common case)
 
 **You stay the Facilitator in one real browser** — that's exactly the UI 8.6 /
@@ -92,11 +126,19 @@ timer-digit hold loop over sockets), and a **strike**. Exits non-zero on failure
 src/
   main.ts        CLI (hybrid --code / autonomous --create)
   swarm.ts       orchestration: build swarm, assign teams, play rounds
-  BotClient.ts   one simulated player (typed socket + state mirror + solve loop)
+  BotClient.ts   one simulated player (typed socket + state mirror + solve loop +
+                 on-demand solveNow/detonateNow/reconnect for the panel)
   solvers.ts     module → shared-solve dispatch (+ wrong-action variants)
   timerDigits.ts timer-LCD digit extraction (mirror of apps/client timerLcd.ts)
   verify.ts      Docker-free in-process end-to-end check
+panel/
+  index.html     control-panel shell + styles
+  main.ts        the dashboard: spawn a swarm, render live status, drive each bot
+vite.config.ts   dev server for the panel (root: panel/, port 5180)
 ```
+
+> The panel runs bots in the browser, so it must never import `verify.ts` (it
+> pulls in `@bomb-squad/server` + `socket.io`, which are Node-only).
 
 The shipped tool depends only on `@bomb-squad/shared` + `socket.io-client`.
 `@bomb-squad/server` + `socket.io` are **dev** dependencies used only by

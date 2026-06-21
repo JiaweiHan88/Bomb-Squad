@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bomb Squad — Bot Control Panel</title>
+    <style>
+      :root {
+        --bg: #0e1116;
+        --panel: #161b22;
+        --panel2: #1c2430;
+        --line: #2a3340;
+        --ink: #d7e0ea;
+        --dim: #8a98a8;
+        --accent: #36c5f0;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --bad: #f85149;
+        --defuser: #a371f7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      h1 { font-size: 16px; margin: 0; letter-spacing: 0.5px; }
+      h1 small { color: var(--dim); font-weight: 400; font-size: 11px; }
+      header {
+        display: flex; align-items: baseline; gap: 12px;
+        padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+      }
+      main { padding: 16px; max-width: 1280px; margin: 0 auto; }
+      .card {
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 8px; padding: 14px; margin-bottom: 16px;
+      }
+      .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 0 0 10px; }
+      label { color: var(--dim); margin-right: 4px; }
+      input, select, button {
+        font: inherit; color: var(--ink); background: var(--panel2);
+        border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+      }
+      input { width: 84px; }
+      input.code { width: 110px; text-transform: uppercase; }
+      input.url { width: 220px; }
+      button { cursor: pointer; transition: background 0.1s, border-color 0.1s; }
+      button:hover:not(:disabled) { border-color: var(--accent); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.primary { background: var(--accent); color: #04222e; border-color: var(--accent); font-weight: 600; }
+      button.bad { border-color: var(--bad); color: var(--bad); }
+      button.warn { border-color: var(--warn); color: var(--warn); }
+      .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+      .row + .row { margin-top: 10px; }
+      .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      th { color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+      tr.defuser td { background: rgba(163, 113, 247, 0.08); }
+      tr.dropped td { opacity: 0.5; }
+      .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
+      .pill.ok { color: var(--ok); border-color: var(--ok); }
+      .pill.bad { color: var(--bad); border-color: var(--bad); }
+      .pill.warn { color: var(--warn); border-color: var(--warn); }
+      .pill.defuser { color: var(--defuser); border-color: var(--defuser); }
+      .pill.dim { color: var(--dim); }
+      .tbtns button { padding: 3px 7px; font-size: 12px; }
+      .banner { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+      .banner b { color: var(--ink); }
+      .banner .k { color: var(--dim); }
+      .paused { color: var(--warn); font-weight: 600; }
+      .timer { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--accent); }
+      .timer.low { color: var(--bad); }
+      .timer.paused { color: var(--warn); }
+      .err { color: var(--bad); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+      #log {
+        background: #0a0d12; border: 1px solid var(--line); border-radius: 6px;
+        padding: 8px 10px; height: 180px; overflow-y: auto; font-size: 11.5px; color: var(--dim);
+        white-space: pre-wrap; word-break: break-word;
+      }
+      #log .t { color: #56606c; }
+      .hint { color: var(--dim); font-size: 11px; margin-top: 8px; }
+      .empty { color: var(--dim); padding: 20px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>🕹️ Bomb Squad <small>Bot Control Panel</small></h1>
+      <small id="conn-summary" style="color: var(--dim); margin-left: auto"></small>
+    </header>
+    <main id="app"></main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

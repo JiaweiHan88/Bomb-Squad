@@ -6,6 +6,7 @@
   "description": "Dev-only headless bot-swarm simulator: real socket clients that fill player seats and self-solve rounds so a solo dev can verify the multiplayer game loop (Stories 8.6 / 8.1) without juggling browsers.",
   "scripts": {
     "sim": "tsx src/main.ts",
+    "panel": "vite",
     "verify": "tsx src/verify.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -18,6 +19,7 @@
     "@types/node": "^25.9.3",
     "socket.io": "^4.8.3",
     "tsx": "^4.19.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
   }
 }
