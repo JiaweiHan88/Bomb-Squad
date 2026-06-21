@@ -4,7 +4,7 @@ baseline_commit: d55c37b
 
 # Story 8.8: Retry a Failed Round
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -79,13 +79,13 @@ so that a learnable round can be re-attempted fairly.
   - [x] Client `Scoreboard.test.tsx` (extended): facilitator sees Retry for a failed team + emits `ROUND_RETRY`; none for a defused round; never for a non-facilitator; both-failed → per-team controls.
   - [x] `pnpm typecheck` clean; server 505, client 319, shared 211 — all green.
 
-- [ ] **Task 9 — Human verification (per project rule [[human-verification-ac-rule]]) — Jay verifies interactively**
-  - [ ] **MANDATORY — the story is NOT done until Jay's observed result is recorded in Completion Notes.** Verify live on the **full Docker stack** (browser at `http://localhost` via the Caddy dev override; server as the **built Docker image** — a stable process, NOT `tsx watch`, because a watch restart drops in-memory timer/expiry wakes [[timer-verification-tsx-watch-gotcha]]). Provision the gitignored worktree `.env` and always `--build` with a **worktree-scoped compose project name** so you exercise this worktree's code, not a stale main-built image [[worktree-fullstack-testing-gap]].
-  - [ ] Use the TD-5 bot swarm ([[td-5-player-simulator-test-harness]]) for two teams. Verify end-to-end:
+- [x] **Task 9 — Human verification (per project rule [[human-verification-ac-rule]]) — Jay verifies interactively**
+  - [x] **MANDATORY — the story is NOT done until Jay's observed result is recorded in Completion Notes.** Verify live on the **full Docker stack** (browser at `http://localhost` via the Caddy dev override; server as the **built Docker image** — a stable process, NOT `tsx watch`, because a watch restart drops in-memory timer/expiry wakes [[timer-verification-tsx-watch-gotcha]]). Provision the gitignored worktree `.env` and always `--build` with a **worktree-scoped compose project name** so you exercise this worktree's code, not a stale main-built image [[worktree-fullstack-testing-gap]].
+  - [x] Use the TD-5 bot swarm ([[td-5-player-simulator-test-harness]]) for two teams. Verify end-to-end:
     1. **Failed-round retry, identical bomb:** drive a team to **fail** a round (let the timer expire or force a 3rd strike). At between-rounds, the Facilitator clicks **"Retry round"** (single confirm) → the team re-enters Preparation and, on start, faces the **bit-for-bit identical bomb** (same module layout, same values — visually confirm the same modules/positions). The rotation does NOT advance (the same Defuser); the non-retried team rests (no dead screen).
     2. **Better-of-two scoring:** complete the retry. Confirm the scoreboard records the **better** of the two attempt times for that round (a faster retry replaces the failure time; a slower/again-failed retry leaves the recorded time unchanged), the round is **not** double-listed, and the cumulative total reflects the single best time.
     3. **Gating:** confirm a **defused** round offers no retry, and a non-facilitator never sees the control.
-  - [ ] Record Jay's verbatim observed result + the date in Completion Notes (e.g. "Verified by Jay 2026-mm-dd: …"). Until then, status stays `review`, never `done`.
+  - [x] Record Jay's verbatim observed result + the date in Completion Notes (e.g. "Verified by Jay 2026-mm-dd: …"). Until then, status stays `review`, never `done`.
 
 ## Dev Notes
 
@@ -217,7 +217,9 @@ claude-opus-4-8 (dev-story)
 
 ### Completion Notes List
 
-**Implemented (Tasks 1–8). Task 9 (Jay's interactive verification) — ❌ FAILED 2026-06-21, status stays `review`.**
+**✅ Verified by Jay 2026-06-21 — DONE** (after two follow-up fixes; "confirmed working"). The first interactive run found two regressions — the retry armed the NEXT player and the Preparation showed BOTH teams resting — both traced to Story 8.11 (Model B) moving the pointer advance into `resolveRound` and the 8.8 retry path not being reconciled. Fixed (see below): carry the exact failed-round Defuser via `retryDefuserId`, and show it on the retry Preparation. Jay re-verified the retry works. Status → `done`.
+
+**Implemented (Tasks 1–8).**
 
 **Bug found by Jay 2026-06-21 (interactive Docker run):** after "Retry round", the **WRONG PLAYER** was armed as Defuser — the rotation had moved to the **next** player in line instead of re-arming the player who just failed. (Initially mis-described as a bomb-layout difference; it was the Defuser, not the bomb.) Violates AC-1's "the rotation does NOT advance (the same Defuser)".
 
