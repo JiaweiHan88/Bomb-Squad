@@ -1556,7 +1556,17 @@ export function registerSessionHandlers(io: SessionIOServer, deps: SessionHandle
           return;
         }
 
-        const next = retryRound(state, parsed.teamId);
+        // Re-arm the EXACT Defuser that played the failed round (Story 8.8) — read
+        // from the persisted RoundState, NOT recomputed from the rotation pointer
+        // (under Model B the pointer has already advanced past that player). A
+        // failed round always recorded a defuser; absence is a desync → refuse.
+        const failedDefuserId = round?.defusers[parsed.teamId];
+        if (failedDefuserId === undefined) {
+          socket.emit('ERROR', { code: 'ROUND_RETRY_FAILED', message: 'Could not retry the round. Try again.', recoverable: true });
+          return;
+        }
+
+        const next = retryRound(state, parsed.teamId, failedDefuserId);
         if (next === state) return; // guard no-op
 
         // Persist then emit. Single-key write — nothing partial to roll back. The

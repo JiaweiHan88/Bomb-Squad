@@ -210,15 +210,20 @@ describe('startRound — odd-team equalisation round (Story 8.9 / 8.11)', () => 
 });
 
 describe('startRound — retry round (Story 8.8)', () => {
-  /** A retry prep: preparation with the retryingTeamId marker set (via retryRound). */
-  const retryPrep = (teamId: 'A' | 'B'): SessionState => ({
+  /**
+   * A retry prep: preparation with the retry markers set (via retryRound). The
+   * Defuser is carried EXPLICITLY (`retryDefuserId`) — the player who played the
+   * failed round, NOT recomputed from the rotation pointer.
+   */
+  const retryPrep = (teamId: 'A' | 'B', defuserId: string): SessionState => ({
     ...prepState(),
     retryingTeamId: teamId,
+    retryDefuserId: defuserId,
     activeTeamId: teamId,
   });
 
   it('arms ONLY the retried team with its SAME Defuser, retry: true, outcomes: {}', () => {
-    const result = startRound(retryPrep('A'));
+    const result = startRound(retryPrep('A', 'sock-maya'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.round.defusers).toEqual({ A: 'sock-maya' }); // same Defuser, B absent
@@ -227,9 +232,25 @@ describe('startRound — retry round (Story 8.8)', () => {
     expect(result.round.roundNumber).toBe(1); // unchanged
   });
 
+  it('REGRESSION (Jay 2026-06-21): arms the player who FAILED, even though the pointer already advanced past them', () => {
+    // Model B: when Maya (index 0) failed round 1, resolveRound advanced Team A's
+    // currentDefuserIndex to 1 (→ Devon). The retry must STILL arm Maya — the old
+    // index-based pick armed relayOrder[1] = Devon (the bug). retryDefuserId fixes it.
+    const advanced: SessionState = {
+      ...retryPrep('A', 'sock-maya'),
+      teams: { ...prepState().teams, A: { ...prepState().teams.A!, currentDefuserIndex: 1 } },
+    };
+    const result = startRound(advanced);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.round.defusers).toEqual({ A: 'sock-maya' }); // the FAILED player, not Devon
+    expect(result.state.players['sock-maya']!.role).toBe('defuser');
+    expect(result.state.players['sock-devon']!.role).toBe('expert'); // NOT armed
+  });
+
   it('rests the other team (absent from defusers) and demotes its stale defuser', () => {
     // Retry Team B → Team A rests; Maya (lobby defuser on A) is demoted to expert.
-    const result = startRound(retryPrep('B'));
+    const result = startRound(retryPrep('B', 'sock-ana'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.round.defusers).toEqual({ B: 'sock-ana' });
@@ -238,28 +259,27 @@ describe('startRound — retry round (Story 8.8)', () => {
     expect(result.state.players['sock-maya']!.role).toBe('expert');
   });
 
-  it('clears the retryingTeamId marker and leaves pointers + counters UNCHANGED', () => {
-    const result = startRound(retryPrep('A'));
+  it('clears BOTH retry markers and leaves pointers + counters UNCHANGED', () => {
+    const result = startRound(retryPrep('A', 'sock-maya'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.retryingTeamId).toBeUndefined();
+    expect(result.state.retryDefuserId).toBeUndefined();
     expect(result.state.teams.A!.currentDefuserIndex).toBe(0);
     expect(result.state.teams.A!.equalisationRoundsPlayed).toBe(0);
     expect(result.state.roundNumber).toBe(1);
   });
 
-  it('refuses when the retried team is exhausted (failed equalisation round — V1 limitation)', () => {
-    const exhausted: SessionState = {
-      ...prepState(),
-      retryingTeamId: 'B',
-      activeTeamId: 'B',
-      teams: { ...prepState().teams, B: { ...prepState().teams.B!, currentDefuserIndex: 5 } },
-    };
-    expect(startRound(exhausted)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+  it('refuses when retryDefuserId is missing (desync) or names an off-team / unknown player', () => {
+    const noDefuser: SessionState = { ...prepState(), retryingTeamId: 'A', activeTeamId: 'A' };
+    expect(startRound(noDefuser)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
+
+    const offTeam = retryPrep('A', 'sock-ana'); // Ana is on B, not A
+    expect(startRound(offTeam)).toEqual({ ok: false, reason: 'NO_POPULATED_TEAM' });
   });
 
   it('does not mutate the input (deep-frozen input must not throw)', () => {
-    const frozen = deepFreeze(retryPrep('A'));
+    const frozen = deepFreeze(retryPrep('A', 'sock-maya'));
     const result = startRound(frozen);
     expect(result.ok).toBe(true);
     expect(frozen.status).toBe('preparation');

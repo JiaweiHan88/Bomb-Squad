@@ -217,7 +217,15 @@ claude-opus-4-8 (dev-story)
 
 ### Completion Notes List
 
-**Implemented (Tasks 1–8). Task 9 (Jay's interactive verification) is still OPEN — status stays `review` until his observed result is recorded here.**
+**Implemented (Tasks 1–8). Task 9 (Jay's interactive verification) — ❌ FAILED 2026-06-21, status stays `review`.**
+
+**Bug found by Jay 2026-06-21 (interactive Docker run):** after "Retry round", the **WRONG PLAYER** was armed as Defuser — the rotation had moved to the **next** player in line instead of re-arming the player who just failed. (Initially mis-described as a bomb-layout difference; it was the Defuser, not the bomb.) Violates AC-1's "the rotation does NOT advance (the same Defuser)".
+
+**ROOT CAUSE (confirmed):** a Story-8.11 (Model B) regression in the 8.8 retry path. 8.8 was written assuming `retryRound` "left the pointer unadvanced, so it still points at the original round's Defuser" — true under 8.9's model, where the pointer advanced in `openPreparation`. But **8.11 moved the per-team pointer advance into `resolveRound`** (advance only when a team plays). So when a natural round FAILS, `resolveRound` increments `currentDefuserIndex` to the NEXT slot; by retry time `startRetryRound`'s `relayOrder[currentDefuserIndex]` read returned the next player. 8.11 reworked the pointer timing and never reconciled this 8.8 retry pick.
+
+**FIX (2026-06-21):** replay the **EXACT** Defuser the failed round recorded, not an index recomputation (which is also ambiguous at the rotation boundary / for an equalisation round). Added a transient `SessionState.retryDefuserId` (optional, like `retryingTeamId`): the `ROUND_RETRY` handler reads `RoundState.defusers[teamId]` (the player who actually played the failed round) and passes it to `retryRound(state, teamId, defuserId)`; `startRetryRound` commits `state.retryDefuserId` (validated against the roster + the retrying team's `relayOrder`) and clears both markers; `cancelPreparation` clears them too. Pointers/`roundNumber`/counters remain untouched, so the bomb is still the identical reused-seed bomb. New unit regression (`startRound.test.ts`): with the pointer already advanced past the failed player, the retry still arms the failed player (not the next). typecheck clean; shared 216 / server 539 / client 396 + sim-verify 7/7 green.
+
+**Status stays `review`** — awaiting Jay's interactive re-verification of (a) the SAME Defuser re-arms on retry with the identical bomb, and (b) better-of-two scoring (which he did not reach on the first run).
 
 Per-team retry granularity confirmed correct by Jay ("your decision is right"). Key design decisions (as recorded in Dev Notes "Decisions to make and record"):
 
@@ -264,6 +272,7 @@ Per-team retry granularity confirmed correct by Jay ("your decision is right"). 
 ### Change Log
 
 - 2026-06-20 — Story 8.8 implemented (Tasks 1–8): retry a failed round — `RoundState.outcomes` + per-team retry gate, pure `retryRound` (same `roundNumber` → identical bomb), `startRound` retry branch (arm only the failed team, rest the other), `resolveRound` better-of-two replace-in-place, `ROUND_RETRY` handler (authority + failure-gated), `cancelPreparation` reconcile (deferred-work.md:7 resolved), and the client "Retry round" affordance driven by `ScoreboardPayload.failedTeams`. All typecheck + server/client/shared suites green. Task 9 (Jay's interactive verification) outstanding.
+- 2026-06-21 — **Post-verification fix (Jay's run exposed a Model-B regression):** the retry armed the NEXT player, not the one who failed — `startRetryRound` recomputed the Defuser from `currentDefuserIndex`, but Story 8.11 moved the pointer advance into `resolveRound`, so the index had already advanced. Fix: carry the exact failed-round Defuser explicitly via a new transient `SessionState.retryDefuserId` (handler reads `RoundState.defusers[teamId]` → `retryRound` → `startRetryRound` commits it; `cancelPreparation` clears it). Files: `packages/shared/src/types/session.ts`, `apps/server/src/session/{retryRound,startRound,cancelPreparation}.ts`, `apps/server/src/handlers/sessionHandlers.ts`; tests `apps/server/src/session/__tests__/{retryRound,startRound}.test.ts` (+ new advanced-pointer regression). typecheck clean; shared 216 / server 539 / client 396 + sim-verify 7/7 green. Re-verification by Jay still outstanding.
 
 ---
 

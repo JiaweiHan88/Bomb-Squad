@@ -39,11 +39,14 @@ export type StartRoundResult =
  * - The facilitator and off-team players are never touched.
  *
  * RETRY round (Story 8.8, FR14) — takes priority when `state.retryingTeamId` is
- * set. ONLY the retrying team is armed with its SAME Defuser (raw, unadvanced
- * index); the other team rests; `retry: true` drives the resolveRound
- * better-of-two. The retry marker is cleared in the returned state;
- * `equalisationRoundsPlayed`, `activeTeamId`, and every pointer are UNTOUCHED
- * (`retryRound` set `activeTeamId = retryingTeamId` for client routing).
+ * set. ONLY the retrying team is armed with the EXACT Defuser that played the
+ * failed round (`state.retryDefuserId`, carried from `RoundState.defusers` by the
+ * handler — NOT recomputed from the pointer, which under Model B has already
+ * advanced past that player); the other team rests; `retry: true` drives the
+ * resolveRound better-of-two. The retry markers are cleared in the returned state;
+ * `currentDefuserIndex`, `equalisationRoundsPlayed`, `activeTeamId`, and every
+ * pointer are UNTOUCHED (`retryRound` set `activeTeamId = retryingTeamId` for
+ * client routing).
  *
  * Integrity guard: if the active team's selected player is missing from `players`
  * the start is refused (NO_POPULATED_TEAM); an absent/undesignated active team is
@@ -153,21 +156,27 @@ export function startRound(state: SessionState): StartRoundResult {
 }
 
 /**
- * Commit a RETRY round (Story 8.8): arm ONLY the retrying team with its SAME
- * Defuser (raw index — `retryRound` left the pointer unadvanced, so it still
- * points at the original round's Defuser), rest the other team, and clear the
- * `retryingTeamId` marker. `roundNumber`, every `currentDefuserIndex`, and every
+ * Commit a RETRY round (Story 8.8): arm ONLY the retrying team with the EXACT
+ * Defuser that played the failed round (`state.retryDefuserId`, set by `retryRound`
+ * from the persisted `RoundState.defusers`), rest the other team, and clear the
+ * retry markers. `roundNumber`, every `currentDefuserIndex`, and every
  * `equalisationRoundsPlayed` are UNCHANGED (a retry is the same round, not a new
- * one). Pure — same discipline as `startRound`.
+ * one). The Defuser is NOT recomputed from the rotation pointer — under Model B
+ * (Story 8.11) the pointer advanced at resolve, so it now points at the NEXT
+ * player; reading `retryDefuserId` re-arms the right one regardless. Pure — same
+ * discipline as `startRound`.
  */
 function startRetryRound(state: SessionState, retryingTeamId: TeamId): StartRoundResult {
   const team = state.teams[retryingTeamId];
-  // Same-Defuser pick via the raw, unadvanced index. Out-of-range (an exhausted
-  // index — i.e. the original was an equalisation round) yields no natural pick:
-  // retry of a failed equalisation round is not supported in V1 (see header).
-  const defuserId =
-    team !== undefined && hasNaturalSlot(team) ? team.relayOrder[team.currentDefuserIndex] : undefined;
-  if (defuserId === undefined || state.players[defuserId] === undefined) {
+  // The EXACT player who played the failed round, validated against the roster AND
+  // the retrying team's relay order (a desync — missing/off-team id — refuses).
+  const defuserId = state.retryDefuserId;
+  if (
+    team === undefined ||
+    defuserId === undefined ||
+    !team.relayOrder.includes(defuserId) ||
+    state.players[defuserId] === undefined
+  ) {
     return { ok: false, reason: 'NO_POPULATED_TEAM' };
   }
 
@@ -187,9 +196,9 @@ function startRetryRound(state: SessionState, retryingTeamId: TeamId): StartRoun
     }
   }
 
-  // Clear the consumed retry marker (immutable rest-destructure). roundNumber,
+  // Clear the consumed retry markers (immutable rest-destructure). roundNumber,
   // pointers, and equalisation counters are untouched.
-  const { retryingTeamId: _consumed, ...rest } = state;
+  const { retryingTeamId: _consumed, retryDefuserId: _consumedDefuser, ...rest } = state;
 
   return {
     ok: true,

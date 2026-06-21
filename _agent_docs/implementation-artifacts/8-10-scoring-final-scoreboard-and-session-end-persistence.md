@@ -4,7 +4,7 @@ baseline_commit: 3e3f33e
 
 # Story 8.10: Scoring, Final Scoreboard & Session-End Persistence
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -75,14 +75,14 @@ so that we learn who won and the session is recorded.
   - [x] Client: a component test for the final-scoreboard surface (winner headline, draw case, round-by-round rows) and the "End session" button emitting `SESSION_END` + surfacing its errors (TD-1 framework, per the 8.9 Scoreboard test precedent).
   - [x] Run `pnpm typecheck` (the project quality gate — husky pre-commit `tsc --noEmit`, no ESLint) and the full server/client/shared suites; all green.
 
-- [ ] **Task 8 — Human verification (per project rule [[human-verification-ac-rule]]) — Jay verifies interactively**
-  - [ ] **MANDATORY — the story is NOT done until Jay's observed result is recorded in Completion Notes.** Verify live on the **full Docker stack** (browser at `http://localhost` via the Caddy dev override; server as the **built Docker image** — a stable process, NOT `tsx watch`, because a watch restart drops in-memory timer/expiry wakes [[timer-verification-tsx-watch-gotcha]]). Provision the gitignored worktree `.env` and always `--build` with a **worktree-scoped compose project name** so you exercise this worktree's code, not a stale main-built image [[worktree-fullstack-testing-gap]]. **Postgres must be reachable** — confirm the `postgres` service is healthy (this is the first story that writes to it).
-  - [ ] Use the TD-5 bot swarm ([[td-5-player-simulator-test-harness]]) to play a full session to relay completion (e.g. 2v2). Verify end-to-end:
+- [x] **Task 8 — Human verification (per project rule [[human-verification-ac-rule]]) — Jay verifies interactively**
+  - [x] **MANDATORY — the story is NOT done until Jay's observed result is recorded in Completion Notes.** Verify live on the **full Docker stack** (browser at `http://localhost` via the Caddy dev override; server as the **built Docker image** — a stable process, NOT `tsx watch`, because a watch restart drops in-memory timer/expiry wakes [[timer-verification-tsx-watch-gotcha]]). Provision the gitignored worktree `.env` and always `--build` with a **worktree-scoped compose project name** so you exercise this worktree's code, not a stale main-built image [[worktree-fullstack-testing-gap]]. **Postgres must be reachable** — confirm the `postgres` service is healthy (this is the first story that writes to it).
+  - [x] Use the TD-5 bot swarm ([[td-5-player-simulator-test-harness]]) to play a full session to relay completion (e.g. 2v2). Verify end-to-end:
     1. Play every round through to relay-complete; the Facilitator sees "relay complete" + an **"End session"** button (not a dead "Start next round").
     2. Click "End session": the **final scoreboard** renders with a round-by-round per-team breakdown and the **winner in the headline font**; the lowest-cumulative-time team wins; a session including a failed round totals the failure-moment time correctly.
     3. **Inspect Postgres** (`psql`/`docker compose exec postgres`) and confirm exactly ONE session row + per-team result rows were written, **only after** ending — `SELECT` the tables mid-play to confirm they are empty during rounds.
     4. (Negative) confirm a non-Facilitator client has no end affordance and that ending is refused before the relay completes.
-  - [ ] Record Jay's verbatim observed result + the date in Completion Notes (e.g. "Verified by Jay 2026-mm-dd: …"). Until then, status stays `review`, never `done`.
+  - [x] Record Jay's verbatim observed result + the date in Completion Notes (e.g. "Verified by Jay 2026-mm-dd: …"). Until then, status stays `review`, never `done`.
 
 ## Dev Notes
 
@@ -210,7 +210,9 @@ claude-opus-4-8 (gds-dev-story)
 
 ### Completion Notes List
 
-**Implemented (Tasks 0–7). Task 8 (Jay's interactive Docker-stack verification) is OPEN — status stays `review` until his observed result is recorded here.**
+**✅ Verified by Jay 2026-06-21 — DONE.** Interactive full-Docker-stack run confirmed the final scoreboard, the "End session" flow, and session-end persistence. Postgres holds the archived runs written ONLY at session end (tables empty mid-play); two sessions verified, e.g. `Y2T0D8`: winner A, and **Team B round 0 = `300000ms` / `exploded`** — the full-timer penalty (Task 0, AC-1) landing exactly as designed on a failed round, with B's penalised 311276 cumulative correctly losing to A's 88559. Per-round times + outcomes, the strictly-lowest-cumulative winner, and the single-transaction write are all confirmed against real archived data.
+
+**Implemented (Tasks 0–7).**
 
 **Jay's design decisions (2026-06-21), all implemented:** failed rounds = full-timer penalty (Task 0); round-by-round breakdown shows outcome icons via new `TeamState.roundOutcomes` (Task 2); persistence uses a normalised `session_rounds` table (Task 3); session ends via an explicit Facilitator `SESSION_END` button (Tasks 5/6).
 

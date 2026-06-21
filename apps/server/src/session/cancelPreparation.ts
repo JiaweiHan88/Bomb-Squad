@@ -36,7 +36,7 @@ export function cancelPreparation(state: SessionState): SessionState {
   // between-rounds, leave roundNumber + every pointer untouched (retryRound never
   // advanced them). Strip the transient fields via rest-destructure (immutable).
   if (state.retryingTeamId !== undefined) {
-    const { retryingTeamId: _retry, activeTeamId: _active, ...rest } = state;
+    const { retryingTeamId: _retry, retryDefuserId: _retryDefuser, activeTeamId: _active, ...rest } = state;
     return { ...rest, status: 'between-rounds' };
   }
 

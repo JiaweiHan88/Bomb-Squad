@@ -29,12 +29,15 @@ const betweenRounds = (): SessionState => ({
 });
 
 describe('retryRound (Story 8.8)', () => {
-  it('flips between-rounds → preparation, sets retryingTeamId, leaves roundNumber + pointers UNCHANGED', () => {
+  it('flips between-rounds → preparation, sets retryingTeamId + retryDefuserId, leaves roundNumber + pointers UNCHANGED', () => {
     const before = betweenRounds();
-    const next = retryRound(before, 'B');
+    const next = retryRound(before, 'B', 'p3');
 
     expect(next.status).toBe('preparation');
     expect(next.retryingTeamId).toBe('B');
+    // The EXACT failed-round Defuser is carried explicitly (not recomputed from
+    // the pointer, which under Model B already advanced past that player).
+    expect(next.retryDefuserId).toBe('p3');
     // Crucially NOT advanced (a retry is the same round, same Defuser).
     expect(next.roundNumber).toBe(2);
     expect(next.teams.A!.currentDefuserIndex).toBe(1);
@@ -48,13 +51,13 @@ describe('retryRound (Story 8.8)', () => {
     'returns the same reference when status is %s (guard, no throw)',
     (status) => {
       const state: SessionState = { ...lobbyState(), status };
-      expect(retryRound(state, 'A')).toBe(state);
+      expect(retryRound(state, 'A', 'p1')).toBe(state);
     },
   );
 
   it('does not mutate the input (deep-frozen input must not throw)', () => {
     const frozen = deepFreeze(betweenRounds());
-    const next = retryRound(frozen, 'A');
+    const next = retryRound(frozen, 'A', 'p1');
     expect(next.retryingTeamId).toBe('A');
     expect(frozen.status).toBe('between-rounds');
     expect((frozen as SessionState).retryingTeamId).toBeUndefined();
@@ -62,7 +65,7 @@ describe('retryRound (Story 8.8)', () => {
 
   it('preserves players, teams, config references (only status + marker change)', () => {
     const before = betweenRounds();
-    const next = retryRound(before, 'A');
+    const next = retryRound(before, 'A', 'p1');
     expect(next.players).toBe(before.players);
     expect(next.teams).toBe(before.teams);
     expect(next.config).toBe(before.config);

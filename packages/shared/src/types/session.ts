@@ -144,6 +144,18 @@ export interface SessionState {
    */
   retryingTeamId?: TeamId;
   /**
+   * The EXACT Defuser to re-arm for a retry (Story 8.8, set alongside
+   * `retryingTeamId`). The just-resolved round's `RoundState.defusers[teamId]` —
+   * the player who actually played the failed round. Stored explicitly because
+   * under Model B (Story 8.11) the rotation pointer ADVANCES at resolve, so by the
+   * time the retry opens `currentDefuserIndex` already points at the NEXT player;
+   * recomputing the Defuser from the index would arm the wrong one (and is
+   * ambiguous at the rotation boundary / for an equalisation round). `startRound`'s
+   * retry branch commits THIS id and clears it; `cancelPreparation` clears it too.
+   * Undefined when no retry is pending.
+   */
+  retryDefuserId?: string;
+  /**
    * The single ACTIVE team for the round about to play / playing (Story 8.11,
    * Model B). Transient per-round intent: `openPreparation` SELECTS it (via the
    * pure `selectActiveTeam` snake rule) when prep opens, `startRound` CONSUMES it

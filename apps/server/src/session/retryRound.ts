@@ -13,9 +13,15 @@ import type { SessionState, TeamId } from '@bomb-squad/shared';
  * guarantee). `openPreparation` would `+1` both, which is wrong for a retry.
  *
  * It records the retry intent in the transient `retryingTeamId` marker (the team
- * re-attempting the failed round). `startRound` consumes + clears it: only that
- * team is armed, with its SAME Defuser; the other team rests (reusing the Story
- * 8.9 resting-team machinery). The failed-round eligibility gate (was this team's
+ * re-attempting the failed round) PLUS `retryDefuserId` — the EXACT player who
+ * played the failed round, supplied by the handler from the persisted
+ * `RoundState.defusers[teamId]`. `startRound` consumes + clears both: only that
+ * team is armed, with that SAME Defuser; the other team rests (reusing the Story
+ * 8.9 resting-team machinery). The Defuser is carried EXPLICITLY rather than
+ * recomputed from the rotation pointer because under Model B (Story 8.11) the
+ * pointer ADVANCES at resolve, so by retry time `currentDefuserIndex` already
+ * points at the NEXT player — recomputing it would arm the wrong Defuser (the
+ * Jay-reported 2026-06-21 bug). The failed-round eligibility gate (was this team's
  * last outcome a failure?) lives in the handler, which loads the persisted
  * `RoundState.outcomes` — this pure transition only flips the phase + records
  * intent.
@@ -24,10 +30,10 @@ import type { SessionState, TeamId } from '@bomb-squad/shared';
  * any status other than 'between-rounds' returns the same reference, so a
  * duplicate emit is a structural no-op for the handler.
  */
-export function retryRound(state: SessionState, teamId: TeamId): SessionState {
+export function retryRound(state: SessionState, teamId: TeamId, defuserId: string): SessionState {
   if (state.status !== 'between-rounds') return state;
   // Set activeTeamId too (Story 8.11): the retrying team IS the active team this
   // round, so the client routes the other team to spectate. `startRound`'s retry
-  // branch arms only `retryingTeamId`; `cancelPreparation` clears both markers.
-  return { ...state, status: 'preparation', retryingTeamId: teamId, activeTeamId: teamId };
+  // branch arms `retryDefuserId`; `cancelPreparation` clears all three markers.
+  return { ...state, status: 'preparation', retryingTeamId: teamId, retryDefuserId: defuserId, activeTeamId: teamId };
 }
