@@ -1,5 +1,14 @@
 # Deferred Work
 
+## Deferred from: code review of Epic-8 relay (combined 8-7/8-8/8-9/8-10/8-11) (2026-06-21)
+
+_gds-code-review, three adversarial layers over the combined relay diff `b536b01..HEAD`. Acceptance Auditor passed all five stories. Two **[Decision]** items await Jay (logged in 8-7); the four below are deferred._
+
+- **Equalisation owed but unstaffable (→ 8-9).** If the shorter team owes an equalisation round but every already-defused player on its `relayOrder` has left, no volunteer is eligible (`equalisationVolunteer.ts` → `NOT_ON_TEAM`), `startRound` refuses (`EQUALISATION_VOLUNTEER_REQUIRED`), and `isRelayComplete` stays false so `SESSION_END` is blocked — the session can't complete or end. Partial mitigation: facilitator `PLAYER_REMOVE` recomputes `maxLen`/owed. Requires near-total team abandonment; revisit if seen in playtest. [Edge, S2]
+- **Stale timer wake during the pause-commit window (→ 8-7 / 8-4).** `onTimerExpired` → `resolveRound('time-expired')` doesn't re-check `session.pausedAt`; a wake in-flight when `autoPauseOnDisconnect` commits `pausedAt` (before `freezeRoundTimers` cancels it) resolves the round. Outcome is defensible (the clock genuinely hit 0); optional `pausedAt` re-check would harden it. [Edge, S3]
+- **Snake `A,B,B,A` order disrupted by equalisation eligibility (→ 8-11).** `selectActiveTeam` eligibility (`hasNaturalSlot OR owed>0`, positional-first) lets the short team play equalisation rounds before the long team finishes its natural rotation (e.g. A=4,B=2 → A,B,B,A,A,B,B,A), inverting the second-mover spectating balance in the final pair. Fairness nuance only; totals/completion correct. [Blind + Edge, S3]
+- **Solo equalisation round reuses an earlier pair's bomb layout (→ 8-11).** A lone equalisation turn gets `pairIndex = ceil(roundNumber/2)`, colliding with that pair's two natural turns, so the equalisation bomb reproduces an already-seen layout. Harmless (no matched opponent), cosmetic determinism artifact. [Edge, S3]
+
 ## Raised by: correct-course — Sequential Round Play (2026-06-20)
 
 _See `_agent_docs/planning-artifacts/sprint-change-proposal-2026-06-20.md`. Captured here as cross-cutting concerns; owning stories are 8-11 and 3-7._

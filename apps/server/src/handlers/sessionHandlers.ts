@@ -547,8 +547,10 @@ async function restoreReattachedSocket(
  * ACTIVE round: freezes the clock IMMEDIATELY so no time is unfairly burned, names
  * the dropper for the amber strip, and resets the resume-ready gate. Race-safe via
  * the 2.6 `updateJSON` primitive (a team can be resolving concurrently). Only acts
- * on an `active` round with the player still on a team; every other phase is a
- * no-op (lobby cleanup is the grace-window path; between-rounds/ended don't pause).
+ * on an `active` round when the dropper is on the ACTIVE team (Model B — a resting-
+ * team drop must not freeze the live round); every other phase / a non-active-team
+ * drop is a no-op (lobby cleanup is the grace-window path; between-rounds/ended
+ * don't pause).
  */
 async function autoPauseOnDisconnect(
   io: SessionIOServer,
@@ -560,10 +562,17 @@ async function autoPauseOnDisconnect(
     const { result } = await deps.redis.updateJSON<SessionState, SessionState | null>(
       sessionKey(sessionId),
       (current) => {
+        if (current === null || current.status !== 'active') {
+          return { commit: false, result: null };
+        }
+        // Model B (Story 8.11): only the ACTIVE team plays a given round. A drop by
+        // the resting team / Facilitator / spectator must NOT freeze the live round
+        // or block its resume. No-op unless the dropper is on the active team
+        // (fall back to any on-a-team player if activeTeamId is unset — defensive).
+        const droppedTeamId = current.players[playerId]?.teamId;
         if (
-          current === null ||
-          current.status !== 'active' ||
-          current.players[playerId]?.teamId === undefined
+          droppedTeamId === undefined ||
+          (current.activeTeamId !== undefined && droppedTeamId !== current.activeTeamId)
         ) {
           return { commit: false, result: null };
         }

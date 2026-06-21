@@ -124,6 +124,34 @@ describe('canResume', () => {
   });
 });
 
+describe('active-team scoping (Model B, Story 8.11)', () => {
+  // Same roster, but Team A is the team currently playing the round.
+  const activeTeamAState = (): SessionState => ({ ...activeState(), activeTeamId: 'A' });
+
+  it('disconnect pause resets ONLY the active team — a resting-team drop leaves the rest untouched', () => {
+    const next = pauseSession(activeTeamAState(), { kind: 'disconnect', now: 1000, droppedPlayerId: 'ana' });
+    // Team A is playing: its participants reset to not-ready for the resume gate.
+    expect(next.players['maya']!.isReady).toBe(false);
+    expect(next.players['devon']!.isReady).toBe(false);
+    // Ana is on the RESTING team B — not a participant this round, ready untouched.
+    expect(next.players['ana']!.isReady).toBe(true);
+    expect(next.players['fac']!.isReady).toBe(true);
+    expect(next.players['sam']!.isReady).toBe(true);
+  });
+
+  it('canResume ignores a resting-team player — only the active team must be ready', () => {
+    // A resting-team (B / ana) drop pauses; ana is NOT required to come back.
+    let paused = pauseSession(activeTeamAState(), { kind: 'disconnect', now: 1000, droppedPlayerId: 'ana' });
+    expect(canResume(paused)).toBe(false); // active team (maya, devon) was reset
+    // ana stays not-ready (or absent) and must NOT block resume.
+    paused = { ...paused, players: { ...paused.players, ana: { ...paused.players['ana']!, isReady: false } } };
+    paused = { ...paused, players: { ...paused.players, maya: { ...paused.players['maya']!, isReady: true } } };
+    expect(canResume(paused)).toBe(false); // devon still short
+    paused = { ...paused, players: { ...paused.players, devon: { ...paused.players['devon']!, isReady: true } } };
+    expect(canResume(paused)).toBe(true); // active team ready; resting ana irrelevant
+  });
+});
+
 describe('clearDisconnectedPlayer', () => {
   it('removes a reconnected player; same reference when absent', () => {
     const paused = pauseSession(activeState(), { kind: 'disconnect', now: 1000, droppedPlayerId: 'maya' });

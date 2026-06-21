@@ -258,6 +258,12 @@ Fixes (all client + a shared refactor; NO server-logic change):
 - `apps/client/src/ui/copy.ts` — equalisation/relay-complete/resting copy.
 - `apps/client/src/ui/__tests__/Scoreboard.test.tsx`, `apps/client/src/ui/__tests__/Preparation.test.tsx` — new relay-UX tests; fixed a degenerate 8.6 fixture now detected as relay-complete.
 
+### Review Findings (combined Epic-8 relay code review — gds-code-review 2026-06-21)
+
+_Reviewed as part of the combined Epic-8 relay/resilience/scoring diff (`b536b01..HEAD`), reshaped by 8.11 (Model B). Acceptance Auditor: **8.9 PASS** — every-player-defuses-once, equalisation convergence via `equalisationRoundsOwed`, on-team volunteer validation, server never auto-picks, `RELAY_COMPLETE` advance gate._
+
+- [x] [Review][Defer] **Equalisation owed but unstaffable → relay can neither complete nor end** `[apps/server/src/session/equalisationVolunteer.ts, startRound.ts (EQUALISATION_VOLUNTEER_REQUIRED)]` — if the shorter team owes an equalisation round but every already-defused player on its `relayOrder` has left the roster, `designateEqualisationVolunteer` rejects all candidates (`NOT_ON_TEAM`), `startRound` refuses, and `isRelayComplete` stays false so `SESSION_END` is blocked (`RELAY_NOT_COMPLETE`) — no path closes the session. Deferred — requires near-total abandonment of one team; partially mitigated today by the facilitator `PLAYER_REMOVE`-ing departed players (recomputes `maxLen`/owed), though the arithmetic isn't always escapable. Revisit if it surfaces in playtest. [Edge Case Hunter, S2]
+
 ### Change Log
 
 - 2026-06-20 — Story 8.9 implemented (Tasks 1–7): odd-team equalisation bookkeeping, pure relay-completion predicate, raw-index rotation cap (removes the indefinite-wrap bug), Facilitator volunteer via reused `TEAM_ASSIGN`, between-rounds advance gated on `isRelayComplete` (`RELAY_COMPLETE`), resting-team demotion (no dead surface). Resolved two deferred items (index-clamp, stale-defuser). All typecheck + server/client/shared suites green. Task 8 (Jay's interactive verification) outstanding.

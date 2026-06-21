@@ -1,4 +1,4 @@
-import type { PlayerInfo, SessionState } from '@bomb-squad/shared';
+import type { PlayerInfo, SessionState, TeamId } from '@bomb-squad/shared';
 
 /**
  * Pure pause/resume reducers (Story 8.7, FR13). No I/O, no clock, no randomness —
@@ -8,9 +8,11 @@ import type { PlayerInfo, SessionState } from '@bomb-squad/shared';
  * to the exact phase it paused from (the per-team countdown freeze is the Task-4
  * timer effect, which the handler runs alongside these for an `active` round).
  *
- * An "active participant" is a player ON A TEAM (`teamId !== undefined`); the
- * Facilitator and unassigned spectators are excluded from the disconnect-pause
- * ready gate and never trigger an auto-pause.
+ * An "active participant" is a player on the team CURRENTLY PLAYING the round
+ * (`teamId === activeTeamId`). Under Model B (Story 8.11) only one team plays a
+ * given round; the Facilitator, unassigned spectators, AND the resting team are
+ * excluded from the disconnect-pause ready gate and never freeze the live round.
+ * (When `activeTeamId` is unset — defensive — any on-a-team player counts.)
  */
 
 export interface PauseArgs {
@@ -27,17 +29,26 @@ export interface PauseArgs {
   droppedPlayerId?: string;
 }
 
-/** Whether a player counts toward the disconnect-pause ready gate (on a team). */
-function isActiveParticipant(player: PlayerInfo): boolean {
-  return player.teamId !== undefined;
+/**
+ * Whether a player counts toward the disconnect-pause ready gate: on the team
+ * currently playing (`teamId === activeTeamId`). A resting-team player, the
+ * Facilitator, and spectators do NOT count. When `activeTeamId` is undefined
+ * (defensive — no active team) any on-a-team player counts.
+ */
+function isActiveParticipant(player: PlayerInfo, activeTeamId: TeamId | undefined): boolean {
+  if (player.teamId === undefined) return false;
+  return activeTeamId === undefined || player.teamId === activeTeamId;
 }
 
 /** Reset every active participant's `isReady` to false; same ref if none changed. */
-function resetParticipantsReady(players: Record<string, PlayerInfo>): Record<string, PlayerInfo> {
+function resetParticipantsReady(
+  players: Record<string, PlayerInfo>,
+  activeTeamId: TeamId | undefined,
+): Record<string, PlayerInfo> {
   let changed = false;
   const next: Record<string, PlayerInfo> = {};
   for (const [id, player] of Object.entries(players)) {
-    if (isActiveParticipant(player) && player.isReady) {
+    if (isActiveParticipant(player, activeTeamId) && player.isReady) {
       next[id] = { ...player, isReady: false };
       changed = true;
     } else {
@@ -66,7 +77,7 @@ export function pauseSession(state: SessionState, args: PauseArgs): SessionState
     args.droppedPlayerId !== undefined && !already.includes(args.droppedPlayerId)
       ? [...already, args.droppedPlayerId]
       : already;
-  const players = resetParticipantsReady(state.players);
+  const players = resetParticipantsReady(state.players, state.activeTeamId);
 
   // No-op only if already a disconnect-pause AND nothing changed.
   if (
@@ -101,11 +112,14 @@ export function resumeSession(state: SessionState): SessionState {
 /**
  * Whether the session may resume right now (Story 8.7 AC-1/AC-2 gate). A
  * Facilitator-kind pause is always resumable (the handler authority-gates the
- * Facilitator). A disconnect-kind pause requires EVERY active participant ready.
+ * Facilitator). A disconnect-kind pause requires EVERY active participant (the
+ * team currently playing) ready — a resting-team drop does not block resume.
  */
 export function canResume(state: SessionState): boolean {
   if (state.pauseKind !== 'disconnect') return true;
-  return Object.values(state.players).every((p) => !isActiveParticipant(p) || p.isReady);
+  return Object.values(state.players).every(
+    (p) => !isActiveParticipant(p, state.activeTeamId) || p.isReady,
+  );
 }
 
 /** Remove a reconnected player from the dropped list (same ref if absent). */

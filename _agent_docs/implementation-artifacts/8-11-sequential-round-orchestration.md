@@ -257,6 +257,15 @@ claude-opus-4-8 (dev-story)
 **Tooling**
 - `tools/sim-clients/src/verify.ts` — 2-team defuse check plays the full snake relay to completion.
 
+### Review Findings (combined Epic-8 relay code review — gds-code-review 2026-06-21)
+
+_Reviewed as part of the combined Epic-8 relay/resilience/scoring diff (`b536b01..HEAD`). Acceptance Auditor: **8.11 PASS** — one active team/round, resting team absent from `round.defusers`, snake `A,B,B,A`, identical layout per pair via `pairIndex`, single pointer-advance site in `resolveRound`. Findings below are fairness/ordering nuances, not AC violations._
+
+- [x] [Review][Defer] **Snake `A,B,B,A` order can be disrupted by equalisation eligibility** `[packages/shared/src/session/relay.ts selectActiveTeam]` — eligibility is `hasNaturalSlot OR owed>0` with the positional pick tried first. With A=4, B=2 the order becomes A,B,B,A,A,B,B,A: B plays its equalisation rounds (R6/R7) before A finishes its natural rotation (R8), so in the final pair B plays its layout *before* A — reversing the second-mover spectating balance the snake exists to protect. No stranding, totals/`isRelayComplete` correct. Deferred — fairness nuance in a rare asymmetric-team shape; the snake's core balance holds for equal-length teams. [Blind + Edge, S3]
+- [x] [Review][Defer] **Solo equalisation round reuses an earlier pair's bomb layout** `[packages/shared/src/session/relay.ts pairIndexFor]` — a lone equalisation turn still gets `pairIndex = ceil(roundNumber/2)`, colliding with the two natural turns of that pair, so the equalisation bomb reproduces a layout the team(s) already saw. Harmless (no matched opponent for fairness in a solo turn) but an unintended "same bomb twice" the seed design didn't call out. Deferred — cosmetic determinism artifact. [Edge, S3]
+
+**Cross-reference:** the Model-B resting-team pause gap (a resting player's mid-round drop pauses the *active* team and blocks resume) is logged as a **[Decision]** against Story 8-7 — the pause code 8.7 wrote predates this story's sequential model. See 8-7 Review Findings.
+
 ### Change Log
 
 - 2026-06-21 — Story 8.11 created (ready-for-dev) via gds-create-story: Model B sequential orchestration (one active team/round, per-team pointer, single clock, resting-team spectate routing).

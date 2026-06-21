@@ -3148,6 +3148,32 @@ describe('Pause — facilitator & disconnect (Story 8.7)', () => {
     expect(timer.pausedAt).not.toBeNull(); // clock frozen, key kept
   });
 
+  it('a RESTING-team player disconnect does NOT auto-pause the active round (Model B, Story 8.11)', async () => {
+    const { ack } = await createWithIdentity();
+    const maya = await joinWithIdentity(ack.joinCode, 'Maya');
+    const ana = await joinWithIdentity(ack.joinCode, 'Ana');
+    await assign(maya.identity.playerId, 'A'); // Team A is the active team this round
+    await assign(ana.identity.playerId, 'B'); // Team B is resting
+    seed(ack.sessionId, { activeTeamId: 'A' });
+    await store.setJSON(timerKey(ack.sessionId, 'A'), runningTimer());
+
+    // A resting-team drop must NOT freeze the live round — so no auto-pause
+    // SESSION_STATE is broadcast, and the stored session stays unpaused.
+    const stateEvent = nextEvent<SessionState>(facilitator, 'SESSION_STATE');
+    ana.socket.disconnect();
+    const settled = await Promise.race([
+      stateEvent.then(() => 'received' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 100)),
+    ]);
+    expect(settled).toBe('timeout');
+
+    const stored = JSON.parse(store.data.get(sessionKey(ack.sessionId))!) as SessionState;
+    expect(stored.pausedAt).toBeNull();
+    expect(stored.pauseKind).toBeNull();
+    const timer = JSON.parse(store.data.get(timerKey(ack.sessionId, 'A'))!) as TimerState;
+    expect(timer.pausedAt).toBeNull(); // active team's clock kept running
+  });
+
   it('a reconnecting mid-round participant is re-sent BOMB_INIT and cleared from the dropped list', async () => {
     const { ack } = await createWithIdentity();
     const maya = await joinWithIdentity(ack.joinCode, 'Maya');
