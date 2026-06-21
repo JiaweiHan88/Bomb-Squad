@@ -100,13 +100,22 @@ export function strikeModule(module: ModuleState<unknown>): SolveStep[] | null {
   switch (module.moduleId) {
     case WIRES_MODULE_ID: {
       const data = module.data as WiresState;
-      const len = data.wires.length;
-      if (len < 2) return null; // a single wire is the answer — can't miss
+      if (data.wires.length < 2) return null; // a single wire is the answer — can't miss
       const right = solveWires(
         data.wires.map((w) => w.color),
         data.ctx,
       );
-      return [{ kind: 'emit', action: { type: 'CUT', wireIndex: (right + 1) % len } }];
+      // Each strike must cut a DIFFERENT *uncut* wrong wire. Cutting an
+      // already-severed wire is an idempotent no-op in the reducer (no second
+      // strike), so a fixed index strikes at most once — pick the first uncut
+      // wire that isn't the answer. Returns null once only the answer remains
+      // uncut (cutting it would solve, not strike), so the caller moves on.
+      for (let i = 0; i < data.wires.length; i++) {
+        if (i !== right && !data.wires[i].cut) {
+          return [{ kind: 'emit', action: { type: 'CUT', wireIndex: i } }];
+        }
+      }
+      return null;
     }
     case BUTTON_MODULE_ID: {
       const data = module.data as ButtonState;

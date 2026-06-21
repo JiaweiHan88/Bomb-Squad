@@ -8,6 +8,8 @@
  *   2. BUTTON   — the-button only → exercises the PRESS/RELEASE + timer-digit
  *                 HOLD loop over real sockets
  *   3. STRIKE   — wires, one wrong cut → a STRIKE is observed
+ *   4. DETONATE — wires, on-demand detonateNow() → 3 strikes → BOMB_EXPLODED
+ *                 (guards the fixed-wrong-wire bug where strikes stalled at 1)
  *
  * This is the AC-6 smoke run made Docker-free and repeatable (`pnpm verify`).
  * @bomb-squad/server is a DEV dependency used only here; nothing in the shipped
@@ -156,6 +158,25 @@ async function run(): Promise<void> {
       swarm.facilitator!.startRound();
       await swarm.players[0].waitUntil(() => swarm.players[0].strikes >= 1, 15_000).catch(() => {});
       check('strike: a STRIKE was registered for the team', swarm.players[0].strikes >= 1);
+      teardown(swarm);
+    }
+
+    // 4. DETONATE — on-demand detonateNow() must accumulate 3 strikes to explode
+    //    on an all-wires bomb. Guards the bug where a fixed wrong-wire index only
+    //    ever struck once (cutting an already-severed wire is a no-op).
+    {
+      const swarm = await buildAutonomousSwarm(
+        { url: server.url, teams: 1, perTeam: 2, outcome: 'manual', pacingMs: 20, log },
+        { modulePool: ['wires'], moduleCount: 3, timerMs: 300_000 },
+      );
+      const defuser = swarm.players[0];
+      swarm.facilitator!.openPreparation();
+      await swarm.facilitator!.waitUntil(() => swarm.facilitator!.session?.status === 'preparation');
+      swarm.facilitator!.startRound();
+      await defuser.waitUntil(() => defuser.isCurrentDefuser && defuser.bomb !== null, 15_000);
+      await defuser.detonateNow();
+      await defuser.waitUntil(() => defuser.resolved === 'exploded', 20_000).catch(() => {});
+      check('detonate: 3 strikes reached → bomb exploded', defuser.resolved === 'exploded' && defuser.strikes >= 3);
       teardown(swarm);
     }
   } finally {
