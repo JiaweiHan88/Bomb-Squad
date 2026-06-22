@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore.js';
 import { useVoiceStore } from '../store/voiceStore.js';
 import { connectVoice, disconnectVoice, reconnectVoice } from '../voice/connectVoice.js';
+import { useVoiceScopeSync } from '../voice/useVoiceScopeSync.js';
 import Button from './Button.js';
 import {
   VOICE_CONNECT_CTA,
@@ -50,6 +51,14 @@ export default function VoiceController() {
   const selfId = useGameStore((s) => s.myPlayerId);
   const status = useVoiceStore((s) => s.status);
   const [dismissed, setDismissed] = useState(false);
+
+  // Re-mint on effective-scope change (Story 3.5): when a CONNECTED player's
+  // server-assigned voice scope flips (e.g. facilitator reassigns a Defuser to
+  // Spectator), tear down the stale connection and reconnect with a fresh token
+  // in the new room/publish mode. A no-op for same-scope role relabels (e.g.
+  // Defuser→Expert same team) and for a player who never connected (idle). MUST
+  // run before the early return below — hooks are unconditional.
+  useVoiceScopeSync(session, selfId);
 
   // Re-show the failure microcopy whenever we (re-)enter `unavailable`.
   useEffect(() => {

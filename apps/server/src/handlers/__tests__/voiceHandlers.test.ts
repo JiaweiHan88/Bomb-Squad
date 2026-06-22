@@ -278,6 +278,38 @@ describe('VOICE_TOKEN handler', () => {
     expect(decodeJwt(res.token).video?.canPublish).toBe(false);
   });
 
+  // ── Re-mint after a role change (Story 3.5) ────────────────────────────────
+  // The server is stateless: a SECOND VOICE_TOKEN request after the player's role
+  // changes derives the NEW room + grants from authoritative state, never the
+  // first request. This is the server half of "old token never reused".
+  it('re-derives a NEW room + grants on a second request after a role change', async () => {
+    const { sessionId } = await createSession(client);
+    const playerId = await facilitatorId(store, sessionId);
+
+    // First: a Bomb Room defuser on team A.
+    await setPlayer(store, sessionId, playerId, 'defuser', { teamId: 'A', status: 'active' });
+    const first = await requestVoiceToken(client);
+    expect(isGrant(first)).toBe(true);
+    if (!isGrant(first)) return;
+    expect(first.room).toBe(`bomb-room:${sessionId}:A`);
+    expect(decodeJwt(first.token).video?.canPublish).toBe(true);
+
+    // Facilitator reassigns them to Spectator (team cleared) — the cross-boundary
+    // trigger. The SAME socket requests again with the SAME empty payload.
+    await setPlayer(store, sessionId, playerId, 'spectator', { teamId: undefined, status: 'active' });
+    const second = await requestVoiceToken(client);
+    expect(isGrant(second)).toBe(true);
+    if (!isGrant(second)) return;
+
+    // New room, listen-only grant — derived from current state, not the prior token.
+    expect(second.room).toBe(`spectator-lounge:${sessionId}`);
+    expect(second.token).not.toBe(first.token);
+    const claims = decodeJwt(second.token);
+    expect(claims.video?.room).toBe(`spectator-lounge:${sessionId}`);
+    expect(claims.video?.canPublish).toBe(false);
+    expect(claims.video?.canSubscribe).toBe(true);
+  });
+
   it('never logs the minted token (AC #2 secret-leak guard)', async () => {
     const { sessionId } = await createSession(client);
     const playerId = await facilitatorId(store, sessionId);

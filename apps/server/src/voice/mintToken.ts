@@ -12,27 +12,19 @@
  */
 import { AccessToken, type VideoGrant } from 'livekit-server-sdk';
 import type { PlayerRole, SessionState, TeamId } from '@bomb-squad/shared';
+import { resolveVoiceScope as resolveSharedVoiceScope } from '@bomb-squad/shared';
 
-/**
- * Roles that belong in a team's bidirectional Bomb Room (AR12). The facilitator
- * is deliberately NOT here: their baseline room is the Spectator Lounge (see
- * {@link resolveVoiceScope}). Their on-demand push-to-talk INTO a team's Bomb
- * Room is a separate mechanism (its own grant/token) handled by a later story.
- */
-const BOMB_ROOM_ROLES: ReadonlySet<PlayerRole> = new Set<PlayerRole>([
-  'defuser',
-  'expert',
-]);
-
-/** Raised when a participant cannot be scoped to a room (e.g. a Bomb Room role
- * with no team assigned). The voiceHandlers guard catches this and acks an
- * error rather than minting a malformed token. */
-export class VoiceScopeError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'VoiceScopeError';
-  }
-}
+// The room/grant derivation now lives in `@bomb-squad/shared` (Story 3.5) so the
+// client's re-mint reconciler and this server minting path can never drift. We
+// re-export the shared error + room-name builders here to keep existing import
+// sites (`voiceHandlers`, tests) unchanged — this module stays the server's
+// public voice-scope surface; it just delegates the topology rule to shared.
+export {
+  VoiceScopeError,
+  bombRoomName,
+  spectatorLoungeName,
+  lobbyRoomName,
+} from '@bomb-squad/shared';
 
 export interface VoiceParticipant {
   /** Server-side player id, used verbatim as the LiveKit participant identity. */
@@ -61,84 +53,29 @@ export interface ResolvedVoiceScope {
   grant: VideoGrant;
 }
 
-/** LiveKit room name for a team's Bomb Room (bidirectional). */
-export const bombRoomName = (sessionId: string, teamId: TeamId): string =>
-  `bomb-room:${sessionId}:${teamId}`;
-
-/** LiveKit room name for the session's Spectator Lounge (listen-only). */
-export const spectatorLoungeName = (sessionId: string): string =>
-  `spectator-lounge:${sessionId}`;
-
-/** LiveKit room name for the session's pre-game lobby mic check (Story 2.5).
- * A single shared, bidirectional room every participant joins while the session
- * is in `lobby` status. */
-export const lobbyRoomName = (sessionId: string): string => `lobby:${sessionId}`;
-
 /**
- * Resolve a participant's single room + grant from their role. Pure and
- * total over valid inputs; throws {@link VoiceScopeError} for the one
- * unrepresentable case (a Bomb Room role with no team).
+ * Resolve a participant's single room + LiveKit grant from their role/team/phase.
  *
- * - defuser / expert → `bomb-room:{sessionId}:{teamId}`, `canPublish: true`,
- *   `canSubscribe: true` (bidirectional).
- * - spectator → `spectator-lounge:{sessionId}`, `canPublish: false`,
- *   `canSubscribe: true` (listen-only — enforced at the grant level, FR39).
- * - facilitator → `spectator-lounge:{sessionId}`, `canPublish: true`,
- *   `canSubscribe: true`. The facilitator's baseline is the lounge alongside the
- *   spectators, but as the host they may narrate (publish). Their on-demand
- *   push-to-talk into a team's Bomb Room is a separate grant handled by a later
- *   story — never minted here.
+ * Delegates the topology rule (room name + publish/subscribe) to the SHARED
+ * `resolveVoiceScope` (Story 3.5) — the one place client and server agree on
+ * scope — then shapes the result into a LiveKit `VideoGrant` by adding
+ * `roomJoin: true`. Pure and total over valid inputs; propagates
+ * {@link VoiceScopeError} for the one unrepresentable case (a Bomb Room role
+ * with no team, outside the lobby). See the shared helper for the full mapping
+ * (lobby mic-check exception, spectator listen-only, facilitator narration).
  */
 export function resolveVoiceScope(participant: VoiceParticipant): ResolvedVoiceScope {
   const { role, sessionId, teamId, phase } = participant;
-
-  // Lobby mic check (Story 2.5): while the session is in `lobby` status EVERY
-  // participant — defuser / expert / spectator / facilitator — shares one
-  // bidirectional room. This branch runs BEFORE the role checks so an un-teamed
-  // Bomb Room role in the lobby no longer throws VoiceScopeError (today a
-  // teamless defuser does): in the lobby they belong in the lobby room regardless
-  // of team. Deliberate FR39 exception: spectators get `canPublish: true` HERE
-  // ONLY. FR39's spectator-listen-only rule governs the in-game Spectator Lounge
-  // (Story 3.3) — a pre-game mic check is not the lounge; every participant must
-  // be able to verify their own mic, so do NOT "fix" this into listen-only.
-  if (phase === 'lobby') {
-    const room = lobbyRoomName(sessionId);
-    return {
-      room,
-      grant: { roomJoin: true, room, canPublish: true, canSubscribe: true },
-    };
-  }
-
-  // Spectators and the facilitator share the Spectator Lounge as their baseline
-  // room; only the facilitator may publish into it (host narration). Spectators
-  // stay listen-only (FR39), enforced at the grant level.
-  if (role === 'spectator' || role === 'facilitator') {
-    const room = spectatorLoungeName(sessionId);
-    return {
-      room,
-      grant: {
-        roomJoin: true,
-        room,
-        canPublish: role === 'facilitator',
-        canSubscribe: true,
-      },
-    };
-  }
-
-  if (BOMB_ROOM_ROLES.has(role)) {
-    if (teamId === undefined) {
-      throw new VoiceScopeError(`Bomb Room role "${role}" has no team assigned`);
-    }
-    const room = bombRoomName(sessionId, teamId);
-    return {
-      room,
-      grant: { roomJoin: true, room, canPublish: true, canSubscribe: true },
-    };
-  }
-
-  // Defensive: PlayerRole is a closed union, so this is unreachable today, but
-  // a future role must opt into a scope explicitly rather than default-publish.
-  throw new VoiceScopeError(`role "${role}" has no voice scope`);
+  const { room, canPublish, canSubscribe } = resolveSharedVoiceScope({
+    role,
+    sessionId,
+    teamId,
+    phase,
+  });
+  return {
+    room,
+    grant: { roomJoin: true, room, canPublish, canSubscribe },
+  };
 }
 
 /**

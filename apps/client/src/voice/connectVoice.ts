@@ -292,7 +292,9 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       // LiveKit self-healed the transport — restore the connected UI (the banner
       // clears; ActiveSpeakersChanged will repopulate the pills).
       if (epoch !== connectEpoch) return;
-      useVoiceStore.getState().setConnected({ room: roomName, identity });
+      // `publish` is THIS connect's intent — preserve it across a self-heal so the
+      // re-mint reconciler still sees the correct connected scope (Story 3.5).
+      useVoiceStore.getState().setConnected({ room: roomName, identity, publish });
       // Reconcile mute: setUnavailable() cleared voiceStore.muted to false during
       // the blip, but the participant's real intent (and the kept-alive mic track)
       // may have been muted. Re-assert the mic publish state and restore the store
@@ -407,7 +409,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     // listen-only spectator (no mic to toggle) — belt-and-suspenders with the
     // MuteControl's own render gate (Story 3.4).
     published = publish;
-    useVoiceStore.getState().setConnected({ room: roomName, identity });
+    useVoiceStore.getState().setConnected({ room: roomName, identity, publish });
 
     // Best-effort autoplay recovery (Story 3.2): we are inside the connect gesture
     // chain, so resuming the AudioContext here unblocks remote playback. Blocked

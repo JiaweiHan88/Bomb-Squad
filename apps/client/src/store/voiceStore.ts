@@ -23,6 +23,15 @@ interface VoiceState {
   room?: string;
   /** The participant identity baked into the token (the local socket id). Set on `connected`. */
   identity?: string;
+  /**
+   * Whether the CURRENT connection published the mic (Story 3.5). `true` for a
+   * Bomb Room participant, `false` for a listen-only spectator. Set on
+   * `connected`; reset to `false` on every non-connected transition. The
+   * re-mint reconciler compares the FULL `{ room, publishing }` tuple against the
+   * server-derived desired scope — because Spectator and Facilitator share the
+   * lounge ROOM but differ on publish, room alone cannot decide a re-mint.
+   */
+  publishing: boolean;
   /** Optional failure detail for microcopy. Never holds a secret (never the token). */
   error?: string;
   /**
@@ -56,10 +65,10 @@ interface VoiceState {
    */
   audioBlocked: boolean;
 
-  /** idle/unavailable → connecting. Clears any prior room/identity/error + speakers + mute + audioBlocked. */
+  /** idle/unavailable → connecting. Clears any prior room/identity/error + speakers + mute + audioBlocked + publishing. */
   setConnecting: () => void;
-  /** connecting → connected. Records the room + identity from the token grant. */
-  setConnected: (info: { room: string; identity: string }) => void;
+  /** connecting → connected. Records the room + identity + publish intent from the connect. */
+  setConnected: (info: { room: string; identity: string; publish: boolean }) => void;
   /** any → unavailable. Drops room/identity/speakers/mute/audioBlocked; keeps an optional non-secret error string. */
   setUnavailable: (error?: string) => void;
   /** Replace the set of currently-speaking durable player ids. */
@@ -80,14 +89,15 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   activeSpeakers: [],
   muted: false,
   audioBlocked: false,
+  publishing: false,
 
   setConnecting: () =>
-    set({ status: 'connecting', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false }),
-  setConnected: ({ room, identity }) => set({ status: 'connected', room, identity, error: undefined }),
+    set({ status: 'connecting', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false, publishing: false }),
+  setConnected: ({ room, identity, publish }) => set({ status: 'connected', room, identity, publishing: publish, error: undefined }),
   setUnavailable: (error) =>
-    set({ status: 'unavailable', room: undefined, identity: undefined, error, activeSpeakers: [], muted: false, audioBlocked: false }),
+    set({ status: 'unavailable', room: undefined, identity: undefined, error, activeSpeakers: [], muted: false, audioBlocked: false, publishing: false }),
   setActiveSpeakers: (ids) => set({ activeSpeakers: ids }),
   setMuted: (muted) => set({ muted }),
   setAudioBlocked: (audioBlocked) => set({ audioBlocked }),
-  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false }),
+  reset: () => set({ status: 'idle', room: undefined, identity: undefined, error: undefined, activeSpeakers: [], muted: false, audioBlocked: false, publishing: false }),
 }));
